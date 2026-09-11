@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/organic-00f5ac1b-6156-4169-874e-0fabc78171b4/styles.css">
+<script src="_ds/organic-00f5ac1b-6156-4169-874e-0fabc78171b4/_ds_bundle.js"></script>
+<style>
+body{margin:0;background:var(--color-bg)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--color-neutral-300);border-radius:999px;border:3px solid var(--color-bg)}
+</style>
+</helmet>
+
+<div style="height:100vh;min-height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
+
+  <div style="display:flex;align-items:center;gap:18px;padding:14px 26px 0">
+    <div onClick="{{ goSetup }}" style="display:flex;align-items:center;gap:9px;cursor:pointer;margin-right:6px">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2.75" stroke-linejoin="round"><path d="M12 2.6 20 7.3v9.4L12 21.4 4 16.7V7.3Z"></path></svg>
+      <span style="font-family:var(--font-heading);font-size:19px;letter-spacing:-0.01em">Maphex</span>
+    </div>
+    <sc-if value="{{ showStepper }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:center;gap:2px;flex:1">
+        <sc-for list="{{ steps }}" as="step" hint-placeholder-count="4">
+          <div onClick="{{ step.onClick }}" style="{{ step.itemStyle }}" style-hover="{background:'color-mix(in srgb, var(--color-text) 6%, transparent)'}">{{ step.label }}</div>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{ showBreadcrumb }}" hint-placeholder-val="{{ true }}">
+      <div style="margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">
+        <span>Project</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="m9 18 6-6-6-6"></path></svg>
+        <span style="color:var(--color-text);font-weight:600">{{ projectName }}</span>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- ══ SCREEN 0 — Projects ══ -->
+  <sc-if value="{{ isProjects }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;min-height:0;overflow:auto;display:flex;justify-content:center;padding:36px 24px 60px">
+      <div style="width:100%;max-width:900px">
+        <sc-if value="{{ hasProjects }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <h1 style="font-size:34px;margin:0 0 8px">Your projects</h1>
+            <p style="margin:0 0 26px;font-size:15px;color:color-mix(in srgb, var(--color-text) 60%, transparent);max-width:520px;text-wrap:pretty">Pick up where you left off, or start something new.</p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px">
+              <sc-for list="{{ projects }}" as="p" hint-placeholder-count="4">
+                <div class="card elev-sm" onClick="{{ p.open }}" style="padding:20px 20px 17px;gap:12px;cursor:pointer" style-hover="{boxShadow:'var(--shadow-md)'}">
+                  <div style="display:flex;align-items:flex-start;gap:12px">
+                    <div style="{{ p.swatchStyle }}"></div>
+                    <div style="flex:1;min-width:0">
+                      <div class="card-title" style="font-size:18px">{{ p.name }}</div>
+                      <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent);margin-top:2px">{{ p.mesh }}</div>
+                    </div>
+                  </div>
+                  <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px">
+                    <span style="{{ p.tagStyle }}">{{ p.status }}</span>
+                    <span style="font-size:11.5px;line-height:1.4;color:color-mix(in srgb, var(--color-text) 50%, transparent)">{{ p.detail }}</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:12.5px;color:var(--color-accent-700);font-weight:600">
+                    {{ p.action }}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="m9 18 6-6-6-6"></path></svg>
+                  </div>
+                </div>
+              </sc-for>
+              <div onClick="{{ goSetupClick }}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;min-height:150px;padding:20px;cursor:pointer;text-align:center;border-radius:calc(var(--radius-lg) * 1.15);border:2px dashed var(--color-accent-400);background:color-mix(in srgb, var(--color-accent-100) 60%, transparent)">
+                <div style="width:38px;height:38px;border-radius:999px;background:var(--color-accent-200);display:grid;place-items:center">
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-800)" stroke-width="2.75" stroke-linecap="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+                </div>
+                <div style="font-family:var(--font-heading);font-size:17px">New project</div>
+                <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">Start from a mesh and your data folders</div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noProjects }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;padding:90px 20px">
+            <div style="width:76px;height:76px;border-radius:999px;background:var(--color-accent-100);display:grid;place-items:center">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2.75" stroke-linejoin="round"><path d="M12 2.6 20 7.3v9.4L12 21.4 4 16.7V7.3Z"></path></svg>
+            </div>
+            <h1 style="font-size:32px;margin:0">No projects yet</h1>
+            <p style="margin:0;max-width:380px;font-size:14.5px;color:color-mix(in srgb, var(--color-text) 60%, transparent);text-wrap:pretty">A project holds one map area and the data you want to look at on it. Making one takes a minute.</p>
+            <button class="btn btn-primary" onClick="{{ goSetupClick }}" style="height:44px;padding-inline:26px;font-size:15px;margin-top:6px">Create your first project</button>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══ SCREEN 1 — New project ══ -->
+  <sc-if value="{{ isSetup }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px 72px">
+      <div style="width:100%;max-width:560px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:26px">
+          <div>
+            <h1 style="font-size:40px;margin:0 0 8px">Start a new project</h1>
+            <p style="margin:0;font-size:15px;color:color-mix(in srgb, var(--color-text) 60%, transparent);max-width:400px;text-wrap:pretty">Name it, pick the map area you are working in, and we will take care of the hexagons.</p>
+          </div>
+          <button class="btn btn-secondary" onClick="{{ openConfig }}" style="flex:none;gap:8px">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg>
+            Config
+          </button>
+        </div>
+
+        <div class="card elev-sm" style="gap:20px;padding:28px 26px">
+          <div class="field">
+            <label>Project name</label>
+            <input class="input" value="{{ projectName }}" onChange="{{ setName }}" placeholder="e.g. Ridgeline Wind — Phase 2">
+          </div>
+          <div class="field">
+            <label>Map mesh</label>
+            <div style="display:flex;gap:10px;align-items:center">
+              <select class="input" value="{{ mesh }}" onChange="{{ setMesh }}" style="flex:1;padding-right:12px">
+                <option value="ireland_5km_mesh.geojson">Ireland — 5 km mesh</option>
+                <option value="iberia_10km_mesh.geojson">Iberia — 10 km mesh</option>
+                <option value="north_sea_2km_mesh.geojson">North Sea — 2 km mesh</option>
+              </select>
+              <button class="btn btn-secondary" style="gap:7px;flex:none">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8"></path><path d="m8 17 4-4 4 4"></path><path d="M20 16.7A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 4 15.9"></path></svg>
+                Upload
+              </button>
+            </div>
+            <sc-if value="{{ hints }}" hint-placeholder-val="{{ true }}">
+              <p style="margin:7px 0 0;font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">The mesh is the outline of the area you want to study. Pick a saved one or upload your own.</p>
+            </sc-if>
+          </div>
+          <div class="field">
+            <label>Results folder</label>
+            <div style="display:flex;gap:10px;align-items:center">
+              <input class="input" value="{{ outFolder }}" onChange="{{ setOutFolder }}" placeholder="e.g. /Projects/Ridgeline/results" style="flex:1">
+              <button class="btn btn-secondary" onClick="{{ pickOutFolder }}" style="gap:7px;flex:none">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>
+                Choose
+              </button>
+            </div>
+            <sc-if value="{{ hints }}" hint-placeholder-val="{{ true }}">
+              <p style="margin:7px 0 0;font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">Where we save the processed files. Pick an empty folder if you can.</p>
+            </sc-if>
+          </div>
+          <div class="field">
+            <label>Description <span style="opacity:.6">— optional</span></label>
+            <textarea class="input" value="{{ desc }}" onChange="{{ setDesc }}" placeholder="What are you trying to find out?" style="border-radius:var(--radius-lg);min-height:84px"></textarea>
+          </div>
+          <button class="btn btn-primary btn-block" onClick="{{ createProject }}" style="height:44px;font-size:15px">Create Project</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══ SCREEN 2 — Upload & process ══ -->
+  <sc-if value="{{ isUpload }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;min-height:0;overflow:auto;display:flex;justify-content:center;padding:34px 24px 60px">
+      <div style="width:100%;max-width:760px">
+        <h1 style="font-size:34px;margin:0 0 8px">Add your data</h1>
+        <p style="margin:0 0 24px;font-size:15px;color:color-mix(in srgb, var(--color-text) 60%, transparent);max-width:520px;text-wrap:pretty">Drop in one folder per variable — up to ten. Each folder becomes a layer you can look at on the map.</p>
+
+        <div onClick="{{ dropzoneClick }}" style="{{ dropzoneStyle }}">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13v8"></path><path d="m8 17 4-4 4 4"></path><path d="M20 16.7A5 5 0 0 0 18 7h-1.3A8 8 0 1 0 4 15.9"></path></svg>
+          <div style="font-family:var(--font-heading);font-size:19px">{{ dropTitle }}</div>
+          <div style="font-size:13px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">{{ dropSub }}</div>
+        </div>
+
+        <sc-if value="{{ hasFolders }}" hint-placeholder-val="{{ true }}">
+          <div style="margin-top:24px">
+            <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
+              <h4 style="margin:0">Added folders</h4>
+              <span style="font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">{{ folderCount }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <sc-for list="{{ folders }}" as="f" hint-placeholder-count="3">
+                <div style="{{ f.rowStyle }}">
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-600)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ f.name }}</div>
+                    <div style="font-size:11.5px;color:color-mix(in srgb, var(--color-text) 50%, transparent)">{{ f.meta }}</div>
+                  </div>
+                  <sc-if value="{{ f.showTag }}" hint-placeholder-val="{{ true }}">
+                    <span class="tag tag-accent-2" style="gap:5px">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+                      Ready
+                    </span>
+                  </sc-if>
+                  <sc-if value="{{ f.showRemove }}" hint-placeholder-val="{{ true }}">
+                    <button class="btn btn-icon btn-secondary" onClick="{{ f.remove }}" style="width:30px;height:30px;border-color:transparent">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+                    </button>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isProcessing }}" hint-placeholder-val="{{ true }}">
+          <div class="card elev-sm" style="margin-top:24px;padding:20px 22px;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent)" stroke-width="2.75" stroke-linecap="round" style="animation:none"><path d="M21 12a9 9 0 1 1-6.2-8.6"></path></svg>
+              <div style="flex:1;font-size:14px;font-weight:600">{{ statusText }}</div>
+              <div style="font-size:13px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">{{ progressText }}</div>
+            </div>
+            <div style="height:9px;border-radius:999px;background:color-mix(in srgb, var(--color-text) 10%, transparent);overflow:hidden">
+              <div style="{{ barStyle }}"></div>
+            </div>
+            <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">Folders are locked while we convert them. This usually takes a couple of minutes.</div>
+          </div>
+        </sc-if>
+
+        <div style="display:flex;align-items:center;gap:14px;margin-top:26px">
+          <button class="btn btn-primary" disabled="{{ processDisabled }}" onClick="{{ startProcess }}" style="height:44px;padding-inline:26px;font-size:15px">{{ processLabel }}</button>
+          <sc-if value="{{ hints }}" hint-placeholder-val="{{ true }}">
+            <span style="font-size:12.5px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">{{ processHint }}</span>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══ SCREEN 3 — Map view ══ -->
+  <sc-if value="{{ isMap }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;display:flex;min-height:0;gap:18px;padding:18px 26px 26px">
+      <div style="width:310px;flex:none;display:flex;flex-direction:column;min-height:0">
+        <div class="seg" style="width:100%;margin-bottom:14px">
+          <label class="seg-opt" style="flex:1;justify-content:center">
+            <input type="radio" name="mode" checked="{{ rawChecked }}" onChange="{{ setRaw }}">
+            Raw variables
+          </label>
+          <label class="seg-opt" style="flex:1;justify-content:center">
+            <input type="radio" name="mode" checked="{{ modelChecked }}" onChange="{{ setModel }}">
+            Model output
+          </label>
+        </div>
+        <sc-if value="{{ hints }}" hint-placeholder-val="{{ true }}">
+          <p style="margin:0 0 12px;font-size:12px;line-height:1.45;color:color-mix(in srgb, var(--color-text) 55%, transparent)">{{ modeHint }}</p>
+        </sc-if>
+        <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:7px;padding-right:4px">
+          <sc-for list="{{ variables }}" as="v" hint-placeholder-count="6">
+            <div onClick="{{ v.select }}" style="{{ v.rowStyle }}">
+              <div style="{{ v.swatchStyle }}"></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13.5px;font-weight:600;line-height:1.3">{{ v.name }}</div>
+                <div style="font-size:11.5px;color:color-mix(in srgb, var(--color-text) 52%, transparent)">{{ v.unit }}</div>
+              </div>
+              <sc-if value="{{ v.active }}" hint-placeholder-val="{{ true }}">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <button class="btn btn-secondary btn-block" onClick="{{ goTune }}" style="margin-top:14px;gap:8px;height:40px">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg>
+          Tune the model
+        </button>
+      </div>
+
+      <div ref="{{ mapRef }}" onMouseMove="{{ onMapMove }}" onMouseLeave="{{ onMapLeave }}" onMouseDown="{{ onMapDown }}" onMouseUp="{{ onMapUp }}" style="flex:1;position:relative;border-radius:var(--radius-lg);background:var(--color-surface);overflow:hidden;box-shadow:var(--shadow-sm);cursor:grab">
+        <svg width="100%" height="100%" viewBox="0 0 1000 720" preserveAspectRatio="xMidYMid meet" style="display:block;position:absolute;inset:0">
+          <g transform="{{ mapTransform }}">
+            <sc-for list="{{ hexes }}" as="h" hint-placeholder-count="0">
+              <polygon points="{{ h.points }}" fill="{{ h.fill }}" data-t="{{ h.t }}" data-id="{{ h.id }}" stroke="{{ h.stroke }}" stroke-width="0.7"></polygon>
+            </sc-for>
+          </g>
+        </svg>
+
+        <div style="position:absolute;top:16px;left:18px;display:flex;flex-direction:column;gap:3px">
+          <div style="font-family:var(--font-heading);font-size:20px">{{ activeVarName }}</div>
+          <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent)">{{ activeVarHint }}</div>
+        </div>
+
+        <div style="position:absolute;top:14px;right:14px;display:flex;flex-direction:column;gap:6px">
+          <button class="btn btn-icon" onClick="{{ zoomIn }}" style="{{ mapBtnStyle }}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+          </button>
+          <button class="btn btn-icon" onClick="{{ zoomOut }}" style="{{ mapBtnStyle }}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="M5 12h14"></path></svg>
+          </button>
+          <button class="btn btn-icon" onClick="{{ fitMap }}" style="{{ mapBtnStyle }}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>
+          </button>
+        </div>
+
+        <div style="position:absolute;bottom:16px;left:18px;background:color-mix(in srgb, var(--color-bg) 88%, transparent);backdrop-filter:blur(4px);padding:11px 14px;border-radius:var(--radius-md);box-shadow:var(--shadow-sm);min-width:230px">
+          <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:color-mix(in srgb, var(--color-text) 55%, transparent);margin-bottom:7px">{{ legendTitle }}</div>
+          <div style="{{ legendBarStyle }}"></div>
+          <div style="display:flex;justify-content:space-between;gap:12px;font-size:11.5px;margin-top:5px;white-space:nowrap">
+            <span>{{ legendLo }}</span>
+            <span>{{ legendHi }}</span>
+          </div>
+        </div>
+
+        <div style="position:absolute;bottom:16px;right:18px;white-space:nowrap;font-size:11.5px;color:color-mix(in srgb, var(--color-text) 45%, transparent)">H3 resolution {{ resolution }} · {{ hexCount }} hexagons · drag to pan</div>
+
+        <sc-if value="{{ hover }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ tipStyle }}">
+            <div style="font-size:10.5px;letter-spacing:0.07em;text-transform:uppercase;opacity:.62">{{ tipId }}</div>
+            <div style="font-family:var(--font-heading);font-size:17px;line-height:1.2">{{ tipValue }}</div>
+            <div style="font-size:11.5px;opacity:.7">{{ activeVarName }}</div>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══ SCREEN 4 — YAML editor + node diagram ══ -->
+  <sc-if value="{{ isTune }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;display:flex;flex-direction:column;min-height:0;padding:16px 26px 22px">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:14px">
+        <div>
+          <h1 style="font-size:30px;margin:0 0 5px">Tune the model</h1>
+          <sc-if value="{{ hints }}" hint-placeholder-val="{{ true }}">
+            <p style="margin:0;font-size:13.5px;color:color-mix(in srgb, var(--color-text) 58%, transparent);max-width:560px">Edit on either side — the text and the diagram always show the same thing. Each variable has a weight, its own normalisation, an optional exclusion rule, and can hold nested subvariables. Top-level weights should add up to about 1.</p>
+          </sc-if>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;flex:none">
+          <span style="{{ statusChipStyle }}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+            {{ statusLabel }}
+          </span>
+          <button class="btn btn-ghost" onClick="{{ openExamples }}" style="height:42px;padding-inline:16px;font-size:14px;gap:8px;white-space:nowrap">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2Z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7Z"></path></svg>
+            Examples
+          </button>
+          <button class="btn btn-secondary" onClick="{{ saveModel }}" style="height:42px;padding-inline:20px;font-size:14.5px;white-space:nowrap">Save</button>
+          <button class="btn btn-primary" onClick="{{ applyModel }}" disabled="{{ applyDisabled }}" style="height:42px;padding-inline:22px;font-size:14.5px;white-space:nowrap">Apply</button>
+        </div>
+      </div>
+
+      <div style="flex:1;min-height:0;display:flex;gap:16px">
+        <div style="width:42%;flex:none;display:flex;flex-direction:column;min-height:0;border-radius:var(--radius-lg);background:var(--color-neutral-100);box-shadow:var(--shadow-sm);overflow:hidden">
+          <div style="display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--color-divider)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-600)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>
+            <span style="font-size:13px;font-weight:600">model_weights.yaml</span>
+            <span style="margin-left:auto;font-size:11.5px;color:color-mix(in srgb, var(--color-text) 50%, transparent)">plain text</span>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;padding:14px 0 20px">
+            <sc-for list="{{ yamlLines }}" as="l" hint-placeholder-count="12">
+              <div style="display:flex;align-items:center;gap:10px;padding:1px 10px 1px 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.95">
+                <span style="width:34px;flex:none;text-align:right;color:var(--color-neutral-400);font-size:11.5px;user-select:none">{{ l.n }}</span>
+                <span style="{{ l.indentStyle }}"></span>
+                <span style="{{ l.keyStyle }}">{{ l.key }}</span>
+                <sc-if value="{{ l.hasValue }}" hint-placeholder-val="{{ true }}">
+                  <span style="color:var(--color-neutral-500)">:</span>
+                </sc-if>
+                <sc-if value="{{ l.editable }}" hint-placeholder-val="{{ false }}">
+                  <input value="{{ l.value }}" onChange="{{ l.onChange }}" style="{{ l.inputStyle }}">
+                </sc-if>
+                <sc-if value="{{ l.plainValue }}" hint-placeholder-val="{{ false }}">
+                  <span style="color:var(--color-accent-2-700)">{{ l.value }}</span>
+                </sc-if>
+                <sc-if value="{{ l.boolValue }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ l.toggle }}" style="{{ l.boolStyle }}">{{ l.value }}</button>
+                </sc-if>
+                <sc-if value="{{ l.enumValue }}" hint-placeholder-val="{{ false }}">
+                  <select value="{{ l.value }}" onChange="{{ l.onChange }}" style="{{ l.selectStyle }}">
+                    <option value="minmax">minmax</option>
+                    <option value="zscore">zscore</option>
+                    <option value="log">log</option>
+                    <option value="ninguna">ninguna</option>
+                  </select>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div ref="{{ diagRef }}" style="flex:1;min-width:0;min-height:0;position:relative;border-radius:var(--radius-lg);background:var(--color-surface);box-shadow:var(--shadow-sm);overflow:auto">
+          <div style="{{ diagramStyle }}">
+            <svg width="840" height="{{ diagH }}" style="position:absolute;inset:0;overflow:visible">
+              <sc-for list="{{ edges }}" as="e" hint-placeholder-count="0">
+                <path d="{{ e.d }}" fill="none" stroke="{{ e.stroke }}" stroke-width="2"></path>
+              </sc-for>
+            </svg>
+            <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="0">
+              <div style="{{ n.boxStyle }}">
+                <div style="{{ n.labelStyle }}">{{ n.label }}</div>
+                <sc-if value="{{ n.editable }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <button class="btn btn-icon btn-secondary" onClick="{{ n.dec }}" style="width:24px;height:24px;background:var(--color-bg);border-color:var(--color-divider)">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 12h14"></path></svg>
+                    </button>
+                    <input value="{{ n.value }}" onChange="{{ n.onChange }}" style="{{ n.inputStyle }}">
+                    <button class="btn btn-icon btn-secondary" onClick="{{ n.inc }}" style="width:24px;height:24px;background:var(--color-bg);border-color:var(--color-divider)">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+                    </button>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ n.plain }}" hint-placeholder-val="{{ false }}">
+                  <div style="{{ n.valueStyle }}">{{ n.value }}</div>
+                </sc-if>
+                <sc-if value="{{ n.hasMeta }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <select value="{{ n.normValue }}" onChange="{{ n.onNorm }}" style="{{ n.normStyle }}">
+                      <option value="minmax">minmax</option>
+                      <option value="zscore">zscore</option>
+                      <option value="log">log</option>
+                      <option value="ninguna">ninguna</option>
+                    </select>
+                    <button onClick="{{ n.onExcl }}" style="{{ n.exclStyle }}">{{ n.exclLabel }}</button>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="position:absolute;top:14px;left:16px;display:flex;align-items:center;gap:10px">
+            <span style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:color-mix(in srgb, var(--color-text) 55%, transparent)">Same config, as a diagram</span>
+            <span class="tag tag-accent-2" style="gap:5px"><span>weights add to</span><span>{{ sumText }}</span></span>
+          </div>
+
+          <div style="position:absolute;top:12px;right:14px;display:flex;gap:6px">
+            <button class="btn btn-icon" onClick="{{ dZoomIn }}" style="{{ mapBtnStyle }}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+            </button>
+            <button class="btn btn-icon" onClick="{{ dZoomOut }}" style="{{ mapBtnStyle }}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="M5 12h14"></path></svg>
+            </button>
+            <button class="btn btn-icon" onClick="{{ dFit }}" style="{{ mapBtnStyle }}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M21 8V5a2 2 0 0 0-2-2h-3"></path><path d="M3 16v3a2 2 0 0 0 2 2h3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══ Overlays ══ -->
+  <sc-if value="{{ showExamples }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" style="width:min(820px,100%);max-height:86vh;align-items:stretch;gap:16px">
+        <div style="display:flex;align-items:flex-start;gap:16px">
+          <div>
+            <div class="dialog-title">Example structures</div>
+            <p class="dialog-body" style="margin:4px 0 0;max-width:560px">This is how a model is written. Every variable carries a <strong>peso</strong> (weight), can be <strong>excluyente</strong> — it rules the record out instead of just weighting it — has its own <strong>normalizacion</strong>, and may hold nested <strong>subvariables</strong>.</p>
+          </div>
+          <button class="btn btn-icon btn-secondary" onClick="{{ closeExamples }}" style="margin-left:auto;flex:none">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+          </button>
+        </div>
+        <div style="display:flex;gap:14px;overflow:auto;padding-bottom:2px">
+          <sc-for list="{{ examples }}" as="ex" hint-placeholder-count="2">
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:var(--radius-lg);background:var(--color-neutral-100)">
+              <div style="font-family:var(--font-heading);font-size:16px;line-height:1.25">{{ ex.title }}</div>
+              <p style="margin:0;font-size:12.5px;line-height:1.45;color:color-mix(in srgb, var(--color-text) 60%, transparent)">{{ ex.blurb }}</p>
+              <pre style="margin:0;flex:1;overflow:auto;max-height:300px;padding:12px 14px;border-radius:var(--radius-md);background:var(--color-bg);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;color:var(--color-accent-800)">{{ ex.yaml }}</pre>
+              <button class="btn btn-secondary btn-block" onClick="{{ ex.copy }}" style="gap:8px">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"></rect><path d="M16 4h2a2 2 0 0 1 2 2v2M4 16v2a2 2 0 0 0 2 2h2"></path><path d="M4 12V6a2 2 0 0 1 2-2h6"></path></svg>
+                Copy to editor
+              </button>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ inserted }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:12px 20px;border-radius:999px;background:var(--color-accent-2-200);color:var(--color-accent-2-900);box-shadow:var(--shadow-md);font-size:13.5px;z-index:60">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+      {{ insertedText }}
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ showConfig }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" style="width:min(480px,100%)">
+        <div class="dialog-title">Advanced settings</div>
+        <p class="dialog-body" style="margin:0">Most projects never need to touch these. The defaults follow your last project.</p>
+        <div style="display:flex;flex-direction:column;gap:14px;margin-top:2px">
+          <div class="field">
+            <label>Pipeline version</label>
+            <select class="input"><option>v2.4 (current)</option><option>v2.3</option><option>v1.9 (legacy)</option></select>
+          </div>
+          <div style="display:flex;gap:12px">
+            <div class="field" style="flex:1">
+              <label>H3 resolution</label>
+              <input class="input" value="8" readOnly="{{ true }}">
+            </div>
+            <div class="field" style="flex:1">
+              <label>Coordinate system</label>
+              <input class="input" value="EPSG:4326" readOnly="{{ true }}">
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn btn-secondary" onClick="{{ closeConfig }}">Cancel</button>
+          <button class="btn btn-primary" onClick="{{ closeConfig }}">Save settings</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ showComplete }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop">
+      <div class="dialog" style="width:min(430px,100%);align-items:flex-start">
+        <div style="width:52px;height:52px;border-radius:999px;background:var(--color-accent-2-200);display:grid;place-items:center">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-800)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+        </div>
+        <div class="dialog-title">All done</div>
+        <p class="dialog-body" style="margin:0">{{ completeText }}</p>
+        <div class="dialog-actions" style="align-self:stretch">
+          <button class="btn btn-secondary" onClick="{{ dismissComplete }}">Stay here</button>
+          <button class="btn btn-primary" onClick="{{ viewMap }}">View Map</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;startScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Projects&quot;,&quot;New project&quot;,&quot;Data upload &amp; processing&quot;,&quot;Map view&quot;,&quot;Tune model&quot;],&quot;default&quot;:&quot;Projects&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;emptyProjects&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Projects screen&quot;},&quot;showHints&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;hexRadius&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:23,&quot;min&quot;:14,&quot;max&quot;:40,&quot;step&quot;:1,&quot;unit&quot;:&quot;px&quot;,&quot;tsType&quot;:&quot;number&quot;}}">
+const RAMP_RAW = ['#fff2eb', '#f6a06b', '#8c491a'];
+const RAMP_MODEL = ['#f0fae1', '#8fa073', '#3d472b'];
+
+const RAW_VARS = [
+  { id: 'wind', name: 'Mean wind speed', unit: 'metres per second at 100 m', hint: 'How windy it is — higher is better for turbines', seed: 3, min: 4.1, max: 11.8, dec: 1, suffix: ' m/s' },
+  { id: 'slope', name: 'Terrain slope', unit: 'degrees', hint: 'How steep the ground is — steep land costs more to build on', seed: 7.4, min: 0, max: 27, dec: 0, suffix: '°' },
+  { id: 'sub', name: 'Distance to substation', unit: 'kilometres', hint: 'How far the power has to travel to reach the grid', seed: 11.2, min: 0.4, max: 62, dec: 1, suffix: ' km' },
+  { id: 'land', name: 'Land cover suitability', unit: 'index, 0 to 1', hint: 'How buildable the surface is — bare land scores high, forest low', seed: 15.8, min: 0, max: 1, dec: 2, suffix: '' },
+  { id: 'prot', name: 'Protected areas', unit: 'percent of hexagon covered', hint: 'How much of the hexagon is off limits', seed: 19.1, min: 0, max: 100, dec: 0, suffix: '%' },
+  { id: 'pop', name: 'Population density', unit: 'people per square kilometre', hint: 'How many people live nearby', seed: 23.6, min: 0, max: 1200, dec: 0, suffix: ' /km²' },
+];
+
+const MODEL_VARS = [
+  { id: 'score', name: 'Site suitability score', unit: '0 to 100, higher is better', hint: 'Every variable blended together using your weights', seed: 31.5, min: 0, max: 100, dec: 0, suffix: '' },
+  { id: 'cap', name: 'Buildable capacity', unit: 'megawatts per hexagon', hint: 'How much could realistically be installed here', seed: 37.2, min: 0, max: 48, dec: 1, suffix: ' MW' },
+  { id: 'cost', name: 'Grid connection cost', unit: 'dollars per kilowatt', hint: 'Estimated cost of getting the power to the grid', seed: 41.8, min: 40, max: 620, dec: 0, suffix: ' $/kW' },
+  { id: 'pen', name: 'Constraint penalty', unit: 'index, 0 to 1', hint: 'How much the site is held back by restrictions', seed: 47.3, min: 0, max: 1, dec: 2, suffix: '' },
+];
+
+const ALL_FOLDERS = [
+  ['wind_atlas_2024', '18 files · 412 MB'],
+  ['srtm_terrain_tiles', '64 files · 1.2 GB'],
+  ['grid_substations', '3 files · 8 MB'],
+  ['corine_landcover', '22 files · 640 MB'],
+  ['natura2000_protected', '7 files · 96 MB'],
+  ['population_grid_1km', '4 files · 128 MB'],
+  ['road_network', '11 files · 210 MB'],
+  ['existing_wind_farms', '2 files · 4 MB'],
+];
+
+const PROJECTS = [
+  { name: 'Ridgeline Wind — Phase 2', mesh: 'Ireland — 5 km mesh', status: 'Processed', detail: '6 variables · 4,812 hexagons · 2 days ago', screen: 3 },
+  { name: 'Coastal Solar Screening', mesh: 'Iberia — 10 km mesh', status: 'Processed', detail: '4 variables · 9,140 hexagons · last week', screen: 3 },
+  { name: 'North Sea Cable Route', mesh: 'North Sea — 2 km mesh', status: 'Draft', detail: '3 folders added, not processed', screen: 2 },
+  { name: 'Grid Reinforcement Study', mesh: 'Ireland — 5 km mesh', status: 'Processed', detail: '8 variables · 4,812 hexagons · 3 weeks ago', screen: 3 },
+];
+
+const STEP_DEFS = [
+  { label: 'Projects', screen: 0 },
+  { label: 'New project', screen: 1 },
+  { label: 'Data', screen: 2 },
+  { label: 'Map', screen: 3 },
+  { label: 'Model', screen: 4 },
+];
+
+const NORMS = ['minmax', 'zscore', 'log', 'ninguna'];
+
+const DEFAULT_VARS = [
+  { key: 'wind_speed', peso: '0.40', excluyente: false, normalizacion: 'minmax' },
+  { key: 'terrain_slope', peso: '0.15', excluyente: false, normalizacion: 'zscore' },
+  {
+    key: 'grid_access', peso: '0.30', excluyente: false, normalizacion: 'ninguna',
+    sub: [
+      { key: 'distance_to_substation', peso: '0.60', excluyente: false, normalizacion: 'minmax' },
+      { key: 'distance_to_road', peso: '0.40', excluyente: false, normalizacion: 'minmax' },
+    ],
+  },
+  { key: 'land_cover', peso: '0.10', excluyente: false, normalizacion: 'log' },
+  { key: 'protected_area', peso: '0.05', excluyente: true, normalizacion: 'ninguna' },
+];
+
+const EXAMPLES = [
+  {
+    id: 'a',
+    title: 'Example A — one normalisation per variable',
+    blurb: 'Flat variables. Each one picks its own normalisation method, and one of them rules the record out instead of weighting it.',
+    yaml: 'variables:\n  edad:\n    peso: 0.25\n    excluyente: false\n    normalizacion: minmax\n  ingreso_familiar:\n    peso: 0.35\n    excluyente: false\n    normalizacion: zscore\n  nivel_educativo:\n    peso: 0.25\n    excluyente: false\n    normalizacion: log\n  zona_riesgo:\n    peso: 0.15\n    excluyente: true\n    normalizacion: ninguna',
+    vars: [
+      { key: 'edad', peso: '0.25', excluyente: false, normalizacion: 'minmax' },
+      { key: 'ingreso_familiar', peso: '0.35', excluyente: false, normalizacion: 'zscore' },
+      { key: 'nivel_educativo', peso: '0.25', excluyente: false, normalizacion: 'log' },
+      { key: 'zona_riesgo', peso: '0.15', excluyente: true, normalizacion: 'ninguna' },
+    ],
+  },
+  {
+    id: 'b',
+    title: 'Example B — variables with nested subvariables',
+    blurb: 'A variable can be made of other variables. Every subvariable carries its own weight, exclusion flag and normalisation.',
+    yaml: 'variables:\n  desempeno_academico:\n    peso: 0.5\n    excluyente: false\n    normalizacion: minmax\n    subvariables:\n      matematicas:\n        peso: 0.5\n        excluyente: false\n        normalizacion: zscore\n      lenguaje:\n        peso: 0.3\n        excluyente: false\n        normalizacion: zscore\n      ciencias:\n        peso: 0.2\n        excluyente: false\n        normalizacion: zscore\n  contexto_socioeconomico:\n    peso: 0.5\n    excluyente: false\n    normalizacion: ninguna\n    subvariables:\n      estrato:\n        peso: 0.6\n        excluyente: false\n        normalizacion: minmax\n      sisben:\n        peso: 0.4\n        excluyente: true\n        normalizacion: ninguna',
+    vars: [
+      {
+        key: 'desempeno_academico', peso: '0.5', excluyente: false, normalizacion: 'minmax',
+        sub: [
+          { key: 'matematicas', peso: '0.5', excluyente: false, normalizacion: 'zscore' },
+          { key: 'lenguaje', peso: '0.3', excluyente: false, normalizacion: 'zscore' },
+          { key: 'ciencias', peso: '0.2', excluyente: false, normalizacion: 'zscore' },
+        ],
+      },
+      {
+        key: 'contexto_socioeconomico', peso: '0.5', excluyente: false, normalizacion: 'ninguna',
+        sub: [
+          { key: 'estrato', peso: '0.6', excluyente: false, normalizacion: 'minmax' },
+          { key: 'sisben', peso: '0.4', excluyente: true, normalizacion: 'ninguna' },
+        ],
+      },
+    ],
+  },
+];
+
+function hexToRgb(h) {
+  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+}
+function mixHex(a, b, t) {
+  const A = hexToRgb(a), B = hexToRgb(b);
+  const c = A.map((v, i) => Math.round(v + (B[i] - v) * t));
+  return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+}
+function rampColor(ramp, t) {
+  const u = Math.max(0, Math.min(1, t));
+  return u < 0.5 ? mixHex(ramp[0], ramp[1], u * 2) : mixHex(ramp[1], ramp[2], (u - 0.5) * 2);
+}
+function field(seed, q, r) {
+  const x = q * 0.29 + seed, y = r * 0.4 + seed * 1.7;
+  const v = Math.sin(x) * 0.5 + Math.cos(y * 0.9) * 0.34 + Math.sin((x + y) * 0.52) * 0.3 + Math.cos((x - y) * 0.21 + seed) * 0.24;
+  return Math.max(0, Math.min(1, (v + 1.18) / 2.36));
+}
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      screen: 0, folders: [], phase: 'empty', progress: 0, statusText: '',
+      showComplete: false, showConfig: false,
+      projectName: 'Ridgeline Wind — Phase 2', mesh: 'ireland_5km_mesh.geojson', desc: '', outFolder: '',
+      mode: 'raw', selRaw: 'wind', selModel: 'score',
+      hover: null, zoom: 1, pan: { x: 0, y: 0 }, dragging: null,
+      variables: JSON.parse(JSON.stringify(DEFAULT_VARS)),
+      resolution: '8', saved: true, applied: true, dzoom: 0.86,
+      showExamples: false, inserted: null,
+    };
+    this.mapRef = React.createRef();
+    this.diagRef = React.createRef();
+    this._cache = {};
+  }
+
+  componentDidMount() {
+    const s = this.props.startScreen;
+    if (s && s !== 'Projects') {
+      const map = { 'New project': 1, 'Data upload & processing': 2, 'Map view': 3, 'Tune model': 4 };
+      const n = map[s];
+      if (n === 1) this.setState({ screen: 1 });
+      else if (n === 2) this.setState({ screen: 2, folders: [0, 1, 2, 3] });
+      else if (n) this.setState({ screen: n, folders: [0, 1, 2, 3, 4, 5], phase: 'done' });
+    }
+  }
+  componentWillUnmount() { clearInterval(this._timer); }
+
+  // ── data ──────────────────────────────────────────────
+  varList() { return this.state.mode === 'raw' ? RAW_VARS : MODEL_VARS; }
+  activeVar() {
+    const id = this.state.mode === 'raw' ? this.state.selRaw : this.state.selModel;
+    return this.varList().find(v => v.id === id) || this.varList()[0];
+  }
+  ramp() { return this.state.mode === 'raw' ? RAMP_RAW : RAMP_MODEL; }
+  fmt(v, t) { return (v.min + (v.max - v.min) * t).toFixed(v.dec) + v.suffix; }
+
+  hexes() {
+    const v = this.activeVar(), ramp = this.ramp();
+    const R = this.props.hexRadius ?? 23;
+    const key = v.id + '|' + R + '|' + this.state.mode;
+    if (this._cache[key]) return this._cache[key];
+    const out = [];
+    const dx = R * 1.5, dy = R * Math.sqrt(3);
+    const cols = Math.floor((1000 - 24) / dx), rows = Math.floor((720 - 24) / dy);
+    for (let c = 0; c < cols; c++) {
+      for (let r = 0; r < rows; r++) {
+        const cx = 20 + R + dx * c;
+        const cy = 18 + R + dy * r + (c % 2 ? dy / 2 : 0);
+        const nx = (cx - 500) / 470, ny = (cy - 362) / 336;
+        const edge = 0.84 + 0.15 * Math.sin(c * 0.47) + 0.11 * Math.cos(r * 0.71) + 0.07 * Math.sin(c * 0.19 + r * 0.31);
+        if (Math.sqrt(nx * nx + ny * ny) > edge) continue;
+        const t = field(v.seed, c, r);
+        let pts = '';
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI / 3) * i;
+          pts += (cx + R * Math.cos(a)).toFixed(1) + ',' + (cy + R * Math.sin(a)).toFixed(1) + ' ';
+        }
+        out.push({ id: 'h3-' + (881 + c) + (r < 10 ? '0' : '') + r + 'fffff', points: pts.trim(), fill: rampColor(ramp, t), stroke: 'rgba(245,234,216,0.55)', t: t.toFixed(4) });
+      }
+    }
+    this._cache[key] = out;
+    return out;
+  }
+
+  // ── actions ───────────────────────────────────────────
+  go(n) { return () => { this.setState({ screen: n, hover: null }); if (n === 4) setTimeout(() => this.fitDiagram(this.diagHeight()), 60); }; }
+  diagHeight() {
+    const leaves = (v) => (v.sub && v.sub.length ? v.sub.reduce((a, c) => a + leaves(c), 0) : 1);
+    return Math.max(320, this.state.variables.reduce((a, v) => a + leaves(v), 0) * 112 + 40);
+  }
+  addFolders(count) {
+    const cur = this.state.folders.slice();
+    for (let i = 0; i < ALL_FOLDERS.length && cur.length < 10 && count > 0; i++) {
+      if (cur.indexOf(i) === -1) { cur.push(i); count--; }
+    }
+    this.setState({ folders: cur });
+  }
+  startProcess() {
+    if (this.state.phase !== 'empty' || !this.state.folders.length) return;
+    const steps = [
+      [0, 'Reading your mesh'],
+      [22, 'Turning locations into H3 hexagons'],
+      [52, 'Attaching data values to each hexagon'],
+      [78, 'Building color scales'],
+    ];
+    this.setState({ phase: 'processing', progress: 0, statusText: steps[0][1] });
+    clearInterval(this._timer);
+    this._timer = setInterval(() => {
+      const p = Math.min(100, this.state.progress + 2);
+      let label = this.state.statusText;
+      steps.forEach(s => { if (p >= s[0]) label = s[1]; });
+      if (p >= 100) {
+        clearInterval(this._timer);
+        this.setState({ progress: 100, phase: 'done', statusText: 'Finishing up', showComplete: true });
+      } else this.setState({ progress: p, statusText: label });
+    }, 55);
+  }
+
+  nodeAt(vars, path) {
+    let cur = { sub: vars };
+    for (let i = 0; i < path.length; i++) {
+      const step = path[i];
+      if (step === 'sub') continue;
+      cur = cur.sub[step];
+    }
+    return cur;
+  }
+  setField(path, field, val) {
+    const vars = JSON.parse(JSON.stringify(this.state.variables));
+    const node = this.nodeAt(vars, path);
+    node[field] = val;
+    this.setState({ variables: vars, saved: false, applied: false });
+  }
+  bump(path, d) {
+    const node = this.nodeAt(this.state.variables, path);
+    const n = parseFloat(node.peso);
+    this.setField(path, 'peso', Math.max(0, Math.min(1, (isNaN(n) ? 0 : n) + d)).toFixed(2));
+  }
+  sum() {
+    return this.state.variables.reduce((a, v) => a + (parseFloat(v.peso) || 0), 0);
+  }
+  valid() {
+    const ok = (list) => list.every(v => {
+      const n = parseFloat(v.peso);
+      if (isNaN(n) || n < 0 || n > 1) return false;
+      return v.sub && v.sub.length ? ok(v.sub) : true;
+    });
+    return ok(this.state.variables) && /^\d+$/.test(this.state.resolution);
+  }
+  fitDiagram(diagH) {
+    const el = this.diagRef.current;
+    if (!el) return;
+    const scale = Math.min(1, (el.clientWidth - 40) / 860);
+    el.scrollTo(0, 0);
+    this.setState({ dzoom: Math.max(0.62, scale) });
+  }
+  insertExample(ex) {
+    const taken = {};
+    const collect = (list) => list.forEach(v => { taken[v.key] = 1; if (v.sub) collect(v.sub); });
+    collect(this.state.variables);
+    const clone = JSON.parse(JSON.stringify(ex.vars)).map(v => {
+      if (taken[v.key]) v.key = v.key + '_2';
+      return v;
+    });
+    this.setState({
+      variables: this.state.variables.concat(clone),
+      saved: false, applied: false, showExamples: false,
+      inserted: ex.title,
+    });
+    clearTimeout(this._insTimer);
+    this._insTimer = setTimeout(() => this.setState({ inserted: null }), 3200);
+    setTimeout(() => this.fitDiagram(this.diagHeight()), 60);
+  }
+
+  onMapMove(e) {
+    const st = this.state;
+    if (st.dragging) {
+      this.setState({ pan: { x: st.dragging.px + (e.clientX - st.dragging.x), y: st.dragging.py + (e.clientY - st.dragging.y) } });
+      return;
+    }
+    const el = this.mapRef.current;
+    const t = e.target;
+    if (!el || !t || !t.dataset || t.dataset.t === undefined) { if (st.hover) this.setState({ hover: null }); return; }
+    const r = el.getBoundingClientRect();
+    this.setState({ hover: { x: e.clientX - r.left, y: e.clientY - r.top, t: parseFloat(t.dataset.t), id: t.dataset.id } });
+  }
+
+  // ── render values ─────────────────────────────────────
+  renderVals() {
+    const st = this.state, s = st.screen;
+    const hints = this.props.showHints ?? true;
+    const v = this.activeVar(), ramp = this.ramp();
+    const activeStep = s === 1 ? 1 : s === 2 ? (st.phase === 'empty' ? 2 : 3) : s === 3 ? 4 : 5;
+
+    const steps = STEP_DEFS.map(d => {
+      const active = d.screen === s;
+      return {
+        label: d.label, onClick: this.go(d.screen),
+        itemStyle: {
+          padding: '7px 14px', borderRadius: 999, cursor: 'pointer', fontSize: 13.5, whiteSpace: 'nowrap',
+          fontWeight: active ? 700 : 400,
+          background: active ? 'color-mix(in srgb, var(--color-accent) 15%, transparent)' : 'transparent',
+          color: active ? 'var(--color-accent-800)' : 'color-mix(in srgb, var(--color-text) 60%, transparent)',
+        },
+      };
+    });
+
+    const folders = st.folders.map((fi, idx) => ({
+      name: ALL_FOLDERS[fi][0], meta: ALL_FOLDERS[fi][1],
+      showRemove: st.phase === 'empty', showTag: st.phase === 'done',
+      remove: () => { const f = st.folders.slice(); f.splice(idx, 1); this.setState({ folders: f }); },
+      rowStyle: {
+        display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px',
+        borderRadius: 'var(--radius-md)', background: 'var(--color-surface)',
+        opacity: st.phase === 'empty' ? 1 : 0.72,
+      },
+    }));
+
+    const variables = this.varList().map((x, xi) => {
+      const active = x.id === v.id;
+      const a = 0.02 + xi * 0.11, b = 0.55 + (xi % 3) * 0.15, c2 = 1 - xi * 0.07;
+      return {
+        name: x.name, unit: x.unit, active,
+        select: () => this.setState(st.mode === 'raw' ? { selRaw: x.id, hover: null } : { selModel: x.id, hover: null }),
+        rowStyle: {
+          display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', cursor: 'pointer',
+          borderRadius: 'var(--radius-md)',
+          background: active ? 'var(--color-accent-100)' : 'transparent',
+          boxShadow: active ? 'inset 0 0 0 1.5px var(--color-accent-400)' : 'inset 0 0 0 1px var(--color-divider)',
+        },
+        swatchStyle: {
+          width: 30, height: 30, flex: 'none', borderRadius: 999,
+          background: 'linear-gradient(135deg,' + rampColor(ramp, a) + ',' + rampColor(ramp, b) + ',' + rampColor(ramp, c2) + ')',
+        },
+      };
+    });
+
+    const lines = [];
+    let ln = 0;
+    const push = (o) => {
+      ln++;
+      const indent = o.indent || 0;
+      lines.push(Object.assign({
+        n: ln, hasValue: o.value !== undefined, editable: false, plainValue: false,
+        boolValue: false, enumValue: false,
+        indentStyle: { width: indent * 16, flex: 'none', minWidth: 0 },
+        keyStyle: { color: indent > 1 ? 'var(--color-accent-500)' : indent ? 'var(--color-accent-600)' : 'var(--color-accent-700)', fontWeight: 600, whiteSpace: 'nowrap' },
+        inputStyle: {
+          width: 62, font: 'inherit', fontSize: 13, padding: '1px 8px', color: 'var(--color-accent-2-800)',
+          background: 'var(--color-bg)', border: '1px solid var(--color-divider)', borderRadius: 999, outline: 'none',
+        },
+        selectStyle: {
+          font: 'inherit', fontSize: 12.5, padding: '2px 8px', color: 'var(--color-accent-2-800)',
+          background: 'var(--color-bg)', border: '1px solid var(--color-divider)', borderRadius: 999, outline: 'none',
+        },
+      }, o));
+    };
+    push({ key: 'project', value: st.projectName.toLowerCase().replace(/[^a-z0-9]+/g, '_'), plainValue: true });
+    push({ key: 'model', value: 'suitability_v2', plainValue: true });
+    push({ key: 'objective', value: 'maximize', plainValue: true });
+    push({ key: 'resolution', value: st.resolution, editable: true, onChange: (e) => this.setState({ resolution: e.target.value, saved: false }) });
+    push({ key: 'variables' });
+    const emit = (list, path, indent) => {
+      list.forEach((v, i) => {
+        const p = path.concat(i);
+        push({ key: v.key, indent: indent });
+        push({ key: 'peso', indent: indent + 1, value: v.peso, editable: true, onChange: (e) => this.setField(p, 'peso', e.target.value) });
+        push({
+          key: 'excluyente', indent: indent + 1, value: v.excluyente ? 'true' : 'false', boolValue: true,
+          toggle: () => this.setField(p, 'excluyente', !v.excluyente),
+          boolStyle: {
+            font: 'inherit', fontSize: 12.5, padding: '1px 11px', borderRadius: 999, cursor: 'pointer', border: 0,
+            background: v.excluyente ? 'var(--color-accent-200)' : 'var(--color-neutral-200)',
+            color: v.excluyente ? 'var(--color-accent-900)' : 'var(--color-neutral-700)',
+          },
+        });
+        push({
+          key: 'normalizacion', indent: indent + 1, value: v.normalizacion, enumValue: true,
+          options: NORMS, onChange: (e) => this.setField(p, 'normalizacion', e.target.value),
+        });
+        if (v.sub && v.sub.length) {
+          push({ key: 'subvariables', indent: indent + 1 });
+          emit(v.sub, p.concat('sub'), indent + 2);
+        }
+      });
+    };
+    emit(st.variables, [], 1);
+
+    const SLOT = 112, NODEH = 100, COLW = 214;
+    const nodes = [], edges = [];
+    const labelSm = { fontSize: 10.5, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'color-mix(in srgb, var(--color-text) 58%, transparent)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+    const boxBase = (fill, edge) => ({
+      position: 'absolute', display: 'flex', flexDirection: 'column', gap: 6,
+      padding: '9px 12px', borderRadius: 'var(--radius-md)', background: fill,
+      boxShadow: 'inset 0 0 0 1.5px ' + edge + ', var(--shadow-sm)',
+    });
+    const leaves = (v) => (v.sub && v.sub.length ? v.sub.reduce((a, c) => a + leaves(c), 0) : 1);
+    const place = (list, path, depth, y0) => {
+      let cursor = y0;
+      const centers = [];
+      list.forEach((v, i) => {
+        const p = path.concat(i);
+        const h = leaves(v) * SLOT;
+        const center = cursor + h / 2;
+        const top = center - NODEH / 2;
+        const left = 178 + depth * COLW;
+        const tint = depth === 0 ? ['var(--color-accent-100)', 'var(--color-accent-300)'] : ['var(--color-accent-2-200)', 'var(--color-accent-2-400)'];
+        nodes.push({
+          label: v.key.replace(/_/g, ' '), value: v.peso, editable: true, plain: false,
+          onChange: (e) => this.setField(p, 'peso', e.target.value),
+          inc: () => this.bump(p, 0.02), dec: () => this.bump(p, -0.02),
+          hasMeta: true, normValue: v.normalizacion, normOptions: NORMS,
+          onNorm: (e) => this.setField(p, 'normalizacion', e.target.value),
+          exclLabel: v.excluyente ? 'excludes' : 'weighted',
+          onExcl: () => this.setField(p, 'excluyente', !v.excluyente),
+          exclStyle: {
+            font: 'inherit', fontSize: 11, padding: '2px 9px', borderRadius: 999, cursor: 'pointer', border: 0, whiteSpace: 'nowrap',
+            background: v.excluyente ? 'var(--color-accent-300)' : 'var(--color-neutral-200)',
+            color: v.excluyente ? 'var(--color-accent-900)' : 'var(--color-neutral-700)',
+          },
+          normStyle: {
+            flex: 1, minWidth: 0, font: 'inherit', fontSize: 11, padding: '2px 6px', borderRadius: 999,
+            background: 'var(--color-bg)', border: '1px solid var(--color-divider)', color: 'var(--color-text)', outline: 'none',
+          },
+          boxStyle: Object.assign(boxBase(tint[0], tint[1]), { left: left, top: top, width: 190 }),
+          labelStyle: Object.assign({}, labelSm, { color: depth === 0 ? 'var(--color-accent-800)' : 'var(--color-accent-2-900)', fontSize: 11.5, letterSpacing: '0.03em' }),
+          inputStyle: {
+            flex: 1, minWidth: 0, font: 'inherit', fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 14,
+            textAlign: 'center', padding: '2px 6px', color: 'var(--color-accent-900)',
+            background: 'var(--color-bg)', border: '1px solid var(--color-divider)', borderRadius: 999, outline: 'none',
+          },
+        });
+        if (v.sub && v.sub.length) {
+          const cc = place(v.sub, p.concat('sub'), depth + 1, cursor);
+          const x1 = left + 190, x2 = left + COLW;
+          cc.forEach(c => edges.push({ d: 'M ' + x1 + ' ' + center + ' C ' + (x1 + 26) + ' ' + center + ', ' + (x2 - 26) + ' ' + c + ', ' + x2 + ' ' + c, stroke: 'var(--color-accent-2-400)' }));
+        }
+        centers.push(center);
+        cursor += h;
+      });
+      return centers;
+    };
+    const rootCenters = place(st.variables, [], 0, 16);
+    const rootY = rootCenters.length ? (rootCenters[0] + rootCenters[rootCenters.length - 1]) / 2 : 60;
+    nodes.push({
+      label: 'variables', value: 'suitability_v2', plain: true, editable: false, hasMeta: false,
+      boxStyle: Object.assign(boxBase('var(--color-neutral-100)', 'var(--color-accent-400)'), { left: 4, top: rootY - 32, width: 152 }),
+      labelStyle: labelSm, valueStyle: { fontFamily: 'var(--font-heading)', fontSize: 15 },
+    });
+    rootCenters.forEach(c => edges.push({ d: 'M 156 ' + rootY + ' C 168 ' + rootY + ', 166 ' + c + ', 178 ' + c, stroke: 'var(--color-accent-300)' }));
+    const diagH = Math.max(320, (st.variables.reduce((a, v) => a + leaves(v), 0)) * SLOT + 40);
+    const validNow = this.valid();
+    const hexes = s === 3 ? this.hexes() : [];
+
+    const empty = this.props.emptyProjects ?? false;
+    const projects = PROJECTS.map(p => ({
+      name: p.name, mesh: p.mesh, status: p.status, detail: p.detail,
+      action: p.screen === 3 ? 'Open map' : 'Finish setup',
+      open: () => this.setState({
+        screen: p.screen, projectName: p.name, hover: null, mode: 'raw',
+        phase: p.screen === 3 ? 'done' : 'empty',
+        folders: p.screen === 3 ? [0, 1, 2, 3, 4, 5] : [0, 1, 2],
+      }),
+      tagStyle: {
+        display: 'inline-flex', alignItems: 'center', padding: '3px 10px', borderRadius: 999, fontSize: 11,
+        background: p.status === 'Draft' ? 'var(--color-neutral-200)' : 'var(--color-accent-2-200)',
+        color: p.status === 'Draft' ? 'var(--color-neutral-800)' : 'var(--color-accent-2-900)',
+      },
+      swatchStyle: {
+        width: 34, height: 34, flex: 'none', borderRadius: 999,
+        background: 'linear-gradient(135deg,' + rampColor(RAMP_RAW, 0.15) + ',' + rampColor(RAMP_RAW, 0.85) + ')',
+      },
+    }));
+
+    return {
+      hints, projects, isProjects: s === 0,
+      hasProjects: !empty, noProjects: empty,
+      goSetupClick: this.go(1),
+      showStepper: true, showBreadcrumb: s !== 1 && s !== 0,
+      isSetup: s === 1, isUpload: s === 2, isMap: s === 3, isTune: s === 4,
+      steps, projectName: st.projectName, mesh: st.mesh, desc: st.desc,
+      goSetup: this.go(1), goTune: this.go(4),
+      setName: (e) => this.setState({ projectName: e.target.value }),
+      setMesh: (e) => this.setState({ mesh: e.target.value }),
+      setDesc: (e) => this.setState({ desc: e.target.value }),
+      outFolder: st.outFolder,
+      setOutFolder: (e) => this.setState({ outFolder: e.target.value }),
+      pickOutFolder: () => this.setState({ outFolder: '/Projects/Ridgeline/results' }),
+      openConfig: () => this.setState({ showConfig: true }),
+      closeConfig: () => this.setState({ showConfig: false }),
+      showConfig: st.showConfig,
+      createProject: () => this.setState({ screen: 2 }),
+
+      folders, hasFolders: st.folders.length > 0,
+      folderCount: st.folders.length + ' of 10',
+      dropzoneClick: () => { if (st.phase === 'empty') this.addFolders(st.folders.length ? 1 : 3); },
+      dropTitle: st.phase === 'empty' ? 'Drop your data folders here' : 'Folders locked while processing',
+      dropSub: st.phase === 'empty' ? 'Or click to browse — up to 10 folders, one per variable' : 'You can add more once this run finishes',
+      dropzoneStyle: {
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 7,
+        height: 190, textAlign: 'center', borderRadius: 'var(--radius-lg)',
+        border: '2px dashed ' + (st.phase === 'empty' ? 'var(--color-accent-400)' : 'var(--color-neutral-300)'),
+        background: st.phase === 'empty' ? 'color-mix(in srgb, var(--color-accent-100) 70%, transparent)' : 'var(--color-neutral-100)',
+        cursor: st.phase === 'empty' ? 'pointer' : 'not-allowed', opacity: st.phase === 'empty' ? 1 : 0.7,
+      },
+      isProcessing: st.phase === 'processing',
+      statusText: st.statusText, progressText: st.progress + '%',
+      barStyle: { width: st.progress + '%', height: '100%', borderRadius: 999, background: 'var(--color-accent)', transition: 'width .2s linear' },
+      processDisabled: st.folders.length === 0 || st.phase !== 'empty',
+      processLabel: st.phase === 'done' ? 'Processed' : st.phase === 'processing' ? 'Processing…' : 'Process',
+      startProcess: () => this.startProcess(),
+      processHint: st.folders.length === 0 ? 'Add at least one folder to continue.' : st.phase === 'empty' ? 'This converts every location into a hexagon. You can keep working after it starts.' : 'Your data is being converted.',
+      showComplete: st.showComplete,
+      completeText: st.folders.length + ' folders converted into 4,812 hexagons at H3 resolution 8. Every variable is ready to explore on the map.',
+      dismissComplete: () => this.setState({ showComplete: false }),
+      viewMap: () => this.setState({ showComplete: false, screen: 3 }),
+
+      variables, rawChecked: st.mode === 'raw', modelChecked: st.mode === 'model',
+      setRaw: () => this.setState({ mode: 'raw', hover: null }),
+      setModel: () => this.setState({ mode: 'model', hover: null }),
+      modeHint: st.mode === 'raw' ? 'These are the variables exactly as you uploaded them, hexagon by hexagon.' : 'These are the same variables after the model applies your weights.',
+      hexes, hexCount: hexes.length.toLocaleString(), resolution: st.resolution,
+      activeVarName: v.name, activeVarHint: v.hint,
+      mapRef: this.mapRef,
+      mapTransform: 'translate(' + st.pan.x + ',' + st.pan.y + ') scale(' + st.zoom + ')',
+      zoomIn: () => this.setState({ zoom: Math.min(3, st.zoom * 1.25) }),
+      zoomOut: () => this.setState({ zoom: Math.max(0.6, st.zoom / 1.25) }),
+      fitMap: () => this.setState({ zoom: 1, pan: { x: 0, y: 0 } }),
+      mapBtnStyle: { width: 34, height: 34, background: 'color-mix(in srgb, var(--color-bg) 90%, transparent)', boxShadow: 'var(--shadow-sm)' },
+      onMapMove: (e) => this.onMapMove(e),
+      onMapLeave: () => this.setState({ hover: null, dragging: null }),
+      onMapDown: (e) => this.setState({ dragging: { x: e.clientX, y: e.clientY, px: st.pan.x, py: st.pan.y }, hover: null }),
+      onMapUp: () => this.setState({ dragging: null }),
+      hover: !!st.hover,
+      tipId: st.hover ? st.hover.id : '',
+      tipValue: st.hover ? this.fmt(v, st.hover.t) : '',
+      tipStyle: st.hover ? {
+        position: 'absolute', left: Math.min(st.hover.x + 16, 640), top: st.hover.y + 16, pointerEvents: 'none',
+        display: 'flex', flexDirection: 'column', gap: 2, padding: '9px 13px', borderRadius: 'var(--radius-md)',
+        background: 'var(--color-bg)', boxShadow: 'var(--shadow-md)', whiteSpace: 'nowrap',
+      } : {},
+      legendTitle: v.name, legendLo: this.fmt(v, 0), legendHi: this.fmt(v, 1),
+      legendBarStyle: {
+        height: 11, borderRadius: 999,
+        background: 'linear-gradient(90deg,' + rampColor(ramp, 0) + ',' + rampColor(ramp, 0.25) + ',' + rampColor(ramp, 0.5) + ',' + rampColor(ramp, 0.75) + ',' + rampColor(ramp, 1) + ')',
+      },
+
+      yamlLines: lines, nodes, edges,
+      sumText: this.sum().toFixed(2),
+      statusLabel: !validNow ? 'Check the flagged weights' : !st.saved ? 'Valid · unsaved' : st.applied ? 'Saved and applied' : 'Saved · not applied',
+      statusChipStyle: {
+        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 999, fontSize: 12.5, whiteSpace: 'nowrap',
+        background: !validNow ? 'var(--color-accent-200)' : st.saved && st.applied ? 'var(--color-accent-2-200)' : 'var(--color-neutral-200)',
+        color: !validNow ? 'var(--color-accent-900)' : st.saved && st.applied ? 'var(--color-accent-2-900)' : 'var(--color-neutral-800)',
+      },
+      diagramStyle: {
+        position: 'absolute', left: 20, top: 54, width: 840, height: diagH,
+        transform: 'scale(' + st.dzoom + ')', transformOrigin: '0 0', transition: 'transform .18s ease',
+      },
+      diagH: diagH, diagRef: this.diagRef,
+      dZoomIn: () => this.setState({ dzoom: Math.min(1.6, st.dzoom + 0.1) }),
+      dZoomOut: () => this.setState({ dzoom: Math.max(0.3, st.dzoom - 0.1) }),
+      dFit: () => this.fitDiagram(diagH),
+      saveModel: () => this.setState({ saved: true }),
+      applyModel: () => {
+        if (!this.valid()) return;
+        this.setState({ saved: true, applied: true, mode: 'model', selModel: 'score', screen: 3, hover: null });
+      },
+      applyDisabled: !validNow,
+      showExamples: st.showExamples,
+      openExamples: () => this.setState({ showExamples: true }),
+      closeExamples: () => this.setState({ showExamples: false }),
+      examples: EXAMPLES.map(ex => ({
+        title: ex.title, blurb: ex.blurb, yaml: ex.yaml,
+        copy: () => this.insertExample(ex),
+      })),
+      inserted: !!st.inserted,
+      insertedText: st.inserted ? st.inserted + ' added to the editor' : '',
+    };
+  }
+}
+</script>
+</body>
+</html>

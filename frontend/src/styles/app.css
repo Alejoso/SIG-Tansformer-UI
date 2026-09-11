@@ -1,0 +1,122 @@
+/* App-level chrome. Everything visual comes from the Organic tokens in organic.css. */
+
+body { margin: 0; background: var(--color-bg); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-neutral-300);
+  border-radius: 999px;
+  border: 3px solid var(--color-bg);
+}
+
+#root { height: 100vh; }
+
+.app {
+  height: 100vh;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+}
+
+/* The muted body text used across every screen. */
+.muted    { color: color-mix(in srgb, var(--color-text) 60%, transparent); }
+.muted-55 { color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+.muted-52 { color: color-mix(in srgb, var(--color-text) 52%, transparent); }
+.muted-50 { color: color-mix(in srgb, var(--color-text) 50%, transparent); }
+.muted-45 { color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+
+.screen {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.screen-body { width: 100%; }
+
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* ── header ─────────────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 26px 0;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  margin-right: 6px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+
+.header-brand span {
+  font-family: var(--font-heading);
+  font-size: 19px;
+  letter-spacing: -0.01em;
+}
+
+.stepper { display: flex; align-items: center; gap: 2px; flex: 1; }
+
+.step {
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13.5px;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+.step:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.step[aria-current='step'] {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent-800);
+}
+
+.breadcrumb {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+}
+.breadcrumb strong { color: var(--color-text); font-weight: 600; }
+
+/* ── toast ──────────────────────────────────────────────────────────── */
+
+/* Overlay layers. The map and diagram controls sit above deck.gl's canvas at
+   z-index 2, so anything meant to cover the screen has to clear that. */
+.dialog-backdrop { z-index: 50; }
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-radius: 999px;
+  background: var(--color-accent-2-200);
+  color: var(--color-accent-2-900);
+  box-shadow: var(--shadow-md);
+  font-size: 13.5px;
+  z-index: 60;
+}
