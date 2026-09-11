@@ -1,0 +1,58 @@
+# ── Node / frontend ───────────────────────────────────────────────────────
+# frontend/.gitignore (from the Vite scaffold) covers these for that folder
+# too; repeating them here keeps any future package outside frontend/ safe.
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Vite's dev-server cache
+.vite/
+
+# ── Python backend ────────────────────────────────────────────────────────
+# Nothing here yet — the FastAPI + uvicorn server comes later. See README.md.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# ── Environment ───────────────────────────────────────────────────────────
+# .env.example is the documented template and stays tracked.
+.env
+.env.*
+!.env.example
+
+# ── Editor / OS ───────────────────────────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.sw?
+
+# ── Agent tooling ─────────────────────────────────────────────────────────
+# Matching the convention in the sibling SIG-Transformer repo.
+.claude/
+.agents/
+
+# ── Local data ────────────────────────────────────────────────────────────
+# The engine's results folders and any test meshes or parquet dropped in for
+# local runs — regenerable, and too heavy for the repo.
+data/
+out/
+*.parquet
+*.pmtiles
