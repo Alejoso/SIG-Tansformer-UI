@@ -130,7 +130,7 @@ export function TuneScreen() {
     setApplyDone(null);
     // Land on the whole-model document, which is what the new weights
     // just regenerated.
-    setMapView({ scale: 'raw', nodeId: 'model' });
+    setMapView({ mode: 'model', scale: 'raw', nodeId: 'model' });
     goTo('map');
   };
 

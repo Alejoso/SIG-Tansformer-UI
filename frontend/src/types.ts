@@ -110,17 +110,31 @@ export interface LayerNode {
   hasDocument: boolean;
 }
 
+/** Which side of the project the map sidebar is showing. */
+export type MapMode = 'input' | 'model';
+
 /**
- * The two sections of the map sidebar.
+ * Everything the engine rendered for a project.
  *
- * Kept as one response because the engine generates them in a single pass, and
- * because the UI needs both to decide what to show first.
+ * Kept as one response because the engine generates it in a single pass, and
+ * because the UI needs all of it to decide what to show first.
+ *
+ * The two sides are shaped differently on purpose. The model is hierarchical —
+ * a variable can be built from other variables — so it arrives as a tree. The
+ * inputs are one uploaded folder per variable, so they are flat and stay flat.
  */
 export interface LayerTree {
-  /** The whole-model document, with whatever the model produced beneath it. */
-  model: LayerNode;
-  /** The input variables, nested wherever one is composed of others. */
-  variables: LayerNode[];
+  model: {
+    /**
+     * The single document holding the whole model. There is only ever one:
+     * it already contains everything in one place.
+     */
+    combined: LayerNode;
+    /** The model's variables, nested wherever one is composed of others. */
+    variables: LayerNode[];
+  };
+  /** The uploaded variables, one per folder. Never nested. */
+  inputs: LayerNode[];
 }
 
 /* ── model (the tunable YAML) ──────────────────────────────────────────── */

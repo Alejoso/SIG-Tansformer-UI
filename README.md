@@ -87,7 +87,7 @@ No component changes.
 | `startProcessing` | `POST /api/projects/{id}/process` | |
 | `watchProcessing` | `GET /api/projects/{id}/process/stream` | **SSE**, driven by `watchfiles` on the results folder |
 | `listVariables` | `GET /api/projects/{id}/variables?mode=input\|model` | |
-| `getLayerTree` | `GET /api/projects/{id}/layers` | the structure of what was rendered — labels and ids only |
+| `getLayerTree` | `GET /api/projects/{id}/layers` | what was rendered: the model tree and the flat input list, labels and ids only |
 | `getLayerUrl` | `GET /api/projects/{id}/layers/{nodeId}?scale=raw\|normalized` | returns the URL of the pre-rendered document the iframe loads |
 | `getModel` | `GET /api/projects/{id}/model` | read with `ruamel.yaml` so comments and order survive |
 | `saveModel` | `PUT /api/projects/{id}/model` | validate with Pydantic before writing |
@@ -106,25 +106,29 @@ uvicorn on its default port needs no extra config.
 
 ### What the engine has to supply
 
-- **The layer tree.** The engine renders a document for the whole model, one
-  per variable, and one per part of a composite variable, so `getLayerTree`
-  returns a tree rather than a list:
+- **The layer tree.** `getLayerTree` returns both sides of the project, shaped
+  differently on purpose:
 
   ```
-  model:      Complete model ──┬── Site suitability score
-                               ├── Buildable capacity
-                               └── …
-  variables:  Mean wind speed
-              Grid access ──┬── Distance to substation ──┬── High-voltage …
-                            │                            └── Medium-voltage …
-                            └── Distance to road
+  model.combined    Complete model          one document, everything in it
+  model.variables   Mean wind speed
+                    Grid access ──┬── Distance to substation ──┬── High-voltage …
+                                  │                            └── Medium-voltage …
+                                  └── Distance to road
+  inputs            Mean wind speed, Terrain slope, Road network, …   (flat)
   ```
 
-  Nesting is arbitrary depth. `hasDocument: false` marks a node that exists
-  only to group others — it still opens, but selecting it shows nothing. The
-  UI draws whatever structure comes back; it does not derive it from the model
-  config, because what the engine actually rendered is the only truth about
-  what can be displayed.
+  The model is hierarchical — a variable can be built from other variables — so
+  it arrives as a tree and the sidebar opens it like folders, at any depth. The
+  inputs are one uploaded folder per variable, so they are flat and stay flat;
+  the UI sorts them alphabetically rather than trusting the order they arrive
+  in. The same component draws both: when nothing in a section is composite it
+  drops the disclosure column instead of leaving empty space.
+
+  `hasDocument: false` marks a node that exists only to group others — it still
+  opens, but selecting it shows nothing. The UI draws whatever structure comes
+  back; it does not derive it from the model config, because what the engine
+  actually rendered is the only truth about what can be displayed.
 
 - **One rendered document per node.** A node id plus the raw/normalized scale
   names one document. Today every combination resolves to the same sample

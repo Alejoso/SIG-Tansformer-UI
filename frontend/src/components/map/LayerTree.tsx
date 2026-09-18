@@ -1,9 +1,12 @@
 /**
  * The layer picker: a file-explorer tree over what the engine rendered.
  *
- * The engine emits a document for the whole model, one per variable, and one
- * per part of a composite variable — so the picker is a tree, and a composite
- * opens to reveal what it is built from, at any depth.
+ * Used for both sides of the map sidebar. The model is hierarchical — a
+ * variable can be built from other variables — so its rows open to reveal
+ * their parts, at any depth. The input variables are one uploaded folder each
+ * and arrive flat, so the same component draws them as a plain list: when
+ * nothing in a section is composite, the disclosure column is dropped
+ * altogether rather than left as empty space.
  *
  * Structure comes straight from the backend (`api.getLayerTree`); this
  * component only draws it and tracks which rows are open.
@@ -23,8 +26,16 @@ interface LayerTreeProps {
   defaultOpen?: string[];
 }
 
+/** True when anything in the section has children, at any depth. */
+function hasComposite(nodes: LayerNode[]): boolean {
+  return nodes.some((node) => (node.children?.length ?? 0) > 0 || hasComposite(node.children ?? []));
+}
+
 export function LayerTree({ title, nodes, selectedId, onSelect, defaultOpen = [] }: LayerTreeProps) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(defaultOpen));
+  // A flat section needs no disclosure column; a nested one needs it on every
+  // row, including the leaves, or the labels would not line up.
+  const showCarets = hasComposite(nodes);
 
   const toggle = (id: string) =>
     setOpen((current) => {
@@ -51,25 +62,26 @@ export function LayerTree({ title, nodes, selectedId, onSelect, defaultOpen = []
           }`}
           // Depth is drawn with padding rather than nested boxes, so the rows
           // keep one flat hit area and one alignment column.
-          style={{ paddingLeft: 8 + depth * 14 }}
+          style={{ paddingLeft: (showCarets ? 8 : 12) + depth * 14 }}
         >
-          {composite ? (
-            <button
-              type="button"
-              className={`layer-caret${isOpen ? ' is-open' : ''}`}
-              aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${node.label}`}
-              // Stops the caret from also changing what is on the map: opening
-              // a composite to look inside is not the same as selecting it.
-              onClick={(e) => {
-                e.stopPropagation();
-                toggle(node.id);
-              }}
-            >
-              <Icon name="chevronRight" size={12} strokeWidth={3} />
-            </button>
-          ) : (
-            <span className="layer-caret is-leaf" aria-hidden="true" />
-          )}
+          {showCarets &&
+            (composite ? (
+              <button
+                type="button"
+                className={`layer-caret${isOpen ? ' is-open' : ''}`}
+                aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${node.label}`}
+                // Stops the caret from also changing what is on the map:
+                // opening a composite to look inside is not selecting it.
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggle(node.id);
+                }}
+              >
+                <Icon name="chevronRight" size={12} strokeWidth={3} />
+              </button>
+            ) : (
+              <span className="layer-caret is-leaf" aria-hidden="true" />
+            ))}
 
           <button
             type="button"
