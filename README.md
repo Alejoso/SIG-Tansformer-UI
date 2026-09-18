@@ -7,9 +7,38 @@ running against an in-memory mock of the backend.
 ```
 SIG-UI/
 ├── design/      the source mockup (Maphex.dc.html + the Organic design system)
+├── HTML/        the engine's pre-rendered layer documents (git-ignored)
 ├── frontend/    React + Vite + TypeScript
 └── README.md
 ```
+
+## The map is rendered by the engine, not by us
+
+The engine emits a finished pydeck HTML document per layer, and the map screen
+drops it into an `<iframe>`. The UI never receives per-hexagon values and never
+paints a map — a full mesh as JSON would be tens of megabytes to serialise,
+transfer and re-draw, where the generated document is already a map the browser
+can stream and cache.
+
+Put the generated files in `HTML/` at the repo root. The dev server serves that
+folder at `/layers/<filename>` (a small plugin in `frontend/vite.config.ts`);
+in production FastAPI serves the same route. The folder is git-ignored — the
+documents are ~9 MB each and the pipeline regenerates them.
+
+An iframe rather than injected markup, because each document:
+
+- is a complete HTML page that sets `body { margin:0; overflow:hidden }` and
+  sizes its canvas with `100vw/100vh`, which would fight this app's layout;
+- loads its own deck.gl and mapbox-gl from a CDN, and two deck.gl runtimes in
+  one document collide over globals and WebGL contexts;
+- is megabytes of inlined data that must not pass through React state.
+
+It runs under `sandbox="allow-scripts"`, so the document cannot read
+`window.parent` and storage access throws — pydeck runs fine under that.
+
+Because the document owns its own pan, zoom, tooltip and opacity control, the
+app adds no map chrome of its own. Anything drawn on top would duplicate or
+contradict what is inside it.
 
 ## Running it
 
@@ -27,7 +56,7 @@ FastAPI will serve once it exists.
 | Projects | `screens/ProjectsScreen.tsx` | Project list, empty state, "new project" tile |
 | New project | `screens/NewProjectScreen.tsx` | Name, mesh, results folder, description, advanced settings |
 | Add your data | `screens/DataScreen.tsx` | Folder dropzone (max 10), folder list, processing progress, "all done" dialog |
-| Map | `screens/MapScreen.tsx` + `map/HexMap.tsx` | deck.gl `H3HexagonLayer` over MapLibre, input/model switch, raw/normalized switch, legend, hover tooltip |
+| Map | `screens/MapScreen.tsx` + `map/LayerFrame.tsx` | The engine's generated layer HTML in an iframe; the sidebar picks which document to show |
 | Tune the model | `screens/TuneScreen.tsx` + `tune/*` | YAML editor and node diagram over one shared tree, examples dialog |
 
 ## Where the backend plugs in
@@ -58,7 +87,7 @@ No component changes.
 | `startProcessing` | `POST /api/projects/{id}/process` | |
 | `watchProcessing` | `GET /api/projects/{id}/process/stream` | **SSE**, driven by `watchfiles` on the results folder |
 | `listVariables` | `GET /api/projects/{id}/variables?mode=input\|model` | |
-| `getHexLayer` | `GET /api/projects/{id}/hexes?variable={id}` | heaviest response; see note below |
+| `getLayerUrl` | `GET /api/projects/{id}/layers/{variableId}?scale=raw\|normalized` | returns the URL of the pre-rendered document the iframe loads |
 | `getModel` | `GET /api/projects/{id}/model` | read with `ruamel.yaml` so comments and order survive |
 | `saveModel` | `PUT /api/projects/{id}/model` | validate with Pydantic before writing |
 | `applyModel` | `POST /api/projects/{id}/model/apply` | save, then re-run the weighting; returns once accepted |
@@ -76,11 +105,10 @@ uvicorn on its default port needs no extra config.
 
 ### What the engine has to supply
 
-- **`HexCell.normalized`.** Every cell carries both its value in its own units
-  and the same value on a 0-1 scale, because the map's raw/normalized toggle
-  switches between them. The engine owns that number — the UI deliberately
-  does not re-derive it, or the map would disagree with the weighting that
-  actually ran.
+- **One rendered document per layer.** The sidebar's three selectors —
+  input/model, raw/normalized, and the variable — together name one document.
+  Today every combination resolves to the same sample file; when the engine
+  emits one per layer, only `getLayerUrl` changes.
 - **Two resolutions.** `ProjectSettings.processingResolution` is what the
   engine computes and stores at; `mapResolution` is only what gets drawn.
   When the map resolution is coarser, the backend has to aggregate stored
@@ -92,23 +120,24 @@ uvicorn on its default port needs no extra config.
 
 ### Two things to decide before the backend lands
 
-- **`getHexLayer` payload size.** The mock returns ~3,800 cells. A full
-  Colombia mesh at resolution 8 is hundreds of thousands, and one JSON array of
-  `{h3, value}` will not be pleasant. Worth paging, streaming, or sending a
-  binary/Arrow column pair.
+- **Caching the rendered documents.** They are ~9 MB each and there will be one
+  per layer. The dev server sends `Cache-Control: no-store` so a regenerated
+  file is picked up immediately; production wants the opposite — a long cache
+  with a content hash or an ETag in the URL — or every layer switch re-downloads.
 - **Who owns validation.** The UI validates locally so Apply can react as you
   type (`src/lib/model.ts`, `isValid`). `validateModel` exists for the server's
   stricter answer but nothing gates on it yet.
 
 ## Notes on what was built
 
-- **The map is real.** The mockup drew a fake SVG hex grid, because a design
-  canvas cannot run WebGL. This uses the actual stack — deck.gl
-  `H3HexagonLayer` + MapLibre + `h3-js` — with mock cells from
-  `src/lib/h3mock.ts`. Only that generator gets deleted when the engine
-  supplies real cells.
-- **Mock data follows the design**, so the meshes are Ireland / Iberia / North
-  Sea rather than Colombia. It is all in `src/api/mock/fixtures.ts`.
+- **Mock data still follows the design**, so the projects and variables are
+  Ireland / Iberia / North Sea wind-farm fixtures while the one sample document
+  is Colombian SOE-001. The frame shows the filename of the document actually
+  on screen, so the mismatch is visible rather than misleading. Fixtures are in
+  `src/api/mock/fixtures.ts`.
+- **deck.gl, react-map-gl and h3-js are no longer used** by the app now that
+  the engine renders the map. They are still in `package.json`; drop them when
+  you are sure nothing else wants them.
 - **The model tree is deliberately small** — `key`, `peso`, `excluyente`,
   `normalizacion`, `sub` — since the real config will change a lot. The YAML
   editor and the node diagram are two renderings of that one structure

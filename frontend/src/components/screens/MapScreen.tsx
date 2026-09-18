@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import { rampFor, rampSwatch } from '../../lib/ramp';
-import type { HexLayerData, MapMode, Variable, ValueScale } from '../../types';
-import { HexMap } from '../map/HexMap';
+import type { MapMode, Variable, ValueScale } from '../../types';
+import { LayerFrame } from '../map/LayerFrame';
 import { Icon } from '../ui/Icon';
 import { SettingsDialog } from './SettingsDialog';
 
@@ -23,7 +23,8 @@ export function MapScreen() {
   const { mode, scale } = mapView;
 
   const [variables, setVariables] = useState<Variable[]>([]);
-  const [layer, setLayer] = useState<HexLayerData | null>(null);
+  /** URL of the engine's pre-rendered document for the selected layer. */
+  const [layerUrl, setLayerUrl] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   /** Bumped when settings are saved, to force the layer to refetch. */
   const [settingsVersion, setSettingsVersion] = useState(0);
@@ -58,26 +59,17 @@ export function MapScreen() {
   useEffect(() => {
     if (!projectId || !active) return;
     let live = true;
-    api.getHexLayer(projectId, active.id).then((data) => {
-      if (live) setLayer(data);
+    api.getLayerUrl(projectId, active.id, scale).then((url) => {
+      if (live) setLayerUrl(url);
     });
     return () => {
       live = false;
     };
-    // Map resolution lives in settings, so saving them changes what we draw.
-  }, [projectId, active, settingsVersion]);
+    // The resolutions are render settings for the engine, so saving them can
+    // point at a freshly generated document.
+  }, [projectId, active, scale, settingsVersion]);
 
   const ramp = rampFor(mode);
-
-  /**
-   * Normalised values are unitless by definition, so the suffix and the
-   * variable's own decimal places do not apply to them.
-   */
-  const format = useMemo(() => {
-    if (scale === 'normalized') return (value: number) => value.toFixed(2);
-    if (!active) return (value: number) => String(value);
-    return (value: number) => `${value.toFixed(active.decimals)}${active.suffix}`;
-  }, [active, scale]);
 
   return (
     <div className="map-screen">
@@ -178,14 +170,11 @@ export function MapScreen() {
         </div>
       </aside>
 
-      {active && layer ? (
-        <HexMap
-          cells={layer.cells}
-          variable={active}
-          scale={scale}
-          ramp={ramp}
-          resolution={layer.resolution}
-          format={format}
+      {active && layerUrl ? (
+        <LayerFrame
+          url={layerUrl}
+          title={active.name}
+          subtitle={scale === 'normalized' ? `${active.hint} · normalized` : active.hint}
         />
       ) : (
         <div className="map-canvas">

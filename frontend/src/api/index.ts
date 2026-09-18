@@ -14,7 +14,6 @@ import * as mock from './mock';
 import type {
   ApplyProgress,
   DataFolder,
-  HexLayerData,
   MapMode,
   Mesh,
   ModelConfig,
@@ -23,6 +22,7 @@ import type {
   ProcessingProgress,
   Project,
   ProjectSettings,
+  ValueScale,
   Variable,
 } from '../types';
 
@@ -107,14 +107,25 @@ export const listVariables = (projectId: string, mode: MapMode): Promise<Variabl
   mock.listVariables(projectId, mode);
 
 /**
- * ENDPOINT: GET /api/projects/{id}/hexes?variable={variableId}
+ * ENDPOINT: GET /api/projects/{id}/layers/{variableId}?scale=raw|normalized
  *
- * The per-hexagon values deck.gl renders. Expected to be the heaviest
- * response in the app — the real one should stream or page once a full
- * Colombia-sized mesh at resolution 8 is in play.
+ * Returns the URL of the engine's pre-rendered layer HTML, which the map
+ * screen drops into an iframe.
+ *
+ * The engine renders these itself, so the UI never receives per-hexagon
+ * values and never paints the map. That is the whole point: a full mesh as
+ * JSON would be tens of megabytes to serialise, transfer and re-draw, where
+ * the generated document is already a finished map the browser can stream.
+ *
+ * Returning a URL rather than the markup matters — the browser fetches and
+ * caches the document natively instead of routing 8 MB of HTML through
+ * React state.
  */
-export const getHexLayer = (projectId: string, variableId: string): Promise<HexLayerData> =>
-  mock.getHexLayer(projectId, variableId);
+export const getLayerUrl = (
+  projectId: string,
+  variableId: string,
+  scale: ValueScale,
+): Promise<string> => mock.getLayerUrl(projectId, variableId, scale);
 
 /* ── model ─────────────────────────────────────────────────────────────── */
 

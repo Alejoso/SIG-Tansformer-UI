@@ -10,7 +10,6 @@
 import type {
   ApplyProgress,
   DataFolder,
-  HexLayerData,
   MapMode,
   Mesh,
   ModelConfig,
@@ -19,16 +18,15 @@ import type {
   ProcessingProgress,
   Project,
   ProjectSettings,
+  ValueScale,
   Variable,
 } from '../../types';
-import { mockGrid, mockValues, originCell } from '../../lib/h3mock';
 import {
   AVAILABLE_FOLDERS,
   DEFAULT_MODEL,
   DEFAULT_SETTINGS,
   EXAMPLES,
   MESHES,
-  MESH_CENTRES,
   MODEL_VARIABLES,
   PROJECTS,
   INPUT_VARIABLES,
@@ -211,44 +209,24 @@ export async function listVariables(projectId: string, mode: MapMode): Promise<V
   return delay(variablesFor(mode).map(({ seed: _seed, ...variable }) => variable));
 }
 
-/** Cache the generated grid per project so switching variables stays instant. */
-const gridCache = new Map<string, { cells: string[]; origin: string; resolution: number }>();
+/**
+ * The one sample layer the engine has produced so far.
+ *
+ * Served by the dev middleware in `vite.config.ts` from the repo's `HTML/`
+ * folder. Every variable resolves to this same file for now; once the engine
+ * emits one per variable, only this function changes.
+ */
+const SAMPLE_LAYER = 'soe_001_SOE-001_h3.html';
 
-function gridFor(projectId: string) {
-  const project = projects.find((p) => p.id === projectId);
-  const centre = MESH_CENTRES[project?.meshId ?? ''] ?? [53.35, -8.0];
-  // The map draws at the map resolution, not the resolution the data was
-  // processed at. Against the real backend, a coarser map resolution means
-  // the server aggregates stored cells up before sending them.
-  const resolution =
-    settingsByProject.get(projectId)?.mapResolution ?? DEFAULT_SETTINGS.mapResolution;
-
-  const key = `${projectId}:${resolution}`;
-  const cached = gridCache.get(key);
-  if (cached) return cached;
-
-  const grid = {
-    cells: mockGrid({ centre, resolution }),
-    origin: originCell(centre, resolution),
-    resolution,
-  };
-  gridCache.set(key, grid);
-  return grid;
-}
-
-export async function getHexLayer(projectId: string, variableId: string): Promise<HexLayerData> {
-  const definition =
-    [...INPUT_VARIABLES, ...MODEL_VARIABLES].find((v) => v.id === variableId) ?? INPUT_VARIABLES[0];
-  const { cells, origin, resolution } = gridFor(projectId);
-
-  return delay(
-    {
-      variableId: definition.id,
-      resolution,
-      cells: mockValues(cells, origin, definition.seed, definition.min, definition.max),
-    },
-    120,
-  );
+export async function getLayerUrl(
+  projectId: string,
+  variableId: string,
+  scale: ValueScale,
+): Promise<string> {
+  void projectId;
+  void variableId;
+  void scale;
+  return delay(`/layers/${SAMPLE_LAYER}`, 80);
 }
 
 /* ── model ─────────────────────────────────────────────────────────────── */
@@ -364,10 +342,7 @@ export async function getSettings(projectId: string): Promise<ProjectSettings> {
 
 export async function saveSettings(projectId: string, settings: ProjectSettings): Promise<void> {
   settingsByProject.set(projectId, clone(settings));
-  // Both resolutions invalidate the cached grid: one changes what was
-  // computed, the other changes what is drawn.
-  for (const key of [...gridCache.keys()]) {
-    if (key.startsWith(`${projectId}:`)) gridCache.delete(key);
-  }
+  // The resolutions now tell the engine what to render, rather than changing
+  // anything the UI draws itself, so there is no client-side cache to clear.
   await delay(null, 120);
 }

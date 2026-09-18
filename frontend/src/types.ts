@@ -106,27 +106,6 @@ export interface Variable {
   suffix: string;
 }
 
-/** One hexagon's value for one variable. */
-export interface HexCell {
-  /** H3 index, e.g. `881f1d4881fffff`. */
-  h3: string;
-  /** The value in the variable's own units. */
-  value: number;
-  /**
-   * The same value on a 0–1 scale, per the variable's `normalizacion`.
-   * The engine owns this number — the UI must not re-derive it, or the map
-   * would disagree with the weighting that actually ran.
-   */
-  normalized: number;
-}
-
-export interface HexLayerData {
-  variableId: string;
-  /** The map resolution these cells were built at. */
-  resolution: number;
-  cells: HexCell[];
-}
-
 /* ── model (the tunable YAML) ──────────────────────────────────────────── */
 
 export type Normalisation = 'minmax' | 'zscore' | 'log' | 'ninguna';

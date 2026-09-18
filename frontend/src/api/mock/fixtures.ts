@@ -22,16 +22,6 @@ export const MESHES: Mesh[] = [
   { id: 'north_sea_2km_mesh.geojson', label: 'North Sea — 2 km mesh' },
 ];
 
-/**
- * Roughly where each mesh sits, so the mock hex grid lands on real geography.
- * The backend will send the mesh bounds instead and the map will fit to them.
- */
-export const MESH_CENTRES: Record<string, [number, number]> = {
-  'ireland_5km_mesh.geojson': [53.35, -8.0],
-  'iberia_10km_mesh.geojson': [40.2, -3.9],
-  'north_sea_2km_mesh.geojson': [56.0, 3.2],
-};
-
 export const PROJECTS: Project[] = [
   {
     id: 'ridgeline',
