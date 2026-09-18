@@ -2,14 +2,26 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import {
+  addInterval,
   appendVariables,
   bumpWeight,
+  invalidReason,
   isValid,
+  removeInterval,
   setField,
+  setInterval as setIntervalField,
+  setNormalisation,
   toLines,
   weightSum,
 } from '../../lib/model';
-import type { ApplyProgress, ModelConfig, ModelExample, ModelPath, Normalisation } from '../../types';
+import type {
+  ApplyProgress,
+  Interval,
+  ModelConfig,
+  ModelExample,
+  ModelPath,
+  Normalisation,
+} from '../../types';
 import { ApplyDoneDialog, ApplyProgressDialog } from '../tune/ApplyDialogs';
 import { ExamplesDialog } from '../tune/ExamplesDialog';
 import { ModelDiagram } from '../tune/ModelDiagram';
@@ -70,8 +82,23 @@ export function TuneScreen() {
     (path: ModelPath, value: boolean) => edit((m) => setField(m, path, 'excluyente', value)),
     [edit],
   );
+  // Goes through setNormalisation rather than setField so switching to
+  // `intervals` seeds a starting table instead of an empty one.
   const onNormalisation = useCallback(
-    (path: ModelPath, value: Normalisation) => edit((m) => setField(m, path, 'normalizacion', value)),
+    (path: ModelPath, value: Normalisation) => edit((m) => setNormalisation(m, path, value)),
+    [edit],
+  );
+  const onInterval = useCallback(
+    (path: ModelPath, index: number, field: keyof Interval, value: string) =>
+      edit((m) => setIntervalField(m, path, index, field, value)),
+    [edit],
+  );
+  const onAddInterval = useCallback(
+    (path: ModelPath) => edit((m) => addInterval(m, path)),
+    [edit],
+  );
+  const onRemoveInterval = useCallback(
+    (path: ModelPath, index: number) => edit((m) => removeInterval(m, path, index)),
     [edit],
   );
   const onResolution = useCallback(
@@ -142,8 +169,15 @@ export function TuneScreen() {
     );
   }
 
+  const INVALID_LABELS = {
+    weights: 'Check the flagged weights',
+    intervals: 'Check the flagged intervals',
+    resolution: 'Check the resolution',
+  } as const;
+  const reason = model ? invalidReason(model) : null;
+
   const statusLabel = !valid
-    ? 'Check the flagged weights'
+    ? (reason ? INVALID_LABELS[reason] : 'Check the flagged fields')
     : !saved
       ? 'Valid · unsaved'
       : applied
@@ -208,6 +242,9 @@ export function TuneScreen() {
           onExcluyente={onExcluyente}
           onNormalisation={onNormalisation}
           onResolution={onResolution}
+          onInterval={onInterval}
+          onAddInterval={onAddInterval}
+          onRemoveInterval={onRemoveInterval}
         />
         <ModelDiagram
           model={model}

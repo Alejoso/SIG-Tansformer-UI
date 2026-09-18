@@ -139,7 +139,36 @@ export interface LayerTree {
 
 /* ── model (the tunable YAML) ──────────────────────────────────────────── */
 
-export type Normalisation = 'minmax' | 'zscore' | 'log' | 'ninguna';
+/**
+ * How a variable's raw values are turned into a comparable score.
+ *
+ * - `minmax` — rescale onto 0-1 using the observed range. No configuration.
+ * - `standard` — subtract the mean, divide by the standard deviation. No
+ *   configuration.
+ * - `intervals` — hand-written ranges, each mapping to a number. This is also
+ *   how a categorical result is expressed, since a category is just a number
+ *   with a meaning attached.
+ */
+export type Normalisation = 'minmax' | 'standard' | 'intervals';
+
+/**
+ * One row of an interval transform: every value in the range becomes `value`.
+ *
+ * Bounds are `(from, to]` — exclusive lower, inclusive upper — matching the
+ * engine's `range` bins, so the UI does not teach a different convention from
+ * the one that actually runs.
+ *
+ * All three are strings so a half-typed `-` or `0.` survives editing, the same
+ * reason `peso` is a string.
+ */
+export interface Interval {
+  /** Lower bound, exclusive. Empty means unbounded below. */
+  from: string;
+  /** Upper bound, inclusive. Empty means unbounded above. */
+  to: string;
+  /** What values in this range become. Always a number. */
+  value: string;
+}
 
 /**
  * A node in the weighting tree. The engine's real config is richer and is
@@ -153,6 +182,12 @@ export interface ModelVariable {
   /** When true the variable rules a cell out instead of weighting it. */
   excluyente: boolean;
   normalizacion: Normalisation;
+  /**
+   * The ranges, in order. Only meaningful when `normalizacion` is
+   * `intervals`; kept on the variable rather than in a side table so one node
+   * carries everything about itself.
+   */
+  intervals?: Interval[];
   sub?: ModelVariable[];
 }
 

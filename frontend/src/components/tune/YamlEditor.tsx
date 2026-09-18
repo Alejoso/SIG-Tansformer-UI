@@ -8,8 +8,13 @@
  * file back without losing comments.
  */
 
-import { NORMALISATIONS, type ModelLine } from '../../lib/model';
-import type { ModelPath, Normalisation } from '../../types';
+import {
+  NORMALISATIONS,
+  NORMALISATION_LABELS,
+  intervalError,
+  type ModelLine,
+} from '../../lib/model';
+import type { Interval, ModelPath, Normalisation } from '../../types';
 import { Icon } from '../ui/Icon';
 import { ExcluyenteTip } from '../ui/InfoTip';
 
@@ -19,6 +24,9 @@ interface YamlEditorProps {
   onExcluyente: (path: ModelPath, value: boolean) => void;
   onNormalisation: (path: ModelPath, value: Normalisation) => void;
   onResolution: (value: string) => void;
+  onInterval: (path: ModelPath, index: number, field: keyof Interval, value: string) => void;
+  onAddInterval: (path: ModelPath) => void;
+  onRemoveInterval: (path: ModelPath, index: number) => void;
 }
 
 const isBadWeight = (value: string) => {
@@ -32,6 +40,9 @@ export function YamlEditor({
   onExcluyente,
   onNormalisation,
   onResolution,
+  onInterval,
+  onAddInterval,
+  onRemoveInterval,
 }: YamlEditorProps) {
   /** The value control for one line, chosen by what the line edits. */
   function renderValue(line: ModelLine) {
@@ -90,10 +101,74 @@ export function YamlEditor({
         >
           {NORMALISATIONS.map((option) => (
             <option key={option} value={option}>
-              {option}
+              {NORMALISATION_LABELS[option]}
             </option>
           ))}
         </select>
+      );
+    }
+
+    if (line.kind === 'interval' && target?.kind === 'interval') {
+      const { path, index, interval, canRemove, rowCount } = target;
+      const error = intervalError(interval, rowCount);
+      return (
+        <span className={`interval-row${error ? ' is-invalid' : ''}`}>
+          {/* Bounds read as (from, to] — exclusive lower, inclusive upper —
+              which is what the engine's range bins do. */}
+          <span className="interval-bracket">(</span>
+          <input
+            className="interval-input"
+            value={interval.from}
+            placeholder="−∞"
+            aria-label={`Interval ${index + 1} lower bound`}
+            onChange={(e) => onInterval(path, index, 'from', e.target.value)}
+          />
+          <span className="interval-sep">,</span>
+          <input
+            className="interval-input"
+            value={interval.to}
+            placeholder="+∞"
+            aria-label={`Interval ${index + 1} upper bound`}
+            onChange={(e) => onInterval(path, index, 'to', e.target.value)}
+          />
+          <span className="interval-bracket">]</span>
+
+          <span className="interval-arrow" aria-hidden="true">
+            →
+          </span>
+          <input
+            className="interval-input is-result"
+            value={interval.value}
+            placeholder="0"
+            aria-label={`Interval ${index + 1} result`}
+            onChange={(e) => onInterval(path, index, 'value', e.target.value)}
+          />
+
+          <button
+            type="button"
+            className="interval-btn"
+            aria-label={`Remove interval ${index + 1}`}
+            disabled={!canRemove}
+            // A transform with no rows is not a transform, so the last row
+            // stays put rather than leaving an empty table behind.
+            title={canRemove ? 'Remove this interval' : 'An interval transform needs at least one row'}
+            onClick={() => onRemoveInterval(path, index)}
+          >
+            <Icon name="close" size={11} strokeWidth={3} />
+          </button>
+
+          {error && <span className="interval-error">{error}</span>}
+        </span>
+      );
+    }
+
+    if (line.kind === 'add-interval' && target?.kind === 'add-interval') {
+      const { path } = target;
+      return (
+        <button type="button" className="interval-add" onClick={() => onAddInterval(path)}>
+          <Icon name="plus" size={11} strokeWidth={3} />
+          Add interval
+        </button>
       );
     }
 
@@ -121,8 +196,11 @@ export function YamlEditor({
             >
               {line.key}
             </span>
-            {/* Section headings are drawn bare, as in the design. */}
-            {line.kind !== 'section' && <span className="yaml-colon">:</span>}
+            {/* Section headings and interval rows are drawn bare. */}
+            {line.kind !== 'section' &&
+              line.kind !== 'add-interval' &&
+              line.kind !== 'interval' && <span className="yaml-colon">:</span>}
+            {line.kind === 'interval' && <span className="yaml-colon">.</span>}
             {renderValue(line)}
             {line.kind === 'section' && line.informative && (
               <span className="yaml-badge">informative</span>

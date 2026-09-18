@@ -167,8 +167,33 @@ uvicorn on its default port needs no extra config.
 - **deck.gl, react-map-gl and h3-js are no longer used** by the app now that
   the engine renders the map. They are still in `package.json`; drop them when
   you are sure nothing else wants them.
+- **Three transforms, no more.** `minmax` and `standard` (mean and standard
+  deviation) are plain selections. `intervals` carries a table of ranges, each
+  mapping to a number — which is also how a categorical result is expressed,
+  since a category is a number with a meaning attached.
+
+  Ranges are `(from, to]` — exclusive lower, inclusive upper — matching the
+  engine's `range` bins, and a blank bound means unbounded. `toYaml` writes
+  them the way the engine already does:
+
+  ```yaml
+  normalizacion: intervals
+  intervalos:
+    - [null, 0.2, 1]
+    - [0.2, 0.4, 2]
+    - [0.8, null, 5]
+  ```
+
+  Switching to `intervals` seeds five rows rather than an empty table; adding a
+  row continues the numbering and starts where the previous one ended, so it
+  arrives valid instead of pre-flagged. Switching away keeps the table, so
+  going back does not lose typed work. Validation covers each row on its own
+  plus the one cross-row trap — a range open at both ends alongside others,
+  which would silently swallow them. Full gap-and-overlap analysis is not
+  attempted.
+
 - **The model tree is deliberately small** — `key`, `peso`, `excluyente`,
-  `normalizacion`, `sub` — since the real config will change a lot. The YAML
+  `normalizacion`, `intervals`, `sub` — since the real config will change a lot. The YAML
   editor and the node diagram are two renderings of that one structure
   (`src/lib/model.ts`), so they cannot disagree.
 - **A weight of zero means "informative"**: the variable is carried to be

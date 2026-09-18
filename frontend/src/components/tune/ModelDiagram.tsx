@@ -12,7 +12,7 @@ import {
   DIAGRAM_CANVAS_WIDTH,
   DIAGRAM_ROOT_WIDTH,
 } from '../../lib/diagram';
-import { NORMALISATIONS } from '../../lib/model';
+import { NORMALISATIONS, NORMALISATION_LABELS } from '../../lib/model';
 import type { ModelConfig, ModelPath, Normalisation } from '../../types';
 import { Icon } from '../ui/Icon';
 import { ExcluyenteTip } from '../ui/InfoTip';
@@ -134,19 +134,30 @@ export function ModelDiagram({
               </button>
             </div>
 
+            {/* Stacked rather than side by side: "Standard scaler" does not
+                fit beside a chip in a 190px node. */}
+            <select
+              className="node-norm"
+              value={node.normalizacion}
+              aria-label={`${node.label} normalisation`}
+              onChange={(e) => onNormalisation(node.path, e.target.value as Normalisation)}
+            >
+              {NORMALISATIONS.map((option) => (
+                <option key={option} value={option}>
+                  {NORMALISATION_LABELS[option]}
+                </option>
+              ))}
+            </select>
+
             <div className="node-meta">
-              <select
-                className="node-norm"
-                value={node.normalizacion}
-                aria-label={`${node.label} normalisation`}
-                onChange={(e) => onNormalisation(node.path, e.target.value as Normalisation)}
-              >
-                {NORMALISATIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+              {/* The table itself lives in the editor pane — a 190px box is
+                  no place for it — but the count keeps the two views honest
+                  about each other. */}
+              {node.intervalCount > 0 && (
+                <span className="node-intervals" title="Ranges, edited in the YAML pane">
+                  {node.intervalCount}
+                </span>
+              )}
               <button
                 type="button"
                 className={`node-excl${node.excluyente ? ' is-on' : ''}`}

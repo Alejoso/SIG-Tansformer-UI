@@ -8,12 +8,16 @@
  */
 
 import type { ModelPath, ModelVariable } from '../types';
-import { isInformative, leafCount, totalLeaves } from './model';
+import { intervalsOf, isInformative, leafCount, totalLeaves } from './model';
 
-/** Vertical space reserved per leaf. */
-const SLOT = 112;
-/** Node box height, used to centre a box on its slot. */
-const NODE_HEIGHT = 100;
+/**
+ * Vertical space reserved per leaf, and the box height used to centre a node
+ * on its slot. Sized for the tallest node — label, weight row, transform
+ * select and the chips beneath — with enough gap that adjacent siblings do
+ * not touch.
+ */
+const SLOT = 152;
+const NODE_HEIGHT = 132;
 /** Horizontal distance between depth levels. */
 const COLUMN_WIDTH = 214;
 const NODE_WIDTH = 190;
@@ -31,6 +35,12 @@ export interface DiagramNode {
   excluyente: boolean;
   /** Weight is zero: carried for reference, not counted in the score. */
   informative: boolean;
+  /**
+   * How many ranges the interval transform has, or 0 when it uses another
+   * transform. The node is too small to edit a table, so it reports the count
+   * and the editor pane owns the rows.
+   */
+  intervalCount: number;
   depth: number;
   left: number;
   top: number;
@@ -80,6 +90,7 @@ export function buildDiagram(variables: ModelVariable[]): Diagram {
         normalizacion: variable.normalizacion,
         excluyente: variable.excluyente,
         informative: isInformative(variable),
+        intervalCount: variable.normalizacion === 'intervals' ? intervalsOf(variable).length : 0,
         depth,
         left,
         top: centre - NODE_HEIGHT / 2,
