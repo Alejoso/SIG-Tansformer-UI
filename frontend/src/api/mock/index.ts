@@ -316,9 +316,9 @@ export async function validateModel(
 
   const walk = (list: ModelConfig['variables'], trail: string) => {
     for (const v of list) {
-      const weight = Number.parseFloat(v.peso);
+      const weight = Number.parseFloat(v.weight);
       if (Number.isNaN(weight) || weight < 0 || weight > 1) {
-        errors.push(`${trail}${v.key}: peso must be between 0 and 1`);
+        errors.push(`${trail}${v.key}: weight must be between 0 and 1`);
       }
       if (v.sub?.length) walk(v.sub, `${trail}${v.key}.`);
     }

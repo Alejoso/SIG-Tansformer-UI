@@ -12,10 +12,10 @@ import {
   DIAGRAM_CANVAS_WIDTH,
   DIAGRAM_ROOT_WIDTH,
 } from '../../lib/diagram';
-import { NORMALISATIONS, NORMALISATION_LABELS } from '../../lib/model';
-import type { ModelConfig, ModelPath, Normalisation } from '../../types';
+import { NORMALIZATIONS, NORMALIZATION_LABELS } from '../../lib/model';
+import type { ModelConfig, ModelPath, Normalization } from '../../types';
 import { Icon } from '../ui/Icon';
-import { ExcluyenteTip } from '../ui/InfoTip';
+import { ExclusiveTip } from '../ui/InfoTip';
 
 /** Padding subtracted when fitting the diagram to the pane. */
 const FIT_PADDING = 40;
@@ -29,8 +29,8 @@ interface ModelDiagramProps {
   weightSum: number;
   onWeight: (path: ModelPath, value: string) => void;
   onBump: (path: ModelPath, delta: number) => void;
-  onExcluyente: (path: ModelPath, value: boolean) => void;
-  onNormalisation: (path: ModelPath, value: Normalisation) => void;
+  onExclusive: (path: ModelPath, value: boolean) => void;
+  onNormalization: (path: ModelPath, value: Normalization) => void;
 }
 
 export function ModelDiagram({
@@ -38,8 +38,8 @@ export function ModelDiagram({
   weightSum,
   onWeight,
   onBump,
-  onExcluyente,
-  onNormalisation,
+  onExclusive,
+  onNormalization,
 }: ModelDiagramProps) {
   const pane = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(0.86);
@@ -101,73 +101,95 @@ export function ModelDiagram({
             key={node.id}
             className={`node${node.depth > 0 ? ' depth-deep' : ''}${
               node.informative ? ' is-informative' : ''
-            }`}
+            }${node.exclusive ? ' is-exclusive' : ''}`}
             style={{ left: node.left, top: node.top, width: node.width }}
           >
             <div className="node-label">
-              {node.label}
+              {/* The name truncates, the badge does not — it was being
+                  clipped by the label's ellipsis. */}
+              <span className="node-label-name">{node.label}</span>
               {node.informative && <span className="node-badge">informative</span>}
             </div>
 
-            <div className="node-weight">
-              <button
-                type="button"
-                className="btn btn-icon btn-secondary node-step"
-                aria-label={`Decrease ${node.label} weight`}
-                onClick={() => onBump(node.path, -0.02)}
-              >
-                <Icon name="minus" size={12} strokeWidth={3} />
-              </button>
-              <input
-                className={`node-input${Number.isNaN(Number.parseFloat(node.weight)) ? ' is-invalid' : ''}`}
-                value={node.weight}
-                aria-label={`${node.label} weight`}
-                onChange={(e) => onWeight(node.path, e.target.value)}
-              />
-              <button
-                type="button"
-                className="btn btn-icon btn-secondary node-step"
-                aria-label={`Increase ${node.label} weight`}
-                onClick={() => onBump(node.path, 0.02)}
-              >
-                <Icon name="plus" size={12} strokeWidth={3} />
-              </button>
-            </div>
+            {node.exclusive ? (
+              /* An exclusive variable is a yes-or-no rule, not a weighted
+                 input: there is no weight and no transform to set, so only
+                 the flag and its explanation are shown. */
+              <div className="node-meta node-meta-exclusive">
+                <button
+                  type="button"
+                  className="node-excl is-on"
+                  aria-pressed
+                  onClick={() => onExclusive(node.path, false)}
+                >
+                  excludes
+                </button>
+                <ExclusiveTip />
+              </div>
+            ) : (
+              <>
+                <div className="node-weight">
+                  <button
+                    type="button"
+                    className="btn btn-icon btn-secondary node-step"
+                    aria-label={`Decrease ${node.label} weight`}
+                    onClick={() => onBump(node.path, -0.02)}
+                  >
+                    <Icon name="minus" size={12} strokeWidth={3} />
+                  </button>
+                  <input
+                    className={`node-input${
+                      Number.isNaN(Number.parseFloat(node.weight)) ? ' is-invalid' : ''
+                    }`}
+                    value={node.weight}
+                    aria-label={`${node.label} weight`}
+                    onChange={(e) => onWeight(node.path, e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-icon btn-secondary node-step"
+                    aria-label={`Increase ${node.label} weight`}
+                    onClick={() => onBump(node.path, 0.02)}
+                  >
+                    <Icon name="plus" size={12} strokeWidth={3} />
+                  </button>
+                </div>
 
-            {/* Stacked rather than side by side: "Standard scaler" does not
-                fit beside a chip in a 190px node. */}
-            <select
-              className="node-norm"
-              value={node.normalizacion}
-              aria-label={`${node.label} normalisation`}
-              onChange={(e) => onNormalisation(node.path, e.target.value as Normalisation)}
-            >
-              {NORMALISATIONS.map((option) => (
-                <option key={option} value={option}>
-                  {NORMALISATION_LABELS[option]}
-                </option>
-              ))}
-            </select>
+                {/* Stacked rather than side by side: "Standard scaler" does
+                    not fit beside a chip in a 190px node. */}
+                <select
+                  className="node-norm"
+                  value={node.normalization}
+                  aria-label={`${node.label} normalization`}
+                  onChange={(e) => onNormalization(node.path, e.target.value as Normalization)}
+                >
+                  {NORMALIZATIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {NORMALIZATION_LABELS[option]}
+                    </option>
+                  ))}
+                </select>
 
-            <div className="node-meta">
-              {/* The table itself lives in the editor pane — a 190px box is
-                  no place for it — but the count keeps the two views honest
-                  about each other. */}
-              {node.intervalCount > 0 && (
-                <span className="node-intervals" title="Ranges, edited in the YAML pane">
-                  {node.intervalCount}
-                </span>
-              )}
-              <button
-                type="button"
-                className={`node-excl${node.excluyente ? ' is-on' : ''}`}
-                aria-pressed={node.excluyente}
-                onClick={() => onExcluyente(node.path, !node.excluyente)}
-              >
-                {node.excluyente ? 'excludes' : 'weighted'}
-              </button>
-              {node.excluyente && <ExcluyenteTip />}
-            </div>
+                <div className="node-meta">
+                  {/* The table itself lives in the editor pane — a 190px box
+                      is no place for it — but the count keeps the two views
+                      honest about each other. */}
+                  {node.intervalCount > 0 && (
+                    <span className="node-intervals" title="Ranges, edited in the YAML pane">
+                      {node.intervalCount}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="node-excl"
+                    aria-pressed={false}
+                    onClick={() => onExclusive(node.path, true)}
+                  >
+                    weighted
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         ))}
       </div>

@@ -10,7 +10,7 @@ import {
   removeInterval,
   setField,
   setInterval as setIntervalField,
-  setNormalisation,
+  setNormalization,
   toLines,
   weightSum,
 } from '../../lib/model';
@@ -20,7 +20,7 @@ import type {
   ModelConfig,
   ModelExample,
   ModelPath,
-  Normalisation,
+  Normalization,
 } from '../../types';
 import { ApplyDoneDialog, ApplyProgressDialog } from '../tune/ApplyDialogs';
 import { ExamplesDialog } from '../tune/ExamplesDialog';
@@ -71,21 +71,21 @@ export function TuneScreen() {
   }, []);
 
   const onWeight = useCallback(
-    (path: ModelPath, value: string) => edit((m) => setField(m, path, 'peso', value)),
+    (path: ModelPath, value: string) => edit((m) => setField(m, path, 'weight', value)),
     [edit],
   );
   const onBump = useCallback(
     (path: ModelPath, delta: number) => edit((m) => bumpWeight(m, path, delta)),
     [edit],
   );
-  const onExcluyente = useCallback(
-    (path: ModelPath, value: boolean) => edit((m) => setField(m, path, 'excluyente', value)),
+  const onExclusive = useCallback(
+    (path: ModelPath, value: boolean) => edit((m) => setField(m, path, 'exclusive', value)),
     [edit],
   );
-  // Goes through setNormalisation rather than setField so switching to
+  // Goes through setNormalization rather than setField so switching to
   // `intervals` seeds a starting table instead of an empty one.
-  const onNormalisation = useCallback(
-    (path: ModelPath, value: Normalisation) => edit((m) => setNormalisation(m, path, value)),
+  const onNormalization = useCallback(
+    (path: ModelPath, value: Normalization) => edit((m) => setNormalization(m, path, value)),
     [edit],
   );
   const onInterval = useCallback(
@@ -193,9 +193,10 @@ export function TuneScreen() {
           <h1>Tune the model</h1>
           {showHints && (
             <p className="muted">
-              Edit on either side — the text and the diagram always show the same thing. Each
-              variable has a weight, its own normalisation, an optional exclusion rule, and can hold
-              nested subvariables. Top-level weights should add up to about 1.
+              Edit on either side — the text and the diagram always show the same thing. A
+              variable either carries a weight and a normalization, or is exclusive and rules a
+              hexagon out instead — never both. Any variable can hold nested subvariables. The
+              weights that are in play should add up to about 1.
             </p>
           )}
         </div>
@@ -239,8 +240,8 @@ export function TuneScreen() {
         <YamlEditor
           lines={lines}
           onWeight={onWeight}
-          onExcluyente={onExcluyente}
-          onNormalisation={onNormalisation}
+          onExclusive={onExclusive}
+          onNormalization={onNormalization}
           onResolution={onResolution}
           onInterval={onInterval}
           onAddInterval={onAddInterval}
@@ -251,8 +252,8 @@ export function TuneScreen() {
           weightSum={sum}
           onWeight={onWeight}
           onBump={onBump}
-          onExcluyente={onExcluyente}
-          onNormalisation={onNormalisation}
+          onExclusive={onExclusive}
+          onNormalization={onNormalization}
         />
       </div>
 

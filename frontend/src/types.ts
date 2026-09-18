@@ -73,7 +73,7 @@ export interface ProcessingProgress {
 
 /**
  * Whether the map draws each cell's value in the variable's own units or
- * after normalisation.
+ * after normalization.
  *
  * `raw` is the value as stored — metres per second, kilometres, percent.
  * `normalized` is that value put on a common 0-1 scale, which is what makes
@@ -149,7 +149,7 @@ export interface LayerTree {
  *   how a categorical result is expressed, since a category is just a number
  *   with a meaning attached.
  */
-export type Normalisation = 'minmax' | 'standard' | 'intervals';
+export type Normalization = 'minmax' | 'standard' | 'intervals';
 
 /**
  * One row of an interval transform: every value in the range becomes `value`.
@@ -159,7 +159,7 @@ export type Normalisation = 'minmax' | 'standard' | 'intervals';
  * the one that actually runs.
  *
  * All three are strings so a half-typed `-` or `0.` survives editing, the same
- * reason `peso` is a string.
+ * reason `weight` is a string.
  */
 export interface Interval {
   /** Lower bound, exclusive. Empty means unbounded below. */
@@ -173,17 +173,17 @@ export interface Interval {
 /**
  * A node in the weighting tree. The engine's real config is richer and is
  * expected to change a lot, so this stays deliberately small: a name, a
- * weight, an exclusion flag, a normalisation, and children.
+ * weight, an exclusion flag, a normalization, and children.
  */
 export interface ModelVariable {
   key: string;
   /** Weight, kept as a string so a half-typed `0.` survives editing. */
-  peso: string;
+  weight: string;
   /** When true the variable rules a cell out instead of weighting it. */
-  excluyente: boolean;
-  normalizacion: Normalisation;
+  exclusive: boolean;
+  normalization: Normalization;
   /**
-   * The ranges, in order. Only meaningful when `normalizacion` is
+   * The ranges, in order. Only meaningful when `normalization` is
    * `intervals`; kept on the variable rather than in a side table so one node
    * carries everything about itself.
    */
@@ -195,7 +195,7 @@ export interface ModelConfig {
   project: string;
   model: string;
   objective: string;
-  /** H3 resolution, as a string for the same reason as `peso`. */
+  /** H3 resolution, as a string for the same reason as `weight`. */
   resolution: string;
   variables: ModelVariable[];
 }

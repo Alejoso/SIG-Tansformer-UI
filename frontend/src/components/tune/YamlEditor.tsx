@@ -9,20 +9,20 @@
  */
 
 import {
-  NORMALISATIONS,
-  NORMALISATION_LABELS,
+  NORMALIZATIONS,
+  NORMALIZATION_LABELS,
   intervalError,
   type ModelLine,
 } from '../../lib/model';
-import type { Interval, ModelPath, Normalisation } from '../../types';
+import type { Interval, ModelPath, Normalization } from '../../types';
 import { Icon } from '../ui/Icon';
-import { ExcluyenteTip } from '../ui/InfoTip';
+import { ExclusiveTip } from '../ui/InfoTip';
 
 interface YamlEditorProps {
   lines: ModelLine[];
   onWeight: (path: ModelPath, value: string) => void;
-  onExcluyente: (path: ModelPath, value: boolean) => void;
-  onNormalisation: (path: ModelPath, value: Normalisation) => void;
+  onExclusive: (path: ModelPath, value: boolean) => void;
+  onNormalization: (path: ModelPath, value: Normalization) => void;
   onResolution: (value: string) => void;
   onInterval: (path: ModelPath, index: number, field: keyof Interval, value: string) => void;
   onAddInterval: (path: ModelPath) => void;
@@ -37,8 +37,8 @@ const isBadWeight = (value: string) => {
 export function YamlEditor({
   lines,
   onWeight,
-  onExcluyente,
-  onNormalisation,
+  onExclusive,
+  onNormalization,
   onResolution,
   onInterval,
   onAddInterval,
@@ -61,7 +61,7 @@ export function YamlEditor({
       );
     }
 
-    if (line.kind === 'text' && target?.kind === 'peso') {
+    if (line.kind === 'text' && target?.kind === 'weight') {
       const { path } = target;
       return (
         <input
@@ -73,7 +73,7 @@ export function YamlEditor({
       );
     }
 
-    if (line.kind === 'bool' && target?.kind === 'excluyente') {
+    if (line.kind === 'bool' && target?.kind === 'exclusive') {
       const { path, current } = target;
       return (
         <>
@@ -81,27 +81,27 @@ export function YamlEditor({
             type="button"
             className={`yaml-bool${current ? ' is-on' : ''}`}
             aria-pressed={current}
-            onClick={() => onExcluyente(path, !current)}
+            onClick={() => onExclusive(path, !current)}
           >
             {line.value}
           </button>
-          {current && <ExcluyenteTip placement="bottom" />}
+          {current && <ExclusiveTip placement="bottom" />}
         </>
       );
     }
 
-    if (line.kind === 'enum' && target?.kind === 'normalizacion') {
+    if (line.kind === 'enum' && target?.kind === 'normalization') {
       const { path } = target;
       return (
         <select
           className="yaml-select"
           value={line.value}
-          aria-label="Normalisation"
-          onChange={(e) => onNormalisation(path, e.target.value as Normalisation)}
+          aria-label="Normalization"
+          onChange={(e) => onNormalization(path, e.target.value as Normalization)}
         >
-          {NORMALISATIONS.map((option) => (
+          {NORMALIZATIONS.map((option) => (
             <option key={option} value={option}>
-              {NORMALISATION_LABELS[option]}
+              {NORMALIZATION_LABELS[option]}
             </option>
           ))}
         </select>

@@ -31,8 +31,8 @@ export interface DiagramNode {
   path: ModelPath;
   label: string;
   weight: string;
-  normalizacion: ModelVariable['normalizacion'];
-  excluyente: boolean;
+  normalization: ModelVariable['normalization'];
+  exclusive: boolean;
   /** Weight is zero: carried for reference, not counted in the score. */
   informative: boolean;
   /**
@@ -86,11 +86,11 @@ export function buildDiagram(variables: ModelVariable[]): Diagram {
         id: here.join('-'),
         path: here,
         label: variable.key.replace(/_/g, ' '),
-        weight: variable.peso,
-        normalizacion: variable.normalizacion,
-        excluyente: variable.excluyente,
+        weight: variable.weight,
+        normalization: variable.normalization,
+        exclusive: variable.exclusive,
         informative: isInformative(variable),
-        intervalCount: variable.normalizacion === 'intervals' ? intervalsOf(variable).length : 0,
+        intervalCount: variable.normalization === 'intervals' ? intervalsOf(variable).length : 0,
         depth,
         left,
         top: centre - NODE_HEIGHT / 2,

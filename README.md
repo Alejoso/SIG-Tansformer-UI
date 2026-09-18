@@ -177,8 +177,8 @@ uvicorn on its default port needs no extra config.
   them the way the engine already does:
 
   ```yaml
-  normalizacion: intervals
-  intervalos:
+  normalization: intervals
+  intervals:
     - [null, 0.2, 1]
     - [0.2, 0.4, 2]
     - [0.8, null, 5]
@@ -192,8 +192,16 @@ uvicorn on its default port needs no extra config.
   which would silently swallow them. Full gap-and-overlap analysis is not
   attempted.
 
-- **The model tree is deliberately small** — `key`, `peso`, `excluyente`,
-  `normalizacion`, `intervals`, `sub` — since the real config will change a lot. The YAML
+- **The config is English throughout** — `weight`, `exclusive`,
+  `normalization`, `intervals`, `subvariables`. The keys were Spanish in the
+  original mockup.
+- **An exclusive variable has no weight and no transform.** It rules a hexagon
+  out rather than contributing a share of the score, so those fields are not
+  hidden but absent: nothing meaningful could go in them. They are left out of
+  the weight sum and of validation, and the value is kept while hidden so
+  toggling back does not lose it.
+- **The model tree is deliberately small** — `key`, `weight`, `exclusive`,
+  `normalization`, `intervals`, `sub` — since the real config will change a lot. The YAML
   editor and the node diagram are two renderings of that one structure
   (`src/lib/model.ts`), so they cannot disagree.
 - **A weight of zero means "informative"**: the variable is carried to be

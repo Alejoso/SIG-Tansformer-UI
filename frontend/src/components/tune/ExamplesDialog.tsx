@@ -36,10 +36,10 @@ export function ExamplesDialog({ onClose, onInsert }: ExamplesDialogProps) {
             Example structures
           </div>
           <p className="dialog-body" style={{ margin: '4px 0 0', maxWidth: 560 }}>
-            This is how a model is written. Every variable carries a <strong>peso</strong> (weight),
-            can be <strong>excluyente</strong> — it rules the record out instead of just weighting
-            it — has its own <strong>normalizacion</strong>, and may hold nested{' '}
-            <strong>subvariables</strong>.
+            This is how a model is written. Every variable carries a <strong>weight</strong>, or
+            is <strong>exclusive</strong> — ruling a record out instead of being weighted at all.
+            A weighted variable has its own <strong>normalization</strong>, and any variable may
+            hold nested <strong>subvariables</strong>.
           </p>
         </div>
         <button

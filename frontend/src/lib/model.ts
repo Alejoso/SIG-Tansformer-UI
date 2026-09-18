@@ -6,12 +6,12 @@
  * and both views re-render from the result.
  */
 
-import type { Interval, ModelConfig, ModelPath, ModelVariable, Normalisation } from '../types';
+import type { Interval, ModelConfig, ModelPath, ModelVariable, Normalization } from '../types';
 
-export const NORMALISATIONS: Normalisation[] = ['minmax', 'standard', 'intervals'];
+export const NORMALIZATIONS: Normalization[] = ['minmax', 'standard', 'intervals'];
 
 /** What each transform is called in the interface. */
-export const NORMALISATION_LABELS: Record<Normalisation, string> = {
+export const NORMALIZATION_LABELS: Record<Normalization, string> = {
   minmax: 'Min-max',
   standard: 'Standard scaler',
   intervals: 'Intervals',
@@ -47,7 +47,7 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 /** Walk to the node at `path`; the root stands in as a virtual parent. */
 export function nodeAt(variables: ModelVariable[], path: ModelPath): ModelVariable {
-  let current: ModelVariable = { key: '', peso: '0', excluyente: false, normalizacion: 'minmax', sub: variables };
+  let current: ModelVariable = { key: '', weight: '0', exclusive: false, normalization: 'minmax', sub: variables };
   for (const index of path) {
     const children = current.sub;
     if (!children?.[index]) throw new Error(`No model node at path ${path.join('.')}`);
@@ -70,10 +70,10 @@ export function setField<K extends keyof ModelVariable>(
 
 /** Nudge a weight by `delta`, clamped to [0, 1] and kept at two decimals. */
 export function bumpWeight(model: ModelConfig, path: ModelPath, delta: number): ModelConfig {
-  const current = Number.parseFloat(nodeAt(model.variables, path).peso);
+  const current = Number.parseFloat(nodeAt(model.variables, path).weight);
   const base = Number.isNaN(current) ? 0 : current;
   const next = Math.max(0, Math.min(1, base + delta)).toFixed(2);
-  return setField(model, path, 'peso', next);
+  return setField(model, path, 'weight', next);
 }
 
 /**
@@ -83,15 +83,15 @@ export function bumpWeight(model: ModelConfig, path: ModelPath, delta: number): 
  * editor never shows an empty transform. Moving away keeps whatever table was
  * there — switching back should not lose work someone typed.
  */
-export function setNormalisation(
+export function setNormalization(
   model: ModelConfig,
   path: ModelPath,
-  normalizacion: Normalisation,
+  normalization: Normalization,
 ): ModelConfig {
   const next = clone(model);
   const node = nodeAt(next.variables, path);
-  node.normalizacion = normalizacion;
-  if (normalizacion === 'intervals' && !node.intervals?.length) {
+  node.normalization = normalization;
+  if (normalization === 'intervals' && !node.intervals?.length) {
     node.intervals = defaultIntervals();
   }
   return next;
@@ -182,14 +182,22 @@ export function intervalError(interval: Interval, rowCount = 1): string | null {
 
 /** True when every interval on the variable is well-formed. */
 export function intervalsValid(variable: ModelVariable): boolean {
-  if (variable.normalizacion !== 'intervals') return true;
+  if (variable.normalization !== 'intervals') return true;
   const intervals = intervalsOf(variable);
   return intervals.length > 0 && intervals.every((i) => intervalError(i, intervals.length) === null);
 }
 
-/** Top-level weights only — the figure the "weights add to" chip shows. */
+/**
+ * Top-level weights only — the figure the "weights add to" chip shows.
+ *
+ * Exclusive variables are left out: they rule a record out rather than
+ * contributing a share of the score, so counting them would make the total
+ * look wrong whenever one exists.
+ */
 export function weightSum(model: ModelConfig): number {
-  return model.variables.reduce((total, v) => total + (Number.parseFloat(v.peso) || 0), 0);
+  return model.variables
+    .filter((v) => !v.exclusive)
+    .reduce((total, v) => total + (Number.parseFloat(v.weight) || 0), 0);
 }
 
 /**
@@ -199,7 +207,10 @@ export function weightSum(model: ModelConfig): number {
  * reads as a deliberate choice rather than an unfinished edit.
  */
 export function isInformative(variable: ModelVariable): boolean {
-  return Number.parseFloat(variable.peso) === 0;
+  // An exclusive variable has no weight at all, so "weight of zero" says
+  // nothing about it.
+  if (variable.exclusive) return false;
+  return Number.parseFloat(variable.weight) === 0;
 }
 
 /** How many leaves sit under a node — drives the diagram's vertical spacing. */
@@ -219,9 +230,13 @@ export function totalLeaves(variables: ModelVariable[]): number {
 export function isValid(model: ModelConfig): boolean {
   const ok = (list: ModelVariable[]): boolean =>
     list.every((v) => {
-      const weight = Number.parseFloat(v.peso);
-      if (Number.isNaN(weight) || weight < 0 || weight > 1) return false;
-      if (!intervalsValid(v)) return false;
+      // An exclusive variable has neither a weight nor a transform, so there
+      // is nothing on it to be invalid.
+      if (!v.exclusive) {
+        const weight = Number.parseFloat(v.weight);
+        if (Number.isNaN(weight) || weight < 0 || weight > 1) return false;
+        if (!intervalsValid(v)) return false;
+      }
       return v.sub?.length ? ok(v.sub) : true;
     });
   return ok(model.variables) && /^\d+$/.test(model.resolution);
@@ -240,9 +255,11 @@ export function invalidReason(model: ModelConfig): 'weights' | 'intervals' | 're
 
   const walk = (list: ModelVariable[]) => {
     for (const v of list) {
-      const weight = Number.parseFloat(v.peso);
-      if (Number.isNaN(weight) || weight < 0 || weight > 1) badWeight = true;
-      if (!intervalsValid(v)) badInterval = true;
+      if (!v.exclusive) {
+        const weight = Number.parseFloat(v.weight);
+        if (Number.isNaN(weight) || weight < 0 || weight > 1) badWeight = true;
+        if (!intervalsValid(v)) badInterval = true;
+      }
       if (v.sub?.length) walk(v.sub);
     }
   };
@@ -278,9 +295,9 @@ export function appendVariables(
 /** What an editable line writes back to. */
 export type LineTarget =
   | { kind: 'resolution' }
-  | { kind: 'peso'; path: ModelPath }
-  | { kind: 'excluyente'; path: ModelPath; current: boolean }
-  | { kind: 'normalizacion'; path: ModelPath }
+  | { kind: 'weight'; path: ModelPath }
+  | { kind: 'exclusive'; path: ModelPath; current: boolean }
+  | { kind: 'normalization'; path: ModelPath }
   | {
       kind: 'interval';
       path: ModelPath;
@@ -298,7 +315,7 @@ export interface ModelLine {
   /** `section` lines are a key with no value, e.g. `variables:`. */
   kind: 'section' | 'plain' | 'text' | 'bool' | 'enum' | 'interval' | 'add-interval';
   value?: string;
-  /** Set on a variable's own line and its `peso`: the weight is zero. */
+  /** Set on a variable's own line and its `weight`: the weight is zero. */
   informative?: boolean;
   target?: LineTarget;
 }
@@ -327,34 +344,44 @@ export function toLines(model: ModelConfig): ModelLine[] {
     list.forEach((variable, index) => {
       const here = [...path, index];
       push({ indent, key: variable.key, kind: 'section', informative: isInformative(variable) });
+
+      // An exclusive variable is a yes-or-no rule, not a weighted input, so
+      // the weight and the transform are not hidden but absent: there is
+      // nothing meaningful to put in them.
+      if (!variable.exclusive) {
+        push({
+          indent: indent + 1,
+          key: 'weight',
+          kind: 'text',
+          value: variable.weight,
+          informative: isInformative(variable),
+          target: { kind: 'weight', path: here },
+        });
+      }
+
       push({
         indent: indent + 1,
-        key: 'peso',
-        kind: 'text',
-        value: variable.peso,
-        informative: isInformative(variable),
-        target: { kind: 'peso', path: here },
-      });
-      push({
-        indent: indent + 1,
-        key: 'excluyente',
+        key: 'exclusive',
         kind: 'bool',
-        value: variable.excluyente ? 'true' : 'false',
-        target: { kind: 'excluyente', path: here, current: variable.excluyente },
+        value: variable.exclusive ? 'true' : 'false',
+        target: { kind: 'exclusive', path: here, current: variable.exclusive },
       });
-      push({
-        indent: indent + 1,
-        key: 'normalizacion',
-        kind: 'enum',
-        value: variable.normalizacion,
-        target: { kind: 'normalizacion', path: here },
-      });
+
+      if (!variable.exclusive) {
+        push({
+          indent: indent + 1,
+          key: 'normalization',
+          kind: 'enum',
+          value: variable.normalization,
+          target: { kind: 'normalization', path: here },
+        });
+      }
       // The ranges belong to the variable, so they are drawn under it as
       // nested lines rather than hidden behind a dialog — this pane is the
       // config as text, and the ranges are part of the config.
-      if (variable.normalizacion === 'intervals') {
+      if (!variable.exclusive && variable.normalization === 'intervals') {
         const intervals = intervalsOf(variable);
-        push({ indent: indent + 1, key: 'intervalos', kind: 'section' });
+        push({ indent: indent + 1, key: 'intervals', kind: 'section' });
         intervals.forEach((interval, index) => {
           push({
             indent: indent + 2,
@@ -408,11 +435,11 @@ export function toYaml(model: ModelConfig): string {
   const emit = (list: ModelVariable[], pad: string) => {
     for (const v of list) {
       out.push(`${pad}${v.key}:`);
-      out.push(`${pad}  peso: ${v.peso}`);
-      out.push(`${pad}  excluyente: ${v.excluyente}`);
-      out.push(`${pad}  normalizacion: ${v.normalizacion}`);
-      if (v.normalizacion === 'intervals') {
-        out.push(`${pad}  intervalos:`);
+      if (!v.exclusive) out.push(`${pad}  weight: ${v.weight}`);
+      out.push(`${pad}  exclusive: ${v.exclusive}`);
+      if (!v.exclusive) out.push(`${pad}  normalization: ${v.normalization}`);
+      if (!v.exclusive && v.normalization === 'intervals') {
+        out.push(`${pad}  intervals:`);
         for (const interval of intervalsOf(v)) {
           // `null` for an open end, which is how the engine writes its bins.
           const from = interval.from.trim() === '' ? 'null' : interval.from.trim();

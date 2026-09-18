@@ -52,10 +52,10 @@ export function InfoTip({ children, label, placement = 'top' }: InfoTipProps) {
 }
 
 /**
- * The one explanation of what `excluyente` requires of the underlying data.
+ * The one explanation of what `exclusive` requires of the underlying data.
  * Shared so the YAML editor and the diagram cannot drift apart on it.
  */
-export function ExcluyenteTip({ placement = 'top' }: { placement?: 'top' | 'bottom' }) {
+export function ExclusiveTip({ placement = 'top' }: { placement?: 'top' | 'bottom' }) {
   return (
     <InfoTip label="About exclusive variables" placement={placement}>
       An exclusive variable rules a hexagon out instead of weighting it, so its

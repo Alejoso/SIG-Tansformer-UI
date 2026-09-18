@@ -174,14 +174,23 @@
 }
 
 .node-label {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
   font-size: 11.5px;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--color-accent-800);
 }
+/* Only the name gives way; the badge beside it keeps its full width. */
+.node-label-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-badge { flex: none; }
 .node.depth-deep .node-label { color: var(--color-accent-2-900); }
 
 .node-weight { display: flex; align-items: center; gap: 6px; }
@@ -434,3 +443,6 @@
   background: var(--color-accent-200);
   color: var(--color-accent-900);
 }
+
+/* An exclusive node has only its flag, so it needs no extra breathing room. */
+.node-meta-exclusive { justify-content: flex-start; }
