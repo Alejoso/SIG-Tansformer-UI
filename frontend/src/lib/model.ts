@@ -48,6 +48,16 @@ export function weightSum(model: ModelConfig): number {
   return model.variables.reduce((total, v) => total + (Number.parseFloat(v.peso) || 0), 0);
 }
 
+/**
+ * A weight of zero means the variable does not influence the score at all —
+ * it is carried along to be looked at on the map, not to be counted. The UI
+ * calls these *informative* and tints them differently, so a zero weight
+ * reads as a deliberate choice rather than an unfinished edit.
+ */
+export function isInformative(variable: ModelVariable): boolean {
+  return Number.parseFloat(variable.peso) === 0;
+}
+
 /** How many leaves sit under a node — drives the diagram's vertical spacing. */
 export function leafCount(variable: ModelVariable): number {
   if (!variable.sub?.length) return 1;
@@ -107,6 +117,8 @@ export interface ModelLine {
   /** `section` lines are a key with no value, e.g. `variables:`. */
   kind: 'section' | 'plain' | 'text' | 'bool' | 'enum';
   value?: string;
+  /** Set on a variable's own line and its `peso`: the weight is zero. */
+  informative?: boolean;
   target?: LineTarget;
 }
 
@@ -133,8 +145,15 @@ export function toLines(model: ModelConfig): ModelLine[] {
   const emit = (list: ModelVariable[], path: ModelPath, indent: number) => {
     list.forEach((variable, index) => {
       const here = [...path, index];
-      push({ indent, key: variable.key, kind: 'section' });
-      push({ indent: indent + 1, key: 'peso', kind: 'text', value: variable.peso, target: { kind: 'peso', path: here } });
+      push({ indent, key: variable.key, kind: 'section', informative: isInformative(variable) });
+      push({
+        indent: indent + 1,
+        key: 'peso',
+        kind: 'text',
+        value: variable.peso,
+        informative: isInformative(variable),
+        target: { kind: 'peso', path: here },
+      });
       push({
         indent: indent + 1,
         key: 'excluyente',

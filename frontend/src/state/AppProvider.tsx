@@ -9,7 +9,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [screen, setScreen] = useState<Screen>('projects');
   const [project, setProject] = useState<Project | null>(null);
   const [showHints, setShowHints] = useState(true);
-  const [mapView, setMapView] = useState<MapView>({ mode: 'raw', variableId: null });
+  const [mapView, setMapView] = useState<MapView>({ mode: 'input', scale: 'raw', variableId: null });
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -17,7 +17,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const openProject = useCallback((next: Project, target: Screen) => {
     setProject(next);
-    setMapView({ mode: 'raw', variableId: null });
+    setMapView({ mode: 'input', scale: 'raw', variableId: null });
     setScreen(target);
   }, []);
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import {
@@ -9,7 +9,8 @@ import {
   toLines,
   weightSum,
 } from '../../lib/model';
-import type { ModelConfig, ModelExample, ModelPath, Normalisation } from '../../types';
+import type { ApplyProgress, ModelConfig, ModelExample, ModelPath, Normalisation } from '../../types';
+import { ApplyDoneDialog, ApplyProgressDialog } from '../tune/ApplyDialogs';
 import { ExamplesDialog } from '../tune/ExamplesDialog';
 import { ModelDiagram } from '../tune/ModelDiagram';
 import { YamlEditor } from '../tune/YamlEditor';
@@ -24,6 +25,10 @@ export function TuneScreen() {
   const [applied, setApplied] = useState(true);
   const [busy, setBusy] = useState(false);
   const [showExamples, setShowExamples] = useState(false);
+  /** Non-null while the apply run is in flight; drives the loading dialog. */
+  const [applyProgress, setApplyProgress] = useState<ApplyProgress | null>(null);
+  const [applyDone, setApplyDone] = useState<number | null>(null);
+  const unwatchApply = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -38,6 +43,9 @@ export function TuneScreen() {
       live = false;
     };
   }, [projectId]);
+
+  // Never leave the apply stream open behind us.
+  useEffect(() => () => unwatchApply.current?.(), []);
 
   /**
    * Every edit goes through here: it replaces the model and marks it dirty.
@@ -92,19 +100,37 @@ export function TuneScreen() {
     }
   };
 
+  /**
+   * Apply runs the model. It opens a loading dialog naming each variable as
+   * the engine works through it, then a confirmation — rather than jumping
+   * straight to the map, which gave no sign anything had happened.
+   */
   const apply = async () => {
     if (!model || !valid) return;
     setBusy(true);
-    try {
-      await api.applyModel(projectId, model);
-      setSaved(true);
-      setApplied(true);
-      // Land on the score layer, which is what the new weights just changed.
-      setMapView({ mode: 'model', variableId: 'score' });
-      goTo('map');
-    } finally {
+    await api.applyModel(projectId, model);
+    setSaved(true);
+    setApplied(true);
+    setApplyProgress({ phase: 'running', variable: '', index: 0, total: 0 });
+
+    unwatchApply.current = api.watchModelApply(projectId, model, (tick) => {
+      if (tick.phase !== 'done') {
+        setApplyProgress(tick);
+        return;
+      }
+      setApplyProgress(null);
+      setApplyDone(tick.total);
       setBusy(false);
-    }
+      unwatchApply.current?.();
+      unwatchApply.current = null;
+    });
+  };
+
+  const viewMap = () => {
+    setApplyDone(null);
+    // Land on the score layer, which is what the new weights just changed.
+    setMapView({ mode: 'model', scale: 'raw', variableId: 'score' });
+    goTo('map');
   };
 
   if (!model) {
@@ -194,6 +220,16 @@ export function TuneScreen() {
 
       {showExamples && (
         <ExamplesDialog onClose={() => setShowExamples(false)} onInsert={insertExample} />
+      )}
+
+      {applyProgress && <ApplyProgressDialog progress={applyProgress} />}
+
+      {applyDone !== null && (
+        <ApplyDoneDialog
+          variableCount={applyDone}
+          onStay={() => setApplyDone(null)}
+          onViewMap={viewMap}
+        />
       )}
     </div>
   );

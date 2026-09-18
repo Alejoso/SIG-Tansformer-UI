@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
-import { RAMP_RAW, rampCss } from '../../lib/ramp';
+import { RAMP_INPUT, rampCss } from '../../lib/ramp';
 import type { Project } from '../../types';
 import { Icon } from '../ui/Icon';
 
-const SWATCH = `linear-gradient(135deg,${rampCss(RAMP_RAW, 0.15)},${rampCss(RAMP_RAW, 0.85)})`;
+const SWATCH = `linear-gradient(135deg,${rampCss(RAMP_INPUT, 0.15)},${rampCss(RAMP_INPUT, 0.85)})`;
 
 /** "6 variables · 4,812 hexagons · 2 days ago", or the draft equivalent. */
 function detailLine(project: Project): string {

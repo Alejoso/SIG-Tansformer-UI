@@ -12,6 +12,7 @@
 
 import * as mock from './mock';
 import type {
+  ApplyProgress,
   DataFolder,
   HexLayerData,
   MapMode,
@@ -133,10 +134,27 @@ export const saveModel = (projectId: string, model: ModelConfig): Promise<void> 
  * ENDPOINT: POST /api/projects/{id}/model/apply
  *
  * Saves, then re-runs the weighting so the model outputs on the map reflect
- * the new weights.
+ * the new weights. Resolves once the run has been accepted, not once it has
+ * finished — follow it with `watchModelApply` for progress.
  */
 export const applyModel = (projectId: string, model: ModelConfig): Promise<void> =>
   mock.applyModel(projectId, model);
+
+/**
+ * ENDPOINT: GET /api/projects/{id}/model/apply/stream (SSE)
+ *
+ * Per-variable progress while the model is applied, so the UI can name what is
+ * being processed instead of showing an opaque spinner. Returns an
+ * unsubscribe function.
+ *
+ * The `model` argument is only there for the mock, which has no server to ask
+ * which variables are in flight; the real call takes the project alone.
+ */
+export const watchModelApply = (
+  projectId: string,
+  model: ModelConfig,
+  onProgress: (p: ApplyProgress) => void,
+): (() => void) => mock.watchModelApply(projectId, model, onProgress);
 
 /**
  * ENDPOINT: POST /api/model/validate

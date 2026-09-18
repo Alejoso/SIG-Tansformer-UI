@@ -8,7 +8,7 @@
  */
 
 import type { ModelPath, ModelVariable } from '../types';
-import { leafCount, totalLeaves } from './model';
+import { isInformative, leafCount, totalLeaves } from './model';
 
 /** Vertical space reserved per leaf. */
 const SLOT = 112;
@@ -29,6 +29,8 @@ export interface DiagramNode {
   weight: string;
   normalizacion: ModelVariable['normalizacion'];
   excluyente: boolean;
+  /** Weight is zero: carried for reference, not counted in the score. */
+  informative: boolean;
   depth: number;
   left: number;
   top: number;
@@ -77,6 +79,7 @@ export function buildDiagram(variables: ModelVariable[]): Diagram {
         weight: variable.peso,
         normalizacion: variable.normalizacion,
         excluyente: variable.excluyente,
+        informative: isInformative(variable),
         depth,
         left,
         top: centre - NODE_HEIGHT / 2,

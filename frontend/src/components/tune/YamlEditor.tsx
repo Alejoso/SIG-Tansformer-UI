@@ -11,6 +11,7 @@
 import { NORMALISATIONS, type ModelLine } from '../../lib/model';
 import type { ModelPath, Normalisation } from '../../types';
 import { Icon } from '../ui/Icon';
+import { ExcluyenteTip } from '../ui/InfoTip';
 
 interface YamlEditorProps {
   lines: ModelLine[];
@@ -64,14 +65,17 @@ export function YamlEditor({
     if (line.kind === 'bool' && target?.kind === 'excluyente') {
       const { path, current } = target;
       return (
-        <button
-          type="button"
-          className={`yaml-bool${current ? ' is-on' : ''}`}
-          aria-pressed={current}
-          onClick={() => onExcluyente(path, !current)}
-        >
-          {line.value}
-        </button>
+        <>
+          <button
+            type="button"
+            className={`yaml-bool${current ? ' is-on' : ''}`}
+            aria-pressed={current}
+            onClick={() => onExcluyente(path, !current)}
+          >
+            {line.value}
+          </button>
+          {current && <ExcluyenteTip placement="bottom" />}
+        </>
       );
     }
 
@@ -106,7 +110,10 @@ export function YamlEditor({
 
       <div className="yaml-body">
         {lines.map((line) => (
-          <div className="yaml-line" key={line.n}>
+          <div
+            className={`yaml-line${line.informative ? ' is-informative' : ''}`}
+            key={line.n}
+          >
             <span className="yaml-gutter">{line.n}</span>
             <span className="yaml-indent" style={{ width: line.indent * 16 }} />
             <span
@@ -117,6 +124,9 @@ export function YamlEditor({
             {/* Section headings are drawn bare, as in the design. */}
             {line.kind !== 'section' && <span className="yaml-colon">:</span>}
             {renderValue(line)}
+            {line.kind === 'section' && line.informative && (
+              <span className="yaml-badge">informative</span>
+            )}
           </div>
         ))}
       </div>

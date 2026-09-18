@@ -96,7 +96,7 @@ export const AVAILABLE_FOLDERS: DataFolder[] = [
 ];
 
 /** Each variable carries a seed so the mock field is stable across renders. */
-export const RAW_VARIABLES: (Variable & { seed: number })[] = [
+export const INPUT_VARIABLES: (Variable & { seed: number })[] = [
   { id: 'wind', name: 'Mean wind speed', unit: 'metres per second at 100 m', hint: 'How windy it is — higher is better for turbines', seed: 3, min: 4.1, max: 11.8, decimals: 1, suffix: ' m/s' },
   { id: 'slope', name: 'Terrain slope', unit: 'degrees', hint: 'How steep the ground is — steep land costs more to build on', seed: 7.4, min: 0, max: 27, decimals: 0, suffix: '°' },
   { id: 'sub', name: 'Distance to substation', unit: 'kilometres', hint: 'How far the power has to travel to reach the grid', seed: 11.2, min: 0.4, max: 62, decimals: 1, suffix: ' km' },
@@ -224,7 +224,11 @@ export const EXAMPLES: ModelExample[] = [
 
 export const DEFAULT_SETTINGS: ProjectSettings = {
   pipelineVersion: 'v2.4 (current)',
-  h3Resolution: 8,
+  processingResolution: 8,
+  // Defaults to the processing resolution: showing every cell that was
+  // computed is the honest starting point, and coarsening is a deliberate
+  // choice the user makes for speed.
+  mapResolution: 8,
   coordinateSystem: 'EPSG:4326',
 };
 

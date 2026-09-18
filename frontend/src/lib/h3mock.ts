@@ -43,15 +43,39 @@ function insideBoundary(i: number, j: number, k: number): boolean {
 export interface MockGridOptions {
   centre: [number, number];
   resolution: number;
-  /** Ring size around the origin cell. 44 lands near 4,800 cells after carving. */
+  /** Ring size around the origin cell. Derived from the resolution if omitted. */
   k?: number;
+}
+
+/** Ring size at the reference resolution, and the resolution it refers to. */
+const BASE_K = 44;
+const BASE_RESOLUTION = 8;
+/**
+ * Ceiling on the ring size. A fine resolution over a fixed area runs into
+ * millions of cells, which no browser will draw; the real backend has the same
+ * problem and will need to aggregate or page.
+ */
+const MAX_K = 81;
+
+/**
+ * Ring size that keeps the study area roughly constant as the resolution
+ * changes. Each H3 step multiplies the cell count by about seven, so the edge
+ * length — and therefore the ring size needed to span the same ground —
+ * scales by √7 per step.
+ *
+ * Without this, coarsening the map resolution would keep the cell count and
+ * silently widen the area, which is the opposite of what the setting means.
+ */
+function ringFor(resolution: number): number {
+  const scaled = BASE_K * Math.pow(7, (resolution - BASE_RESOLUTION) / 2);
+  return Math.max(3, Math.min(MAX_K, Math.round(scaled)));
 }
 
 /**
  * Build the set of cells for a study area. Shared by every variable in a
  * project so they all cover exactly the same hexagons.
  */
-export function mockGrid({ centre, resolution, k = 44 }: MockGridOptions): string[] {
+export function mockGrid({ centre, resolution, k = ringFor(resolution) }: MockGridOptions): string[] {
   const origin = latLngToCell(centre[0], centre[1], resolution);
   return gridDisk(origin, k).filter((cell) => {
     try {
@@ -85,7 +109,9 @@ export function mockValues(
     } catch {
       // Keep the cell rather than dropping it; a mid-ramp value is fine here.
     }
-    return { h3: cell, value: min + (max - min) * t };
+    // `t` is already the 0-1 field, so it doubles as the normalised value.
+    // The real engine computes this per the variable's `normalizacion`.
+    return { h3: cell, value: min + (max - min) * t, normalized: t };
   });
 }
 

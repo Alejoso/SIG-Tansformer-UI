@@ -222,3 +222,18 @@
   display: grid;
   place-items: center;
 }
+
+/* ── settings validation ────────────────────────────────────────────────── */
+
+.input.is-invalid {
+  border-color: var(--color-accent);
+  background: var(--color-accent-100);
+}
+
+.settings-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+.settings-note.is-error { color: var(--color-accent-700); }

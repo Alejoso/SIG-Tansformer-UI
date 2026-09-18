@@ -283,3 +283,60 @@
   line-height: 1.6;
   color: var(--color-accent-800);
 }
+
+/* ── informative variables (weight 0) ───────────────────────────────────── */
+
+/* A zero weight means the variable is carried for reference, not counted in
+   the score. Neutral rather than tinted, so it reads as "not in the maths". */
+.node.is-informative,
+.node.depth-deep.is-informative {
+  background: var(--color-neutral-200);
+  box-shadow: inset 0 0 0 1.5px var(--color-neutral-400), var(--shadow-sm);
+}
+.node.is-informative .node-label,
+.node.depth-deep.is-informative .node-label { color: var(--color-neutral-800); }
+
+.node-badge,
+.yaml-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: var(--color-neutral-300);
+  color: var(--color-neutral-800);
+}
+
+.yaml-line.is-informative .yaml-key { color: var(--color-neutral-700); }
+.yaml-line.is-informative .yaml-input {
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+}
+
+/* ── apply dialogs ──────────────────────────────────────────────────────── */
+
+.apply-variable {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-100);
+}
+.apply-variable-label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.apply-variable-name {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  line-height: 1.2;
+  /* Variable names vary in length; keep the dialog from jumping about. */
+  min-height: 22px;
+}

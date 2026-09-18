@@ -27,7 +27,7 @@ FastAPI will serve once it exists.
 | Projects | `screens/ProjectsScreen.tsx` | Project list, empty state, "new project" tile |
 | New project | `screens/NewProjectScreen.tsx` | Name, mesh, results folder, description, advanced settings |
 | Add your data | `screens/DataScreen.tsx` | Folder dropzone (max 10), folder list, processing progress, "all done" dialog |
-| Map | `screens/MapScreen.tsx` + `map/HexMap.tsx` | deck.gl `H3HexagonLayer` over MapLibre, raw/model switch, legend, hover tooltip |
+| Map | `screens/MapScreen.tsx` + `map/HexMap.tsx` | deck.gl `H3HexagonLayer` over MapLibre, input/model switch, raw/normalized switch, legend, hover tooltip |
 | Tune the model | `screens/TuneScreen.tsx` + `tune/*` | YAML editor and node diagram over one shared tree, examples dialog |
 
 ## Where the backend plugs in
@@ -57,11 +57,12 @@ No component changes.
 | `removeFolder` | `DELETE /api/projects/{id}/folders/{folderId}` | |
 | `startProcessing` | `POST /api/projects/{id}/process` | |
 | `watchProcessing` | `GET /api/projects/{id}/process/stream` | **SSE**, driven by `watchfiles` on the results folder |
-| `listVariables` | `GET /api/projects/{id}/variables?mode=raw\|model` | |
+| `listVariables` | `GET /api/projects/{id}/variables?mode=input\|model` | |
 | `getHexLayer` | `GET /api/projects/{id}/hexes?variable={id}` | heaviest response; see note below |
 | `getModel` | `GET /api/projects/{id}/model` | read with `ruamel.yaml` so comments and order survive |
 | `saveModel` | `PUT /api/projects/{id}/model` | validate with Pydantic before writing |
-| `applyModel` | `POST /api/projects/{id}/model/apply` | save, then re-run the weighting |
+| `applyModel` | `POST /api/projects/{id}/model/apply` | save, then re-run the weighting; returns once accepted |
+| `watchModelApply` | `GET /api/projects/{id}/model/apply/stream` | **SSE**, one `ApplyProgress` per variable — drives the loading dialog |
 | `validateModel` | `POST /api/model/validate` | the engine's rules are the ones that decide |
 | `listExamples` | `GET /api/model/examples` | |
 | `getSettings` | `GET /api/projects/{id}/settings` | |
@@ -72,6 +73,22 @@ them one-for-one.
 
 Vite proxies `/api` to `http://127.0.0.1:8000` in dev (`vite.config.ts`), so
 uvicorn on its default port needs no extra config.
+
+### What the engine has to supply
+
+- **`HexCell.normalized`.** Every cell carries both its value in its own units
+  and the same value on a 0-1 scale, because the map's raw/normalized toggle
+  switches between them. The engine owns that number — the UI deliberately
+  does not re-derive it, or the map would disagree with the weighting that
+  actually ran.
+- **Two resolutions.** `ProjectSettings.processingResolution` is what the
+  engine computes and stores at; `mapResolution` is only what gets drawn.
+  When the map resolution is coarser, the backend has to aggregate stored
+  cells up before sending them.
+- **Per-variable apply progress.** `watchModelApply` streams one
+  `ApplyProgress` per variable so the loading dialog can name what is being
+  processed. The mock walks the variable tree parents-first; the engine should
+  emit in whatever order it actually works.
 
 ### Two things to decide before the backend lands
 
@@ -96,6 +113,12 @@ uvicorn on its default port needs no extra config.
   `normalizacion`, `sub` — since the real config will change a lot. The YAML
   editor and the node diagram are two renderings of that one structure
   (`src/lib/model.ts`), so they cannot disagree.
+- **A weight of zero means "informative"**: the variable is carried to be
+  looked at on the map, not counted in the score. Both panes tint it neutral
+  and badge it, so a zero reads as a decision rather than an unfinished edit.
+- **`MapMode` is `input | model`, not `raw | model`.** "Raw" now belongs to
+  `ValueScale` (`raw | normalized`), and two meanings of the word on one
+  screen would be a trap.
 - **Base map** is CARTO Positron; override with `VITE_MAP_STYLE` to
   self-host.
 - `optimizeDeps.exclude: ['maplibre-gl']` in `vite.config.ts` is required —

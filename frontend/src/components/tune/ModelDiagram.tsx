@@ -15,6 +15,7 @@ import {
 import { NORMALISATIONS } from '../../lib/model';
 import type { ModelConfig, ModelPath, Normalisation } from '../../types';
 import { Icon } from '../ui/Icon';
+import { ExcluyenteTip } from '../ui/InfoTip';
 
 /** Padding subtracted when fitting the diagram to the pane. */
 const FIT_PADDING = 40;
@@ -98,10 +99,15 @@ export function ModelDiagram({
         {diagram.nodes.map((node) => (
           <div
             key={node.id}
-            className={`node${node.depth > 0 ? ' depth-deep' : ''}`}
+            className={`node${node.depth > 0 ? ' depth-deep' : ''}${
+              node.informative ? ' is-informative' : ''
+            }`}
             style={{ left: node.left, top: node.top, width: node.width }}
           >
-            <div className="node-label">{node.label}</div>
+            <div className="node-label">
+              {node.label}
+              {node.informative && <span className="node-badge">informative</span>}
+            </div>
 
             <div className="node-weight">
               <button
@@ -149,6 +155,7 @@ export function ModelDiagram({
               >
                 {node.excluyente ? 'excludes' : 'weighted'}
               </button>
+              {node.excluyente && <ExcluyenteTip />}
             </div>
           </div>
         ))}

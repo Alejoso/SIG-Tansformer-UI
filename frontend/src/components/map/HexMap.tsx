@@ -14,7 +14,7 @@ import { Map } from 'react-map-gl/maplibre';
 import { cellToLatLng } from 'h3-js';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-import type { HexCell, Variable } from '../../types';
+import type { HexCell, ValueScale, Variable } from '../../types';
 import { rampGradient, rampRgb, type Ramp } from '../../lib/ramp';
 import { Icon } from '../ui/Icon';
 
@@ -46,9 +46,11 @@ interface HoverState {
 interface HexMapProps {
   cells: HexCell[];
   variable: Variable;
+  /** Which number on each cell to draw: its own units, or normalised 0-1. */
+  scale: ValueScale;
   ramp: Ramp;
   resolution: number;
-  /** Formats a raw value for the legend and tooltip. */
+  /** Formats a value of the current scale for the legend and tooltip. */
   format: (value: number) => string;
 }
 
@@ -85,7 +87,11 @@ function fitToCells(cells: HexCell[], size: Size): MapViewState | null {
   };
 }
 
-export function HexMap({ cells, variable, ramp, resolution, format }: HexMapProps) {
+/** The number the map is currently drawing for a cell. */
+const valueOf = (cell: HexCell, scale: ValueScale) =>
+  scale === 'normalized' ? cell.normalized : cell.value;
+
+export function HexMap({ cells, variable, scale, ramp, resolution, format }: HexMapProps) {
   const container = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<Size | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
@@ -131,8 +137,14 @@ export function HexMap({ cells, variable, ramp, resolution, format }: HexMapProp
 
   const fit = useCallback(() => setUserView(null), []);
 
-  /** The value range actually present, so the ramp spans the real data. */
+  /**
+   * The value range actually present, so the ramp spans the real data.
+   * Normalised values keep a fixed 0-1 range instead: rescaling them to the
+   * extremes present would defeat the point of a common scale, since two
+   * variables would no longer share one legend.
+   */
   const [min, max] = useMemo(() => {
+    if (scale === 'normalized') return [0, 1];
     if (cells.length === 0) return [variable.min, variable.max];
     let lo = Infinity;
     let hi = -Infinity;
@@ -141,7 +153,7 @@ export function HexMap({ cells, variable, ramp, resolution, format }: HexMapProp
       if (cell.value > hi) hi = cell.value;
     }
     return [lo, hi];
-  }, [cells, variable.min, variable.max]);
+  }, [cells, scale, variable.min, variable.max]);
 
   const onHover = useCallback((info: PickingInfo<HexCell>) => {
     setHover(info.object ? { x: info.x, y: info.y, cell: info.object } : null);
@@ -153,7 +165,8 @@ export function HexMap({ cells, variable, ramp, resolution, format }: HexMapProp
         id: 'hexagons',
         data: cells,
         getHexagon: (d) => d.h3,
-        getFillColor: (d) => rampRgb(ramp, max === min ? 0.5 : (d.value - min) / (max - min)),
+        getFillColor: (d) =>
+          rampRgb(ramp, max === min ? 0.5 : (valueOf(d, scale) - min) / (max - min)),
         getLineColor: CELL_OUTLINE,
         lineWidthMinPixels: 0.7,
         stroked: true,
@@ -162,11 +175,11 @@ export function HexMap({ cells, variable, ramp, resolution, format }: HexMapProp
         pickable: true,
         onHover,
         updateTriggers: {
-          // Colours depend on the variable's range, not just the cell list.
-          getFillColor: [variable.id, min, max, ramp],
+          // Colours depend on the scale and the range, not just the cell list.
+          getFillColor: [variable.id, scale, min, max, ramp],
         },
       }),
-    [cells, ramp, min, max, variable.id, onHover],
+    [cells, ramp, scale, min, max, variable.id, onHover],
   );
 
   const zoomBy = (delta: number) => {
@@ -211,7 +224,10 @@ export function HexMap({ cells, variable, ramp, resolution, format }: HexMapProp
       </div>
 
       <div className="map-legend">
-        <div className="map-legend-title muted-55">{variable.name}</div>
+        <div className="map-legend-title muted-55">
+          {variable.name}
+          {scale === 'normalized' && ' · normalized'}
+        </div>
         <div className="map-legend-bar" style={{ background: rampGradient(ramp) }} />
         <div className="map-legend-scale">
           <span>{format(min)}</span>
@@ -232,7 +248,7 @@ export function HexMap({ cells, variable, ramp, resolution, format }: HexMapProp
           }}
         >
           <div className="map-tooltip-id">{hover.cell.h3}</div>
-          <div className="map-tooltip-value">{format(hover.cell.value)}</div>
+          <div className="map-tooltip-value">{format(valueOf(hover.cell, scale))}</div>
           <div className="map-tooltip-var">{variable.name}</div>
         </div>
       )}

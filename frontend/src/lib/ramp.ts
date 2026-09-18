@@ -1,5 +1,5 @@
 /**
- * The two colour ramps the map uses: warm terracotta for raw variables,
+ * The two colour ramps the map uses: warm terracotta for input variables,
  * sage for model output. Both are pulled from the Organic accent ramps so the
  * map reads as part of the same system as the rest of the interface.
  */
@@ -8,12 +8,12 @@ import type { MapMode } from '../types';
 
 export type Rgb = [number, number, number];
 
-export const RAMP_RAW = ['#fff2eb', '#f6a06b', '#8c491a'] as const;
+export const RAMP_INPUT = ['#fff2eb', '#f6a06b', '#8c491a'] as const;
 export const RAMP_MODEL = ['#f0fae1', '#8fa073', '#3d472b'] as const;
 
 export type Ramp = readonly [string, string, string];
 
-export const rampFor = (mode: MapMode): Ramp => (mode === 'raw' ? RAMP_RAW : RAMP_MODEL);
+export const rampFor = (mode: MapMode): Ramp => (mode === 'input' ? RAMP_INPUT : RAMP_MODEL);
 
 const hexToRgb = (hex: string): Rgb => [
   parseInt(hex.slice(1, 3), 16),

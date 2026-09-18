@@ -71,7 +71,25 @@ export interface ProcessingProgress {
 
 /* ── map variables ─────────────────────────────────────────────────────── */
 
-export type MapMode = 'raw' | 'model';
+/**
+ * Which set of layers the map is showing: the variables as they came in, or
+ * what the model produced from them.
+ *
+ * Named `input` rather than `raw` because `ValueScale` below now owns the
+ * raw/normalised distinction, and two different meanings of "raw" on the same
+ * screen would be a trap.
+ */
+export type MapMode = 'input' | 'model';
+
+/**
+ * Whether the map draws each cell's value in the variable's own units or
+ * after normalisation.
+ *
+ * `raw` is the value as stored — metres per second, kilometres, percent.
+ * `normalized` is that value put on a common 0–1 scale, which is what makes
+ * two variables comparable to the eye.
+ */
+export type ValueScale = 'raw' | 'normalized';
 
 export interface Variable {
   id: string;
@@ -92,11 +110,19 @@ export interface Variable {
 export interface HexCell {
   /** H3 index, e.g. `881f1d4881fffff`. */
   h3: string;
+  /** The value in the variable's own units. */
   value: number;
+  /**
+   * The same value on a 0–1 scale, per the variable's `normalizacion`.
+   * The engine owns this number — the UI must not re-derive it, or the map
+   * would disagree with the weighting that actually ran.
+   */
+  normalized: number;
 }
 
 export interface HexLayerData {
   variableId: string;
+  /** The map resolution these cells were built at. */
   resolution: number;
   cells: HexCell[];
 }
@@ -129,6 +155,21 @@ export interface ModelConfig {
   variables: ModelVariable[];
 }
 
+/**
+ * One tick while the model is being applied. The engine re-normalises and
+ * re-weights one variable at a time, so the UI can name what it is working on
+ * instead of showing an opaque spinner.
+ */
+export interface ApplyProgress {
+  phase: 'running' | 'done' | 'failed';
+  /** The variable being processed right now, e.g. `wind_speed`. */
+  variable: string;
+  /** 1-based position of `variable` in the run. */
+  index: number;
+  total: number;
+  error?: string;
+}
+
 export interface ModelExample {
   id: string;
   title: string;
@@ -142,10 +183,27 @@ export interface ModelExample {
 
 export interface ProjectSettings {
   pipelineVersion: string;
-  /** Fixed by the engine; shown read-only. */
-  h3Resolution: number;
+  /**
+   * H3 resolution the engine converts the source data at. This is the
+   * resolution the values are actually computed and stored at, so changing it
+   * means reprocessing.
+   */
+  processingResolution: number;
+  /**
+   * H3 resolution the map draws at. Kept separate from the processing
+   * resolution so a heavy mesh can be explored at a coarser, faster grid
+   * without touching the stored data.
+   *
+   * When this is coarser than `processingResolution` the backend has to
+   * aggregate cells up; when it is finer there is no more detail to show.
+   */
+  mapResolution: number;
   coordinateSystem: string;
 }
+
+/** H3 defines resolutions 0 (coarsest) through 15 (finest). */
+export const MIN_H3_RESOLUTION = 0;
+export const MAX_H3_RESOLUTION = 15;
 
 /** Path into the variable tree: child indices from the root down. */
 export type ModelPath = number[];

@@ -8,6 +8,7 @@
  */
 
 import type {
+  ApplyProgress,
   DataFolder,
   HexLayerData,
   MapMode,
@@ -30,7 +31,7 @@ import {
   MESH_CENTRES,
   MODEL_VARIABLES,
   PROJECTS,
-  RAW_VARIABLES,
+  INPUT_VARIABLES,
 } from './fixtures';
 
 const delay = <T>(value: T, ms = 180): Promise<T> =>
@@ -202,7 +203,7 @@ export function watchProcessing(
 
 /* ── map data ──────────────────────────────────────────────────────────── */
 
-const variablesFor = (mode: MapMode) => (mode === 'raw' ? RAW_VARIABLES : MODEL_VARIABLES);
+const variablesFor = (mode: MapMode) => (mode === 'input' ? INPUT_VARIABLES : MODEL_VARIABLES);
 
 export async function listVariables(projectId: string, mode: MapMode): Promise<Variable[]> {
   void projectId;
@@ -214,24 +215,30 @@ export async function listVariables(projectId: string, mode: MapMode): Promise<V
 const gridCache = new Map<string, { cells: string[]; origin: string; resolution: number }>();
 
 function gridFor(projectId: string) {
-  const cached = gridCache.get(projectId);
-  if (cached) return cached;
-
   const project = projects.find((p) => p.id === projectId);
   const centre = MESH_CENTRES[project?.meshId ?? ''] ?? [53.35, -8.0];
-  const resolution = settingsByProject.get(projectId)?.h3Resolution ?? DEFAULT_SETTINGS.h3Resolution;
+  // The map draws at the map resolution, not the resolution the data was
+  // processed at. Against the real backend, a coarser map resolution means
+  // the server aggregates stored cells up before sending them.
+  const resolution =
+    settingsByProject.get(projectId)?.mapResolution ?? DEFAULT_SETTINGS.mapResolution;
+
+  const key = `${projectId}:${resolution}`;
+  const cached = gridCache.get(key);
+  if (cached) return cached;
+
   const grid = {
     cells: mockGrid({ centre, resolution }),
     origin: originCell(centre, resolution),
     resolution,
   };
-  gridCache.set(projectId, grid);
+  gridCache.set(key, grid);
   return grid;
 }
 
 export async function getHexLayer(projectId: string, variableId: string): Promise<HexLayerData> {
   const definition =
-    [...RAW_VARIABLES, ...MODEL_VARIABLES].find((v) => v.id === variableId) ?? RAW_VARIABLES[0];
+    [...INPUT_VARIABLES, ...MODEL_VARIABLES].find((v) => v.id === variableId) ?? INPUT_VARIABLES[0];
   const { cells, origin, resolution } = gridFor(projectId);
 
   return delay(
@@ -264,7 +271,63 @@ export async function saveModel(projectId: string, model: ModelConfig): Promise<
 
 export async function applyModel(projectId: string, model: ModelConfig): Promise<void> {
   modelByProject.set(projectId, clone(model));
-  await delay(null, 320);
+  await delay(null, 120);
+}
+
+/** Every variable in the tree, parents before children — the order the engine works in. */
+function flattenKeys(variables: ModelConfig['variables'], into: string[] = []): string[] {
+  for (const variable of variables) {
+    into.push(variable.key);
+    if (variable.sub?.length) flattenKeys(variable.sub, into);
+  }
+  return into;
+}
+
+/** How long the mock spends "processing" each variable. */
+const APPLY_STEP_MS = 420;
+
+/**
+ * Stands in for the apply stream. Walks the variable tree one key at a time so
+ * the dialog can name what is being processed, then reports `done`.
+ */
+export function watchModelApply(
+  projectId: string,
+  model: ModelConfig,
+  onProgress: (p: ApplyProgress) => void,
+): () => void {
+  const keys = flattenKeys(model.variables);
+  const total = keys.length;
+  let index = 0;
+  let cancelled = false;
+
+  if (total === 0) {
+    // Nothing to process; report done on the next tick so callers can still
+    // unsubscribe from a real handle.
+    const idle = setTimeout(
+      () => onProgress({ phase: 'done', variable: '', index: 0, total: 0 }),
+      APPLY_STEP_MS,
+    );
+    return () => clearTimeout(idle);
+  }
+
+  const timer = setInterval(() => {
+    if (cancelled) return;
+
+    if (index >= total) {
+      clearInterval(timer);
+      onProgress({ phase: 'done', variable: keys[total - 1], index: total, total });
+      return;
+    }
+
+    index += 1;
+    onProgress({ phase: 'running', variable: keys[index - 1], index, total });
+  }, APPLY_STEP_MS);
+
+  void projectId;
+  return () => {
+    cancelled = true;
+    clearInterval(timer);
+  };
 }
 
 export async function validateModel(
@@ -301,6 +364,10 @@ export async function getSettings(projectId: string): Promise<ProjectSettings> {
 
 export async function saveSettings(projectId: string, settings: ProjectSettings): Promise<void> {
   settingsByProject.set(projectId, clone(settings));
-  gridCache.delete(projectId);
+  // Both resolutions invalidate the cached grid: one changes what was
+  // computed, the other changes what is drawn.
+  for (const key of [...gridCache.keys()]) {
+    if (key.startsWith(`${projectId}:`)) gridCache.delete(key);
+  }
   await delay(null, 120);
 }
