@@ -1,60 +1,56 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
-import { rampFor, rampSwatch } from '../../lib/ramp';
-import type { MapMode, Variable, ValueScale } from '../../types';
+import type { LayerNode, LayerTree as LayerTreeData, ValueScale } from '../../types';
 import { LayerFrame } from '../map/LayerFrame';
+import { LayerTree } from '../map/LayerTree';
 import { Icon } from '../ui/Icon';
 import { SettingsDialog } from './SettingsDialog';
 
-const MODE_HINTS: Record<MapMode, string> = {
-  input: 'These are the variables exactly as you uploaded them, hexagon by hexagon.',
-  model: 'These are the same variables after the model applies your weights.',
-};
-
 const SCALE_HINTS: Record<ValueScale, string> = {
   raw: 'Values in their own units — metres per second, kilometres, percent.',
-  normalized: 'The same values put on a common 0 to 1 scale, so variables can be compared.',
+  normalized: 'The same values on a common 0 to 1 scale, so layers can be compared.',
 };
+
+/** Depth-first walk, so a node can be found by id wherever it sits. */
+function findNode(nodes: LayerNode[], id: string): LayerNode | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const found = node.children ? findNode(node.children, id) : null;
+    if (found) return found;
+  }
+  return null;
+}
 
 export function MapScreen() {
   const { project, goTo, showHints, mapView, setMapView } = useApp();
   const projectId = project?.id ?? '';
-  const { mode, scale } = mapView;
+  const { scale, nodeId } = mapView;
 
-  const [variables, setVariables] = useState<Variable[]>([]);
-  /** URL of the engine's pre-rendered document for the selected layer. */
+  const [tree, setTree] = useState<LayerTreeData | null>(null);
+  /** URL of the engine's pre-rendered document for the selected node. */
   const [layerUrl, setLayerUrl] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  /** Bumped when settings are saved, to force the layer to refetch. */
+  /** Bumped when settings are saved, to force the document to refetch. */
   const [settingsVersion, setSettingsVersion] = useState(0);
 
   useEffect(() => {
     if (!projectId) return;
     let live = true;
-    api.listVariables(projectId, mode).then((list) => {
-      if (!live) return;
-      setVariables(list);
-      // Keep the requested variable if it exists in this mode, else fall back.
-      setMapView({
-        ...mapView,
-        mode,
-        variableId: list.some((v) => v.id === mapView.variableId)
-          ? mapView.variableId
-          : (list[0]?.id ?? null),
-      });
+    api.getLayerTree(projectId).then((loaded) => {
+      if (live) setTree(loaded);
     });
     return () => {
       live = false;
     };
-    // `mapView` is read but must not re-trigger the fetch; only the mode does.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, mode]);
+  }, [projectId]);
 
-  const active = useMemo(
-    () => variables.find((v) => v.id === mapView.variableId) ?? variables[0] ?? null,
-    [variables, mapView.variableId],
-  );
+  /** The selected node, defaulting to the whole model. */
+  const active = useMemo(() => {
+    if (!tree) return null;
+    const all = [tree.model, ...tree.variables];
+    return (nodeId && findNode(all, nodeId)) || tree.model;
+  }, [tree, nodeId]);
 
   useEffect(() => {
     if (!projectId || !active) return;
@@ -69,32 +65,11 @@ export function MapScreen() {
     // point at a freshly generated document.
   }, [projectId, active, scale, settingsVersion]);
 
-  const ramp = rampFor(mode);
+  const select = (node: LayerNode) => setMapView({ ...mapView, nodeId: node.id });
 
   return (
     <div className="map-screen">
       <aside className="map-sidebar">
-        <div className="seg mode-switch" role="group" aria-label="Layer source">
-          <label className="seg-opt">
-            <input
-              type="radio"
-              name="map-mode"
-              checked={mode === 'input'}
-              onChange={() => setMapView({ ...mapView, mode: 'input', variableId: null })}
-            />
-            Input variables
-          </label>
-          <label className="seg-opt">
-            <input
-              type="radio"
-              name="map-mode"
-              checked={mode === 'model'}
-              onChange={() => setMapView({ ...mapView, mode: 'model', variableId: null })}
-            />
-            Model output
-          </label>
-        </div>
-
         <div className="seg mode-switch" role="group" aria-label="Value scale">
           <label className="seg-opt">
             <input
@@ -116,34 +91,32 @@ export function MapScreen() {
           </label>
         </div>
 
-        {showHints && (
-          <p className="mode-hint muted-55">
-            {MODE_HINTS[mode]} {SCALE_HINTS[scale]}
-          </p>
-        )}
+        {showHints && <p className="mode-hint muted-55">{SCALE_HINTS[scale]}</p>}
 
-        <div className="variable-list">
-          {variables.map((variable, index) => {
-            const selected = variable.id === active?.id;
-            return (
-              <button
-                key={variable.id}
-                type="button"
-                className="variable-row"
-                aria-pressed={selected}
-                onClick={() => setMapView({ ...mapView, variableId: variable.id })}
-              >
-                <div className="variable-swatch" style={{ background: rampSwatch(ramp, index) }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="variable-name">{variable.name}</div>
-                  <div className="variable-unit muted-52">
-                    {scale === 'normalized' ? 'normalized, 0 to 1' : variable.unit}
-                  </div>
-                </div>
-                {selected && <Icon name="check" size={15} color="var(--color-accent-700)" strokeWidth={3} />}
-              </button>
-            );
-          })}
+        <div className="layer-tree-scroll">
+          {tree ? (
+            <>
+              <LayerTree
+                title="Model HTML"
+                nodes={[tree.model]}
+                selectedId={active?.id ?? null}
+                onSelect={select}
+                // Opened by default so the tree's behaviour is visible without
+                // hunting for something to click.
+                defaultOpen={['model']}
+              />
+              <LayerTree
+                title="Input variables"
+                nodes={tree.variables}
+                selectedId={active?.id ?? null}
+                onSelect={select}
+              />
+            </>
+          ) : (
+            <div className="screen-loading" style={{ padding: 24 }}>
+              <Icon name="spinner" size={20} color="var(--color-accent)" className="spin" />
+            </div>
+          )}
         </div>
 
         <div className="map-sidebar-actions">
@@ -173,8 +146,12 @@ export function MapScreen() {
       {active && layerUrl ? (
         <LayerFrame
           url={layerUrl}
-          title={active.name}
-          subtitle={scale === 'normalized' ? `${active.hint} · normalized` : active.hint}
+          title={active.label}
+          subtitle={
+            scale === 'normalized' && active.description
+              ? `${active.description} · normalized`
+              : active.description
+          }
         />
       ) : (
         <div className="map-canvas">

@@ -69,41 +69,58 @@ export interface ProcessingProgress {
   error?: string;
 }
 
-/* ── map variables ─────────────────────────────────────────────────────── */
-
-/**
- * Which set of layers the map is showing: the variables as they came in, or
- * what the model produced from them.
- *
- * Named `input` rather than `raw` because `ValueScale` below now owns the
- * raw/normalised distinction, and two different meanings of "raw" on the same
- * screen would be a trap.
- */
-export type MapMode = 'input' | 'model';
+/* ── the layer tree ────────────────────────────────────────────────────── */
 
 /**
  * Whether the map draws each cell's value in the variable's own units or
  * after normalisation.
  *
  * `raw` is the value as stored — metres per second, kilometres, percent.
- * `normalized` is that value put on a common 0–1 scale, which is what makes
+ * `normalized` is that value put on a common 0-1 scale, which is what makes
  * two variables comparable to the eye.
  */
 export type ValueScale = 'raw' | 'normalized';
 
-export interface Variable {
+/**
+ * One entry in the structure the engine renders.
+ *
+ * The engine emits a document for the whole model, one for each variable, and
+ * one for each subvariable a composite variable is built from — so what comes
+ * back is a tree, not a list. The sidebar mirrors it the way a file explorer
+ * mirrors folders: composites open to reveal what they are made of.
+ *
+ * Nesting is arbitrary depth. A subvariable can itself be composite.
+ */
+export interface LayerNode {
+  /** Unique across the whole tree; this is the selection key and the URL key. */
   id: string;
-  name: string;
-  /** Unit line under the name, e.g. `metres per second at 100 m`. */
-  unit: string;
-  /** One-line plain-language explanation shown over the map. */
-  hint: string;
-  min: number;
-  max: number;
-  /** Decimal places used when formatting a value. */
-  decimals: number;
-  /** Appended to a formatted value, e.g. ` m/s`. */
-  suffix: string;
+  label: string;
+  /** One line of plain-language context, shown over the map. */
+  description?: string;
+  /**
+   * Present when this node is built from others. An empty array and an absent
+   * one mean the same thing — a leaf — so the UI checks for length.
+   */
+  children?: LayerNode[];
+  /**
+   * False when the engine produced no document for this node, e.g. a grouping
+   * that exists only to hold children. Such a row still opens, but selecting
+   * it shows nothing.
+   */
+  hasDocument: boolean;
+}
+
+/**
+ * The two sections of the map sidebar.
+ *
+ * Kept as one response because the engine generates them in a single pass, and
+ * because the UI needs both to decide what to show first.
+ */
+export interface LayerTree {
+  /** The whole-model document, with whatever the model produced beneath it. */
+  model: LayerNode;
+  /** The input variables, nested wherever one is composed of others. */
+  variables: LayerNode[];
 }
 
 /* ── model (the tunable YAML) ──────────────────────────────────────────── */

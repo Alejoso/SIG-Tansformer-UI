@@ -128,8 +128,9 @@ export function TuneScreen() {
 
   const viewMap = () => {
     setApplyDone(null);
-    // Land on the score layer, which is what the new weights just changed.
-    setMapView({ mode: 'model', scale: 'raw', variableId: 'score' });
+    // Land on the whole-model document, which is what the new weights
+    // just regenerated.
+    setMapView({ scale: 'raw', nodeId: 'model' });
     goTo('map');
   };
 

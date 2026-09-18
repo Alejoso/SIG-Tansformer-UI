@@ -4,7 +4,7 @@
  */
 
 import { createContext, useContext } from 'react';
-import type { MapMode, Project, ValueScale } from '../types';
+import type { Project, ValueScale } from '../types';
 
 export type Screen = 'projects' | 'setup' | 'data' | 'map' | 'tune';
 
@@ -42,11 +42,10 @@ export interface AppContextValue {
 }
 
 export interface MapView {
-  mode: MapMode;
   /** Draw values in their own units, or normalised onto 0-1. */
   scale: ValueScale;
-  /** `null` means "first variable of this mode". */
-  variableId: string | null;
+  /** Id of the selected node in the layer tree; `null` means "not chosen yet". */
+  nodeId: string | null;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);

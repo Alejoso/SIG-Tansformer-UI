@@ -21,38 +21,105 @@
 
 .mode-hint { margin: 0 0 12px; font-size: 12px; line-height: 1.45; }
 
-.variable-list {
+.layer-tree-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
   padding-right: 4px;
 }
 
-.variable-row {
+.layer-section + .layer-section { margin-top: 18px; }
+
+.layer-section-title {
+  margin: 0 0 8px;
+  padding-left: 2px;
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+
+.layer-list, .layer-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.layer-row {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 10px 12px;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  color: inherit;
-  border: 0;
+  gap: 2px;
   border-radius: var(--radius-md);
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--color-divider);
+  /* Left padding is set inline per depth; keep the right side constant. */
+  padding-right: 8px;
 }
-.variable-row:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
-.variable-row[aria-pressed='true'] {
+.layer-row:hover { background: color-mix(in srgb, var(--color-text) 5%, transparent); }
+.layer-row.is-selected {
   background: var(--color-accent-100);
   box-shadow: inset 0 0 0 1.5px var(--color-accent-400);
 }
-.variable-swatch { width: 30px; height: 30px; flex: none; border-radius: 999px; }
-.variable-name { font-size: 13.5px; font-weight: 600; line-height: 1.3; }
-.variable-unit { font-size: 11.5px; }
+.layer-row.is-empty { opacity: 0.5; }
+
+/* The disclosure arrow. Leaves render an empty one of the same width so every
+   label in the tree lines up. */
+.layer-caret {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.layer-caret.is-open { transform: rotate(90deg); }
+.layer-caret.is-leaf { cursor: default; }
+.layer-caret:not(.is-leaf):hover { background: color-mix(in srgb, var(--color-text) 10%, transparent); }
+
+.layer-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 4px;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  font-size: 13px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.layer-label:disabled { cursor: not-allowed; }
+.is-selected .layer-label { font-weight: 700; }
+
+.layer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How many parts a composite is built from. */
+.layer-count {
+  flex: none;
+  min-width: 17px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  text-align: center;
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-700);
+}
+.is-selected .layer-count { background: var(--color-accent-200); color: var(--color-accent-900); }
 
 /* ── the map canvas ─────────────────────────────────────────────────────── */
 

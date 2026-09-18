@@ -56,7 +56,7 @@ FastAPI will serve once it exists.
 | Projects | `screens/ProjectsScreen.tsx` | Project list, empty state, "new project" tile |
 | New project | `screens/NewProjectScreen.tsx` | Name, mesh, results folder, description, advanced settings |
 | Add your data | `screens/DataScreen.tsx` | Folder dropzone (max 10), folder list, processing progress, "all done" dialog |
-| Map | `screens/MapScreen.tsx` + `map/LayerFrame.tsx` | The engine's generated layer HTML in an iframe; the sidebar picks which document to show |
+| Map | `screens/MapScreen.tsx` + `map/LayerTree.tsx` + `map/LayerFrame.tsx` | A file-explorer tree of what the engine rendered, and the selected document in an iframe |
 | Tune the model | `screens/TuneScreen.tsx` + `tune/*` | YAML editor and node diagram over one shared tree, examples dialog |
 
 ## Where the backend plugs in
@@ -87,7 +87,8 @@ No component changes.
 | `startProcessing` | `POST /api/projects/{id}/process` | |
 | `watchProcessing` | `GET /api/projects/{id}/process/stream` | **SSE**, driven by `watchfiles` on the results folder |
 | `listVariables` | `GET /api/projects/{id}/variables?mode=input\|model` | |
-| `getLayerUrl` | `GET /api/projects/{id}/layers/{variableId}?scale=raw\|normalized` | returns the URL of the pre-rendered document the iframe loads |
+| `getLayerTree` | `GET /api/projects/{id}/layers` | the structure of what was rendered — labels and ids only |
+| `getLayerUrl` | `GET /api/projects/{id}/layers/{nodeId}?scale=raw\|normalized` | returns the URL of the pre-rendered document the iframe loads |
 | `getModel` | `GET /api/projects/{id}/model` | read with `ruamel.yaml` so comments and order survive |
 | `saveModel` | `PUT /api/projects/{id}/model` | validate with Pydantic before writing |
 | `applyModel` | `POST /api/projects/{id}/model/apply` | save, then re-run the weighting; returns once accepted |
@@ -105,10 +106,29 @@ uvicorn on its default port needs no extra config.
 
 ### What the engine has to supply
 
-- **One rendered document per layer.** The sidebar's three selectors —
-  input/model, raw/normalized, and the variable — together name one document.
-  Today every combination resolves to the same sample file; when the engine
-  emits one per layer, only `getLayerUrl` changes.
+- **The layer tree.** The engine renders a document for the whole model, one
+  per variable, and one per part of a composite variable, so `getLayerTree`
+  returns a tree rather than a list:
+
+  ```
+  model:      Complete model ──┬── Site suitability score
+                               ├── Buildable capacity
+                               └── …
+  variables:  Mean wind speed
+              Grid access ──┬── Distance to substation ──┬── High-voltage …
+                            │                            └── Medium-voltage …
+                            └── Distance to road
+  ```
+
+  Nesting is arbitrary depth. `hasDocument: false` marks a node that exists
+  only to group others — it still opens, but selecting it shows nothing. The
+  UI draws whatever structure comes back; it does not derive it from the model
+  config, because what the engine actually rendered is the only truth about
+  what can be displayed.
+
+- **One rendered document per node.** A node id plus the raw/normalized scale
+  names one document. Today every combination resolves to the same sample
+  file; when the engine emits one per layer, only `getLayerUrl` changes.
 - **Two resolutions.** `ProjectSettings.processingResolution` is what the
   engine computes and stores at; `mapResolution` is only what gets drawn.
   When the map resolution is coarser, the backend has to aggregate stored
@@ -130,6 +150,11 @@ uvicorn on its default port needs no extra config.
 
 ## Notes on what was built
 
+- **The whole simulation is one constant.** `LAYER_TREE` in
+  `src/api/mock/fixtures.ts` is the tree the backend will send; replacing it is
+  the entire migration for this feature. Its nesting is deliberately uneven —
+  three levels under `grid_access`, two under `protected_areas`, flat
+  elsewhere — so the tree is exercised rather than assumed.
 - **Mock data still follows the design**, so the projects and variables are
   Ireland / Iberia / North Sea wind-farm fixtures while the one sample document
   is Colombian SOE-001. The frame shows the filename of the document actually

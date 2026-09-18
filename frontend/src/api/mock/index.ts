@@ -10,7 +10,7 @@
 import type {
   ApplyProgress,
   DataFolder,
-  MapMode,
+  LayerTree,
   Mesh,
   ModelConfig,
   ModelExample,
@@ -19,17 +19,15 @@ import type {
   Project,
   ProjectSettings,
   ValueScale,
-  Variable,
 } from '../../types';
 import {
   AVAILABLE_FOLDERS,
   DEFAULT_MODEL,
   DEFAULT_SETTINGS,
   EXAMPLES,
+  LAYER_TREE,
   MESHES,
-  MODEL_VARIABLES,
   PROJECTS,
-  INPUT_VARIABLES,
 } from './fixtures';
 
 const delay = <T>(value: T, ms = 180): Promise<T> =>
@@ -199,14 +197,17 @@ export function watchProcessing(
   };
 }
 
-/* ── map data ──────────────────────────────────────────────────────────── */
+/* ── the layer tree ────────────────────────────────────────────────────── */
 
-const variablesFor = (mode: MapMode) => (mode === 'input' ? INPUT_VARIABLES : MODEL_VARIABLES);
-
-export async function listVariables(projectId: string, mode: MapMode): Promise<Variable[]> {
+/**
+ * The structure of what the engine rendered.
+ *
+ * Returned whole: the tree is small (labels and ids, no data), and the sidebar
+ * needs all of it to draw. Only the documents behind it are large.
+ */
+export async function getLayerTree(projectId: string): Promise<LayerTree> {
   void projectId;
-  // `seed` only drives the mock field; it is not part of the wire contract.
-  return delay(variablesFor(mode).map(({ seed: _seed, ...variable }) => variable));
+  return delay(clone(LAYER_TREE), 140);
 }
 
 /**
@@ -220,11 +221,11 @@ const SAMPLE_LAYER = 'soe_001_SOE-001_h3.html';
 
 export async function getLayerUrl(
   projectId: string,
-  variableId: string,
+  nodeId: string,
   scale: ValueScale,
 ): Promise<string> {
   void projectId;
-  void variableId;
+  void nodeId;
   void scale;
   return delay(`/layers/${SAMPLE_LAYER}`, 80);
 }

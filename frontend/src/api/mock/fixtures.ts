@@ -8,12 +8,12 @@
 
 import type {
   DataFolder,
+  LayerTree,
   Mesh,
   ModelConfig,
   ModelExample,
   Project,
   ProjectSettings,
-  Variable,
 } from '../../types';
 
 export const MESHES: Mesh[] = [
@@ -85,22 +85,89 @@ export const AVAILABLE_FOLDERS: DataFolder[] = [
   { id: 'f7', name: 'existing_wind_farms', path: '/data/in/existing_wind_farms', fileCount: 2, sizeBytes: 4e6, state: 'pending' },
 ];
 
-/** Each variable carries a seed so the mock field is stable across renders. */
-export const INPUT_VARIABLES: (Variable & { seed: number })[] = [
-  { id: 'wind', name: 'Mean wind speed', unit: 'metres per second at 100 m', hint: 'How windy it is — higher is better for turbines', seed: 3, min: 4.1, max: 11.8, decimals: 1, suffix: ' m/s' },
-  { id: 'slope', name: 'Terrain slope', unit: 'degrees', hint: 'How steep the ground is — steep land costs more to build on', seed: 7.4, min: 0, max: 27, decimals: 0, suffix: '°' },
-  { id: 'sub', name: 'Distance to substation', unit: 'kilometres', hint: 'How far the power has to travel to reach the grid', seed: 11.2, min: 0.4, max: 62, decimals: 1, suffix: ' km' },
-  { id: 'land', name: 'Land cover suitability', unit: 'index, 0 to 1', hint: 'How buildable the surface is — bare land scores high, forest low', seed: 15.8, min: 0, max: 1, decimals: 2, suffix: '' },
-  { id: 'prot', name: 'Protected areas', unit: 'percent of hexagon covered', hint: 'How much of the hexagon is off limits', seed: 19.1, min: 0, max: 100, decimals: 0, suffix: '%' },
-  { id: 'pop', name: 'Population density', unit: 'people per square kilometre', hint: 'How many people live nearby', seed: 23.6, min: 0, max: 1200, decimals: 0, suffix: ' /km²' },
-];
-
-export const MODEL_VARIABLES: (Variable & { seed: number })[] = [
-  { id: 'score', name: 'Site suitability score', unit: '0 to 100, higher is better', hint: 'Every variable blended together using your weights', seed: 31.5, min: 0, max: 100, decimals: 0, suffix: '' },
-  { id: 'cap', name: 'Buildable capacity', unit: 'megawatts per hexagon', hint: 'How much could realistically be installed here', seed: 37.2, min: 0, max: 48, decimals: 1, suffix: ' MW' },
-  { id: 'cost', name: 'Grid connection cost', unit: 'dollars per kilowatt', hint: 'Estimated cost of getting the power to the grid', seed: 41.8, min: 40, max: 620, decimals: 0, suffix: ' $/kW' },
-  { id: 'pen', name: 'Constraint penalty', unit: 'index, 0 to 1', hint: 'How much the site is held back by restrictions', seed: 47.3, min: 0, max: 1, decimals: 2, suffix: '' },
-];
+/**
+ * The structure the engine would report after rendering a project.
+ *
+ * This is the one thing to replace when the backend lands: it will send the
+ * same shape, built from what it actually generated. Nesting here is
+ * deliberately uneven — two levels under `grid_access`, one under
+ * `protected_areas`, and flat leaves elsewhere — so the tree is exercised
+ * rather than assumed.
+ */
+export const LAYER_TREE: LayerTree = {
+  model: {
+    id: 'model',
+    label: 'Complete model',
+    description: 'Every variable blended together using your weights',
+    hasDocument: true,
+    children: [
+      { id: 'score', label: 'Site suitability score', description: '0 to 100, higher is better', hasDocument: true },
+      { id: 'capacity', label: 'Buildable capacity', description: 'Megawatts per hexagon', hasDocument: true },
+      { id: 'cost', label: 'Grid connection cost', description: 'Dollars per kilowatt', hasDocument: true },
+      { id: 'penalty', label: 'Constraint penalty', description: 'Index, 0 to 1', hasDocument: true },
+    ],
+  },
+  variables: [
+    {
+      id: 'wind_speed',
+      label: 'Mean wind speed',
+      description: 'How windy it is — higher is better for turbines',
+      hasDocument: true,
+    },
+    {
+      id: 'terrain_slope',
+      label: 'Terrain slope',
+      description: 'How steep the ground is — steep land costs more to build on',
+      hasDocument: true,
+    },
+    {
+      id: 'grid_access',
+      label: 'Grid access',
+      description: 'How easily the power reaches the network',
+      hasDocument: true,
+      children: [
+        {
+          id: 'distance_to_substation',
+          label: 'Distance to substation',
+          description: 'How far the power has to travel to reach the grid',
+          hasDocument: true,
+          children: [
+            { id: 'substation_hv', label: 'High-voltage substations', hasDocument: true },
+            { id: 'substation_mv', label: 'Medium-voltage substations', hasDocument: true },
+          ],
+        },
+        {
+          id: 'distance_to_road',
+          label: 'Distance to road',
+          description: 'How far equipment has to be hauled',
+          hasDocument: true,
+        },
+      ],
+    },
+    {
+      id: 'land_cover',
+      label: 'Land cover suitability',
+      description: 'How buildable the surface is — bare land scores high, forest low',
+      hasDocument: true,
+    },
+    {
+      id: 'protected_areas',
+      label: 'Protected areas',
+      description: 'How much of the hexagon is off limits',
+      hasDocument: true,
+      children: [
+        { id: 'natura_2000', label: 'Natura 2000 sites', hasDocument: true },
+        { id: 'national_parks', label: 'National parks', hasDocument: true },
+      ],
+    },
+    {
+      id: 'population_density',
+      label: 'Population density',
+      description: 'How many people live nearby',
+      hasDocument: true,
+    },
+  ],
+};
 
 export const DEFAULT_MODEL: ModelConfig = {
   project: 'ridgeline_wind_phase_2',

@@ -14,7 +14,7 @@ import * as mock from './mock';
 import type {
   ApplyProgress,
   DataFolder,
-  MapMode,
+  LayerTree,
   Mesh,
   ModelConfig,
   ModelExample,
@@ -23,7 +23,6 @@ import type {
   Project,
   ProjectSettings,
   ValueScale,
-  Variable,
 } from '../types';
 
 /* ── projects ──────────────────────────────────────────────────────────── */
@@ -95,19 +94,24 @@ export const watchProcessing = (
   onProgress: (p: ProcessingProgress) => void,
 ): (() => void) => mock.watchProcessing(projectId, onProgress);
 
-/* ── map data ──────────────────────────────────────────────────────────── */
+/* ── map layers ────────────────────────────────────────────────────────── */
 
 /**
- * ENDPOINT: GET /api/projects/{id}/variables?mode=raw|model
+ * ENDPOINT: GET /api/projects/{id}/layers
  *
- * `raw` lists the uploaded variables as-is; `model` lists the outputs the
- * weighting produced.
+ * The structure of what the engine rendered: the whole-model document, and
+ * the variables nested wherever one is composed of others.
+ *
+ * A tree rather than a list, because the engine renders composites and their
+ * parts alike and the sidebar mirrors that the way a file explorer mirrors
+ * folders. It carries labels and ids only — the documents themselves are
+ * fetched one at a time by `getLayerUrl`.
  */
-export const listVariables = (projectId: string, mode: MapMode): Promise<Variable[]> =>
-  mock.listVariables(projectId, mode);
+export const getLayerTree = (projectId: string): Promise<LayerTree> =>
+  mock.getLayerTree(projectId);
 
 /**
- * ENDPOINT: GET /api/projects/{id}/layers/{variableId}?scale=raw|normalized
+ * ENDPOINT: GET /api/projects/{id}/layers/{nodeId}?scale=raw|normalized
  *
  * Returns the URL of the engine's pre-rendered layer HTML, which the map
  * screen drops into an iframe.
@@ -123,9 +127,9 @@ export const listVariables = (projectId: string, mode: MapMode): Promise<Variabl
  */
 export const getLayerUrl = (
   projectId: string,
-  variableId: string,
+  nodeId: string,
   scale: ValueScale,
-): Promise<string> => mock.getLayerUrl(projectId, variableId, scale);
+): Promise<string> => mock.getLayerUrl(projectId, nodeId, scale);
 
 /* ── model ─────────────────────────────────────────────────────────────── */
 

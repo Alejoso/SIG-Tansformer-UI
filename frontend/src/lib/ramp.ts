@@ -1,10 +1,9 @@
 /**
- * The two colour ramps the map uses: warm terracotta for input variables,
- * sage for model output. Both are pulled from the Organic accent ramps so the
- * map reads as part of the same system as the rest of the interface.
+ * The warm terracotta and sage ramps.
+ *
+ * The engine colours its own maps now, so these are only used for interface
+ * accents — the project card swatches — not for anything on a map.
  */
-
-import type { MapMode } from '../types';
 
 export type Rgb = [number, number, number];
 
@@ -12,8 +11,6 @@ export const RAMP_INPUT = ['#fff2eb', '#f6a06b', '#8c491a'] as const;
 export const RAMP_MODEL = ['#f0fae1', '#8fa073', '#3d472b'] as const;
 
 export type Ramp = readonly [string, string, string];
-
-export const rampFor = (mode: MapMode): Ramp => (mode === 'input' ? RAMP_INPUT : RAMP_MODEL);
 
 const hexToRgb = (hex: string): Rgb => [
   parseInt(hex.slice(1, 3), 16),
@@ -42,18 +39,4 @@ export function rampRgb(ramp: Ramp, t: number): Rgb {
 export function rampCss(ramp: Ramp, t: number): string {
   const [r, g, b] = rampRgb(ramp, t);
   return `rgb(${r},${g},${b})`;
-}
-
-/** A left-to-right gradient across the whole ramp, for the map legend. */
-export function rampGradient(ramp: Ramp): string {
-  const stops = [0, 0.25, 0.5, 0.75, 1].map((t) => rampCss(ramp, t));
-  return `linear-gradient(90deg,${stops.join(',')})`;
-}
-
-/** The three-stop diagonal swatch beside each variable in the sidebar. */
-export function rampSwatch(ramp: Ramp, index: number): string {
-  const a = 0.02 + index * 0.11;
-  const b = 0.55 + (index % 3) * 0.15;
-  const c = 1 - index * 0.07;
-  return `linear-gradient(135deg,${rampCss(ramp, a)},${rampCss(ramp, b)},${rampCss(ramp, c)})`;
 }
