@@ -15,7 +15,7 @@ import {
 import { NORMALIZATIONS, NORMALIZATION_LABELS } from '../../lib/model';
 import type { ModelConfig, ModelPath, Normalization } from '../../types';
 import { Icon } from '../ui/Icon';
-import { ExclusiveTip } from '../ui/InfoTip';
+import { ExclusionVariableTip } from '../ui/InfoTip';
 
 /** Padding subtracted when fitting the diagram to the pane. */
 const FIT_PADDING = 40;
@@ -29,7 +29,7 @@ interface ModelDiagramProps {
   weightSum: number;
   onWeight: (path: ModelPath, value: string) => void;
   onBump: (path: ModelPath, delta: number) => void;
-  onExclusive: (path: ModelPath, value: boolean) => void;
+  onExclusionVariable: (path: ModelPath, value: boolean) => void;
   onNormalization: (path: ModelPath, value: Normalization) => void;
 }
 
@@ -38,7 +38,7 @@ export function ModelDiagram({
   weightSum,
   onWeight,
   onBump,
-  onExclusive,
+  onExclusionVariable,
   onNormalization,
 }: ModelDiagramProps) {
   const pane = useRef<HTMLDivElement>(null);
@@ -101,7 +101,7 @@ export function ModelDiagram({
             key={node.id}
             className={`node${node.depth > 0 ? ' depth-deep' : ''}${
               node.informative ? ' is-informative' : ''
-            }${node.exclusive ? ' is-exclusive' : ''}`}
+            }${node.exclusion_variable ? ' is-exclusive' : ''}`}
             style={{ left: node.left, top: node.top, width: node.width }}
           >
             <div className="node-label">
@@ -111,8 +111,8 @@ export function ModelDiagram({
               {node.informative && <span className="node-badge">informative</span>}
             </div>
 
-            {node.exclusive ? (
-              /* An exclusive variable is a yes-or-no rule, not a weighted
+            {node.exclusion_variable ? (
+              /* An exclusion variable is a yes-or-no rule, not a weighted
                  input: there is no weight and no transform to set, so only
                  the flag and its explanation are shown. */
               <div className="node-meta node-meta-exclusive">
@@ -120,11 +120,11 @@ export function ModelDiagram({
                   type="button"
                   className="node-excl is-on"
                   aria-pressed
-                  onClick={() => onExclusive(node.path, false)}
+                  onClick={() => onExclusionVariable(node.path, false)}
                 >
                   excludes
                 </button>
-                <ExclusiveTip />
+                <ExclusionVariableTip />
               </div>
             ) : (
               <>
@@ -183,7 +183,7 @@ export function ModelDiagram({
                     type="button"
                     className="node-excl"
                     aria-pressed={false}
-                    onClick={() => onExclusive(node.path, true)}
+                    onClick={() => onExclusionVariable(node.path, true)}
                   >
                     weighted
                   </button>

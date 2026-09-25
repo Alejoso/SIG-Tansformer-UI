@@ -84,6 +84,18 @@ export const startProcessing = (projectId: string): Promise<void> =>
   mock.startProcessing(projectId);
 
 /**
+ * ENDPOINT: POST /api/projects/{id}/process/abort
+ *
+ * Stops a run that is already going. The backend is expected to signal the
+ * engine process — the equivalent of Ctrl-C — and that part is NOT built yet:
+ * today this only stops the progress stream. Whatever the engine had already
+ * written to the results folder stays there, so a partial run leaves partial
+ * output behind.
+ */
+export const abortProcessing = (projectId: string): Promise<void> =>
+  mock.abortProcessing(projectId);
+
+/**
  * ENDPOINT: GET /api/projects/{id}/process/stream (SSE)
  *
  * Progress ticks driven by `watchfiles` watching the results folder.

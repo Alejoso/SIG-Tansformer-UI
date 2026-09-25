@@ -47,7 +47,7 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 /** Walk to the node at `path`; the root stands in as a virtual parent. */
 export function nodeAt(variables: ModelVariable[], path: ModelPath): ModelVariable {
-  let current: ModelVariable = { key: '', weight: '0', exclusive: false, normalization: 'minmax', sub: variables };
+  let current: ModelVariable = { key: '', weight: '0', exclusion_variable: false, normalization: 'minmax', sub: variables };
   for (const index of path) {
     const children = current.sub;
     if (!children?.[index]) throw new Error(`No model node at path ${path.join('.')}`);
@@ -190,13 +190,13 @@ export function intervalsValid(variable: ModelVariable): boolean {
 /**
  * Top-level weights only — the figure the "weights add to" chip shows.
  *
- * Exclusive variables are left out: they rule a record out rather than
+ * Exclusion variable variables are left out: they rule a record out rather than
  * contributing a share of the score, so counting them would make the total
  * look wrong whenever one exists.
  */
 export function weightSum(model: ModelConfig): number {
   return model.variables
-    .filter((v) => !v.exclusive)
+    .filter((v) => !v.exclusion_variable)
     .reduce((total, v) => total + (Number.parseFloat(v.weight) || 0), 0);
 }
 
@@ -207,9 +207,9 @@ export function weightSum(model: ModelConfig): number {
  * reads as a deliberate choice rather than an unfinished edit.
  */
 export function isInformative(variable: ModelVariable): boolean {
-  // An exclusive variable has no weight at all, so "weight of zero" says
+  // An exclusion variable has no weight at all, so "weight of zero" says
   // nothing about it.
-  if (variable.exclusive) return false;
+  if (variable.exclusion_variable) return false;
   return Number.parseFloat(variable.weight) === 0;
 }
 
@@ -230,9 +230,9 @@ export function totalLeaves(variables: ModelVariable[]): number {
 export function isValid(model: ModelConfig): boolean {
   const ok = (list: ModelVariable[]): boolean =>
     list.every((v) => {
-      // An exclusive variable has neither a weight nor a transform, so there
+      // An exclusion variable has neither a weight nor a transform, so there
       // is nothing on it to be invalid.
-      if (!v.exclusive) {
+      if (!v.exclusion_variable) {
         const weight = Number.parseFloat(v.weight);
         if (Number.isNaN(weight) || weight < 0 || weight > 1) return false;
         if (!intervalsValid(v)) return false;
@@ -255,7 +255,7 @@ export function invalidReason(model: ModelConfig): 'weights' | 'intervals' | 're
 
   const walk = (list: ModelVariable[]) => {
     for (const v of list) {
-      if (!v.exclusive) {
+      if (!v.exclusion_variable) {
         const weight = Number.parseFloat(v.weight);
         if (Number.isNaN(weight) || weight < 0 || weight > 1) badWeight = true;
         if (!intervalsValid(v)) badInterval = true;
@@ -296,7 +296,7 @@ export function appendVariables(
 export type LineTarget =
   | { kind: 'resolution' }
   | { kind: 'weight'; path: ModelPath }
-  | { kind: 'exclusive'; path: ModelPath; current: boolean }
+  | { kind: 'exclusion_variable'; path: ModelPath; current: boolean }
   | { kind: 'normalization'; path: ModelPath }
   | {
       kind: 'interval';
@@ -345,10 +345,10 @@ export function toLines(model: ModelConfig): ModelLine[] {
       const here = [...path, index];
       push({ indent, key: variable.key, kind: 'section', informative: isInformative(variable) });
 
-      // An exclusive variable is a yes-or-no rule, not a weighted input, so
+      // An exclusion variable is a yes-or-no rule, not a weighted input, so
       // the weight and the transform are not hidden but absent: there is
       // nothing meaningful to put in them.
-      if (!variable.exclusive) {
+      if (!variable.exclusion_variable) {
         push({
           indent: indent + 1,
           key: 'weight',
@@ -361,13 +361,13 @@ export function toLines(model: ModelConfig): ModelLine[] {
 
       push({
         indent: indent + 1,
-        key: 'exclusive',
+        key: 'exclusion_variable',
         kind: 'bool',
-        value: variable.exclusive ? 'true' : 'false',
-        target: { kind: 'exclusive', path: here, current: variable.exclusive },
+        value: variable.exclusion_variable ? 'true' : 'false',
+        target: { kind: 'exclusion_variable', path: here, current: variable.exclusion_variable },
       });
 
-      if (!variable.exclusive) {
+      if (!variable.exclusion_variable) {
         push({
           indent: indent + 1,
           key: 'normalization',
@@ -379,7 +379,7 @@ export function toLines(model: ModelConfig): ModelLine[] {
       // The ranges belong to the variable, so they are drawn under it as
       // nested lines rather than hidden behind a dialog — this pane is the
       // config as text, and the ranges are part of the config.
-      if (!variable.exclusive && variable.normalization === 'intervals') {
+      if (!variable.exclusion_variable && variable.normalization === 'intervals') {
         const intervals = intervalsOf(variable);
         push({ indent: indent + 1, key: 'intervals', kind: 'section' });
         intervals.forEach((interval, index) => {
@@ -435,10 +435,10 @@ export function toYaml(model: ModelConfig): string {
   const emit = (list: ModelVariable[], pad: string) => {
     for (const v of list) {
       out.push(`${pad}${v.key}:`);
-      if (!v.exclusive) out.push(`${pad}  weight: ${v.weight}`);
-      out.push(`${pad}  exclusive: ${v.exclusive}`);
-      if (!v.exclusive) out.push(`${pad}  normalization: ${v.normalization}`);
-      if (!v.exclusive && v.normalization === 'intervals') {
+      if (!v.exclusion_variable) out.push(`${pad}  weight: ${v.weight}`);
+      out.push(`${pad}  exclusion_variable: ${v.exclusion_variable}`);
+      if (!v.exclusion_variable) out.push(`${pad}  normalization: ${v.normalization}`);
+      if (!v.exclusion_variable && v.normalization === 'intervals') {
         out.push(`${pad}  intervals:`);
         for (const interval of intervalsOf(v)) {
           // `null` for an open end, which is how the engine writes its bins.

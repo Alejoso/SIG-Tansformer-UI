@@ -16,12 +16,12 @@ import {
 } from '../../lib/model';
 import type { Interval, ModelPath, Normalization } from '../../types';
 import { Icon } from '../ui/Icon';
-import { ExclusiveTip } from '../ui/InfoTip';
+import { ExclusionVariableTip } from '../ui/InfoTip';
 
 interface YamlEditorProps {
   lines: ModelLine[];
   onWeight: (path: ModelPath, value: string) => void;
-  onExclusive: (path: ModelPath, value: boolean) => void;
+  onExclusionVariable: (path: ModelPath, value: boolean) => void;
   onNormalization: (path: ModelPath, value: Normalization) => void;
   onResolution: (value: string) => void;
   onInterval: (path: ModelPath, index: number, field: keyof Interval, value: string) => void;
@@ -37,7 +37,7 @@ const isBadWeight = (value: string) => {
 export function YamlEditor({
   lines,
   onWeight,
-  onExclusive,
+  onExclusionVariable,
   onNormalization,
   onResolution,
   onInterval,
@@ -73,7 +73,7 @@ export function YamlEditor({
       );
     }
 
-    if (line.kind === 'bool' && target?.kind === 'exclusive') {
+    if (line.kind === 'bool' && target?.kind === 'exclusion_variable') {
       const { path, current } = target;
       return (
         <>
@@ -81,11 +81,11 @@ export function YamlEditor({
             type="button"
             className={`yaml-bool${current ? ' is-on' : ''}`}
             aria-pressed={current}
-            onClick={() => onExclusive(path, !current)}
+            onClick={() => onExclusionVariable(path, !current)}
           >
             {line.value}
           </button>
-          {current && <ExclusiveTip placement="bottom" />}
+          {current && <ExclusionVariableTip placement="bottom" />}
         </>
       );
     }
@@ -114,7 +114,8 @@ export function YamlEditor({
       return (
         <span className={`interval-row${error ? ' is-invalid' : ''}`}>
           {/* Bounds read as (from, to] — exclusive lower, inclusive upper —
-              which is what the engine's range bins do. */}
+              which is what the engine's range bins do. The lower bracket is
+              always open, for a real bound and for −∞ alike. */}
           <span className="interval-bracket">(</span>
           <input
             className="interval-input"
@@ -131,7 +132,9 @@ export function YamlEditor({
             aria-label={`Interval ${index + 1} upper bound`}
             onChange={(e) => onInterval(path, index, 'to', e.target.value)}
           />
-          <span className="interval-bracket">]</span>
+          {/* Closed on a real bound, open on infinity: (80, +∞) has no
+              upper value to include. */}
+          <span className="interval-bracket">{interval.to.trim() === '' ? ')' : ']'}</span>
 
           <span className="interval-arrow" aria-hidden="true">
             →

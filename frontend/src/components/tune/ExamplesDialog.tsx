@@ -37,7 +37,8 @@ export function ExamplesDialog({ onClose, onInsert }: ExamplesDialogProps) {
           </div>
           <p className="dialog-body" style={{ margin: '4px 0 0', maxWidth: 560 }}>
             This is how a model is written. Every variable carries a <strong>weight</strong>, or
-            is <strong>exclusive</strong> — ruling a record out instead of being weighted at all.
+            is an <strong>exclusion variable</strong> — ruling a record out instead of being
+            weighted at all.
             A weighted variable has its own <strong>normalization</strong>, and any variable may
             hold nested <strong>subvariables</strong>.
           </p>

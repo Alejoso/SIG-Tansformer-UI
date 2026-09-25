@@ -160,6 +160,22 @@ export async function startProcessing(projectId: string): Promise<void> {
 }
 
 /**
+ * Stop a run in progress.
+ *
+ * The real one signals the engine to stop — the equivalent of Ctrl-C on the
+ * pipeline process — and that part is not built yet. Here it only stops the
+ * progress ticks, which is enough for the UI to be exercised.
+ */
+export async function abortProcessing(projectId: string): Promise<void> {
+  const timer = processingTimers.get(projectId);
+  if (timer) {
+    clearInterval(timer);
+    processingTimers.delete(projectId);
+  }
+  await delay(null, 120);
+}
+
+/**
  * Stands in for the SSE stream. Ticks every 55 ms to 100%, marks every folder
  * ready, then reports `done` — the same sequence `watchfiles` will produce.
  */

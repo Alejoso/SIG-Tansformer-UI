@@ -37,6 +37,7 @@ export function DataScreen() {
   const [statusText, setStatusText] = useState('');
   const [hexagonCount, setHexagonCount] = useState(0);
   const [showComplete, setShowComplete] = useState(false);
+  const [aborting, setAborting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const browseInput = useRef<HTMLInputElement>(null);
   const unwatch = useRef<(() => void) | null>(null);
@@ -72,6 +73,29 @@ export function DataScreen() {
   const removeFolder = async (folderId: string) => {
     await api.removeFolder(projectId, folderId);
     setFolders((current) => current.filter((f) => f.id !== folderId));
+  };
+
+  /**
+   * Stop a run that is already going.
+   *
+   * Returns to the pre-run state rather than a distinct "aborted" one: the
+   * folders are still there and Process is the obvious next move, so a
+   * separate state would only need explaining. Whatever the engine already
+   * wrote is left on disk — the backend decides what to do about that.
+   */
+  const abort = async () => {
+    if (phase !== 'processing' || aborting) return;
+    setAborting(true);
+    try {
+      await api.abortProcessing(projectId);
+      unwatch.current?.();
+      unwatch.current = null;
+      setPhase('empty');
+      setProgress(0);
+      setStatusText('');
+    } finally {
+      setAborting(false);
+    }
   };
 
   const startProcessing = async () => {
@@ -219,6 +243,15 @@ export function DataScreen() {
               <div className="muted-55" style={{ fontSize: 13 }}>
                 {progress}%
               </div>
+              <button
+                type="button"
+                className="btn btn-secondary process-abort"
+                onClick={abort}
+                disabled={aborting}
+              >
+                <Icon name="close" size={13} />
+                {aborting ? 'Stopping…' : 'Abort'}
+              </button>
             </div>
             <div
               className="progress-track"

@@ -12,7 +12,7 @@ import { useId, useState } from 'react';
 interface InfoTipProps {
   /** The explanation. Kept short — one or two sentences. */
   children: React.ReactNode;
-  /** Describes the marker itself, e.g. "About exclusive variables". */
+  /** Describes the marker itself, e.g. "About exclusion variables". */
   label: string;
   /** Which side of the marker the bubble opens on. */
   placement?: 'top' | 'bottom';
@@ -52,16 +52,21 @@ export function InfoTip({ children, label, placement = 'top' }: InfoTipProps) {
 }
 
 /**
- * The one explanation of what `exclusive` requires of the underlying data.
+ * The one explanation of what an exclusion variable requires of its data.
  * Shared so the YAML editor and the diagram cannot drift apart on it.
  */
-export function ExclusiveTip({ placement = 'top' }: { placement?: 'top' | 'bottom' }) {
+export function ExclusionVariableTip({ placement = 'top' }: { placement?: 'top' | 'bottom' }) {
   return (
-    <InfoTip label="About exclusive variables" placement={placement}>
-      An exclusive variable rules a hexagon out instead of weighting it, so its
+    <InfoTip label="About exclusion variables" placement={placement}>
+      An exclusion variable rules a hexagon out instead of weighting it, so its
       data has to be <strong>boolean</strong>: <strong>1</strong> where the
       variable excludes the cell, <strong>0</strong> where it does not. Any
       other value cannot be read as a yes-or-no.
+      <br />
+      <br />
+      To use a range or a categorical variable this way, convert it to 1 and 0
+      yourself before uploading it — there is no transform here to do it for
+      you, because only you know which values should rule a hexagon out.
     </InfoTip>
   );
 }

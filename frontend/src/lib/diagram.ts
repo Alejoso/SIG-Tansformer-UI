@@ -32,7 +32,7 @@ export interface DiagramNode {
   label: string;
   weight: string;
   normalization: ModelVariable['normalization'];
-  exclusive: boolean;
+  exclusion_variable: boolean;
   /** Weight is zero: carried for reference, not counted in the score. */
   informative: boolean;
   /**
@@ -88,7 +88,7 @@ export function buildDiagram(variables: ModelVariable[]): Diagram {
         label: variable.key.replace(/_/g, ' '),
         weight: variable.weight,
         normalization: variable.normalization,
-        exclusive: variable.exclusive,
+        exclusion_variable: variable.exclusion_variable,
         informative: isInformative(variable),
         intervalCount: variable.normalization === 'intervals' ? intervalsOf(variable).length : 0,
         depth,

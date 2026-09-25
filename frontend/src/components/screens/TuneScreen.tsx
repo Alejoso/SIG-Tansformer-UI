@@ -78,8 +78,8 @@ export function TuneScreen() {
     (path: ModelPath, delta: number) => edit((m) => bumpWeight(m, path, delta)),
     [edit],
   );
-  const onExclusive = useCallback(
-    (path: ModelPath, value: boolean) => edit((m) => setField(m, path, 'exclusive', value)),
+  const onExclusionVariable = useCallback(
+    (path: ModelPath, value: boolean) => edit((m) => setField(m, path, 'exclusion_variable', value)),
     [edit],
   );
   // Goes through setNormalization rather than setField so switching to
@@ -194,7 +194,7 @@ export function TuneScreen() {
           {showHints && (
             <p className="muted">
               Edit on either side — the text and the diagram always show the same thing. A
-              variable either carries a weight and a normalization, or is exclusive and rules a
+              variable either carries a weight and a normalization, or is an exclusion variable and rules a
               hexagon out instead — never both. Any variable can hold nested subvariables. The
               weights that are in play should add up to about 1.
             </p>
@@ -240,7 +240,7 @@ export function TuneScreen() {
         <YamlEditor
           lines={lines}
           onWeight={onWeight}
-          onExclusive={onExclusive}
+          onExclusionVariable={onExclusionVariable}
           onNormalization={onNormalization}
           onResolution={onResolution}
           onInterval={onInterval}
@@ -252,7 +252,7 @@ export function TuneScreen() {
           weightSum={sum}
           onWeight={onWeight}
           onBump={onBump}
-          onExclusive={onExclusive}
+          onExclusionVariable={onExclusionVariable}
           onNormalization={onNormalization}
         />
       </div>

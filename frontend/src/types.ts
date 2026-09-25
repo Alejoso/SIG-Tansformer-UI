@@ -180,7 +180,7 @@ export interface ModelVariable {
   /** Weight, kept as a string so a half-typed `0.` survives editing. */
   weight: string;
   /** When true the variable rules a cell out instead of weighting it. */
-  exclusive: boolean;
+  exclusion_variable: boolean;
   normalization: Normalization;
   /**
    * The ranges, in order. Only meaningful when `normalization` is

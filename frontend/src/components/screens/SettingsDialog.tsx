@@ -104,7 +104,7 @@ export function SettingsDialog({ projectId, onClose }: SettingsDialogProps) {
           </div>
 
           <div className="field" style={{ flex: 1 }}>
-            <label htmlFor="map-res">Map resolution</label>
+            <label htmlFor="map-res">Visualization resolution</label>
             <input
               id="map-res"
               className={`input${mapValid ? '' : ' is-invalid'}`}

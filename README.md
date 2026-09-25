@@ -85,6 +85,7 @@ No component changes.
 | `addFolders` | `POST /api/projects/{id}/folders` | browser sends folder names; server resolves paths, counts files, sizes |
 | `removeFolder` | `DELETE /api/projects/{id}/folders/{folderId}` | |
 | `startProcessing` | `POST /api/projects/{id}/process` | |
+| `abortProcessing` | `POST /api/projects/{id}/process/abort` | **signalling the engine is not built yet** — see below |
 | `watchProcessing` | `GET /api/projects/{id}/process/stream` | **SSE**, driven by `watchfiles` on the results folder |
 | `listVariables` | `GET /api/projects/{id}/variables?mode=input\|model` | |
 | `getLayerTree` | `GET /api/projects/{id}/layers` | what was rendered: the model tree and the flat input list, labels and ids only |
@@ -142,6 +143,12 @@ uvicorn on its default port needs no extra config.
   processed. The mock walks the variable tree parents-first; the engine should
   emit in whatever order it actually works.
 
+- **Abort is a stub.** The button on the processing panel stops the progress
+  stream and returns the screen to its pre-run state. It does **not** yet stop
+  the engine: `abortProcessing` is expected to signal the pipeline process, the
+  equivalent of Ctrl-C, and that part is unwritten. Note that a half-finished
+  run leaves whatever it already wrote in the results folder.
+
 ### Two things to decide before the backend lands
 
 - **Caching the rendered documents.** They are ~9 MB each and there will be one
@@ -194,8 +201,8 @@ uvicorn on its default port needs no extra config.
 
 - **The config is English throughout** — `weight`, `exclusive`,
   `normalization`, `intervals`, `subvariables`. The keys were Spanish in the
-  original mockup.
-- **An exclusive variable has no weight and no transform.** It rules a hexagon
+  original mockup. The exclusion flag is `exclusion_variable`.
+- **An exclusion variable has no weight and no transform.** It rules a hexagon
   out rather than contributing a share of the score, so those fields are not
   hidden but absent: nothing meaningful could go in them. They are left out of
   the weight sum and of validation, and the value is kept while hidden so

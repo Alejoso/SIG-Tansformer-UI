@@ -149,7 +149,7 @@ body { margin: 0; background: var(--color-bg); }
   left: 50%;
   z-index: 70;
   width: max-content;
-  max-width: 250px;
+  max-width: 280px;
   padding: 9px 12px;
   border-radius: var(--radius-md);
   background: var(--color-neutral-900);
