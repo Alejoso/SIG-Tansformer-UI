@@ -22,58 +22,15 @@ export const MESHES: Mesh[] = [
   { id: 'north_sea_2km_mesh.geojson', label: 'North Sea — 2 km mesh' },
 ];
 
-export const PROJECTS: Project[] = [
-  {
-    id: 'ridgeline',
-    name: 'Ridgeline Wind — Phase 2',
-    meshId: 'ireland_5km_mesh.geojson',
-    meshLabel: 'Ireland — 5 km mesh',
-    status: 'processed',
-    description: '',
-    outFolder: '/Projects/Ridgeline/results',
-    variableCount: 6,
-    hexagonCount: 4812,
-    updatedAt: '2 days ago',
-  },
-  {
-    id: 'coastal-solar',
-    name: 'Coastal Solar Screening',
-    meshId: 'iberia_10km_mesh.geojson',
-    meshLabel: 'Iberia — 10 km mesh',
-    status: 'processed',
-    description: '',
-    outFolder: '/Projects/CoastalSolar/results',
-    variableCount: 4,
-    hexagonCount: 9140,
-    updatedAt: 'last week',
-  },
-  {
-    id: 'north-sea-cable',
-    name: 'North Sea Cable Route',
-    meshId: 'north_sea_2km_mesh.geojson',
-    meshLabel: 'North Sea — 2 km mesh',
-    status: 'draft',
-    description: '',
-    outFolder: '',
-    variableCount: 0,
-    hexagonCount: 0,
-    updatedAt: '3 folders added, not processed',
-  },
-  {
-    id: 'grid-reinforcement',
-    name: 'Grid Reinforcement Study',
-    meshId: 'ireland_5km_mesh.geojson',
-    meshLabel: 'Ireland — 5 km mesh',
-    status: 'processed',
-    description: '',
-    outFolder: '/Projects/GridReinforcement/results',
-    variableCount: 8,
-    hexagonCount: 4812,
-    updatedAt: '3 weeks ago',
-  },
-];
+/**
+ * No sample projects: the app starts empty, so the first thing anyone sees is
+ * the real "create a project" path rather than someone else's data.
+ *
+ * `LAYER_TREE` below is deliberately kept — one set of layers to look at while
+ * the engine is not wired up yet.
+ */
+export const PROJECTS: Project[] = [];
 
-/** The pool the dropzone draws from when you "browse" for folders. */
 export const AVAILABLE_FOLDERS: DataFolder[] = [
   { id: 'f0', name: 'wind_atlas_2024', path: '/data/in/wind_atlas_2024', fileCount: 18, sizeBytes: 412e6, state: 'pending' },
   { id: 'f1', name: 'srtm_terrain_tiles', path: '/data/in/srtm_terrain_tiles', fileCount: 64, sizeBytes: 1.2e9, state: 'pending' },
