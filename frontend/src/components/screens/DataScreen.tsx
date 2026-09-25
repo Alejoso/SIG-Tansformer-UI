@@ -47,13 +47,20 @@ export function DataScreen() {
   useEffect(() => {
     if (!projectId) return;
     let live = true;
-    api.listFolders(projectId).then((list) => {
-      if (live) setFolders(list);
-    });
+    api
+      .listFolders(projectId)
+      .then((list) => {
+        if (live) setFolders(list);
+      })
+      .catch((error: unknown) => {
+        if (live) {
+          showToast(error instanceof Error ? error.message : 'Could not load this project’s folders');
+        }
+      });
     return () => {
       live = false;
     };
-  }, [projectId, reloadToken]);
+  }, [projectId, reloadToken, showToast]);
 
   // Never leave the progress stream open behind us.
   useEffect(() => () => unwatch.current?.(), []);

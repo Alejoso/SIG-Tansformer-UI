@@ -297,3 +297,6 @@
   background: var(--color-accent-200);
   color: var(--color-accent-900);
 }
+
+/* The empty-state circle, in its "something is wrong" colour. */
+.projects-empty-icon.is-problem { background: var(--color-accent-200); }

@@ -21,15 +21,20 @@ export function NewProjectScreen() {
 
   useEffect(() => {
     let live = true;
-    api.listMeshes().then((list) => {
-      if (!live) return;
-      setMeshes(list);
-      setMeshId((current) => current || list[0]?.id || '');
-    });
+    api
+      .listMeshes()
+      .then((list) => {
+        if (!live) return;
+        setMeshes(list);
+        setMeshId((current) => current || list[0]?.id || '');
+      })
+      .catch(() => {
+        if (live) showToast('Could not load meshes — is the backend running?');
+      });
     return () => {
       live = false;
     };
-  }, []);
+  }, [showToast]);
 
   const uploadMesh = async (file: File | undefined) => {
     if (!file) return;

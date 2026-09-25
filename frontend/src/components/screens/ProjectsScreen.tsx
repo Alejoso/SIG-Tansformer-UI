@@ -37,16 +37,70 @@ function formatWhen(iso: string): string {
 export function ProjectsScreen() {
   const { goTo, openProject } = useApp();
   const [projects, setProjects] = useState<Project[] | null>(null);
+  /**
+   * The last failure, tagged with the attempt it belongs to. Comparing during
+   * render clears it when Try again starts a new attempt, without an effect
+   * reaching back to reset it.
+   */
+  const [failed, setFailed] = useState<{ attempt: number; message: string } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const failure = failed?.attempt === attempt ? failed.message : null;
 
   useEffect(() => {
     let live = true;
-    api.listProjects().then((list) => {
-      if (live) setProjects(list);
-    });
+    api
+      .listProjects()
+      .then((list) => {
+        if (live) setProjects(list);
+      })
+      .catch((error: unknown) => {
+        // Without this the screen spins forever when the backend is not
+        // running, which looks like the app is broken rather than like
+        // something simply has not been started.
+        if (live) {
+          setFailed({
+            attempt,
+            message: error instanceof Error ? error.message : 'Could not reach the backend',
+          });
+        }
+      });
     return () => {
       live = false;
     };
-  }, []);
+  }, [attempt]);
+
+  if (failure) {
+    return (
+      <div className="screen projects-screen">
+        <div className="screen-body">
+          <div className="projects-empty">
+            <div className="projects-empty-icon is-problem">
+              <Icon name="close" size={34} color="var(--color-accent-800)" />
+            </div>
+            <h1>Cannot reach the backend</h1>
+            <p className="muted">
+              Projects are stored by the local server, so nothing can be listed without it. Start it
+              with <code className="mono">cd backend &amp;&amp; ./run.sh</code> and try again.
+            </p>
+            <p className="muted-50" style={{ fontSize: 12.5, maxWidth: 460 }}>
+              {failure}
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                setProjects(null);
+                setAttempt((n) => n + 1);
+              }}
+              style={{ height: 44, paddingInline: 26, fontSize: 15, marginTop: 6 }}
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (projects === null) {
     return (

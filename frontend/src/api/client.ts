@@ -52,18 +52,39 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-    let detail: unknown;
+    // Read the body once. A response body is a stream that can only be
+    // consumed a single time, so trying `.json()` and then falling back to
+    // `.text()` throws "body stream already read" — and that replaces the
+    // real failure with a meaningless one. Take the text, then try to parse.
+    const raw = await res.text().catch(() => '');
+    let detail: unknown = raw;
     try {
-      detail = await res.json();
+      detail = JSON.parse(raw);
     } catch {
-      detail = await res.text();
+      // Not JSON: an HTML error page, or the dev proxy saying the backend is
+      // not listening. The text is what is useful in that case.
     }
+
     // FastAPI puts the useful sentence in `detail` — surface it as the error
     // message so the UI can show what actually went wrong rather than "500".
-    throw new ApiError(describe(detail) ?? `${init?.method ?? 'GET'} ${path} failed`, res.status, detail);
+    const fallback = raw.trim() || `${init?.method ?? 'GET'} ${path} failed (${res.status})`;
+    throw new ApiError(describe(detail) ?? fallback, res.status, detail);
   }
 
-  return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+  if (res.status === 204) return undefined as T;
+
+  // Same one-read rule on the success path, so a non-JSON 200 — which is what
+  // a misrouted request looks like — reports what actually arrived.
+  const body = await res.text();
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    throw new ApiError(
+      `${init?.method ?? 'GET'} ${path} returned ${res.status} but not JSON. Is the backend running?`,
+      res.status,
+      body.slice(0, 500),
+    );
+  }
 }
 
 /**
