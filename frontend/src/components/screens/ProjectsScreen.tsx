@@ -7,14 +7,31 @@ import { Icon } from '../ui/Icon';
 
 const SWATCH = `linear-gradient(135deg,${rampCss(RAMP_INPUT, 0.15)},${rampCss(RAMP_INPUT, 0.85)})`;
 
-/** "6 variables · 4,812 hexagons · 2 days ago", or the draft equivalent. */
+/** "3 folders · 2 days ago", with the hexagon count once there is one. */
 function detailLine(project: Project): string {
-  if (project.status === 'draft') return project.updatedAt;
-  return [
-    `${project.variableCount} variables`,
-    `${project.hexagonCount.toLocaleString()} hexagons`,
-    project.updatedAt,
-  ].join(' · ');
+  const parts = [
+    `${project.variableCount} ${project.variableCount === 1 ? 'folder' : 'folders'}`,
+  ];
+  if (project.hexagonCount > 0) parts.push(`${project.hexagonCount.toLocaleString()} hexagons`);
+  if (project.updatedAt) parts.push(formatWhen(project.updatedAt));
+  return parts.join(' · ');
+}
+
+/** The server stores ISO timestamps; nobody wants to read one on a card. */
+function formatWhen(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return iso;
+
+  const minutes = Math.round((Date.now() - then) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  return new Date(then).toLocaleDateString();
 }
 
 export function ProjectsScreen() {
@@ -90,6 +107,15 @@ export function ProjectsScreen() {
                       <span className={`project-status ${processed ? 'is-processed' : 'is-draft'}`}>
                         {processed ? 'Processed' : 'Draft'}
                       </span>
+                      {/* Flagged here so a broken project is visible without
+                          opening it — the server re-checks every folder on
+                          each read. */}
+                      {project.missingFolders > 0 && (
+                        <span className="project-status is-missing">
+                          {project.missingFolders} folder
+                          {project.missingFolders === 1 ? '' : 's'} not found
+                        </span>
+                      )}
                       <span className="project-detail muted-50">{detailLine(project)}</span>
                     </div>
 

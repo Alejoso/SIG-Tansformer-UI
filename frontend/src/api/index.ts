@@ -10,6 +10,7 @@
  * The `ENDPOINT` comment on each function is the route it is expected to hit.
  */
 
+import { request } from './client';
 import * as mock from './mock';
 import type {
   ApplyProgress,
@@ -20,6 +21,8 @@ import type {
   ModelExample,
   NewProjectPayload,
   ProcessingProgress,
+  PathInspection,
+  PickedFolder,
   Project,
   ProjectSettings,
   ValueScale,
@@ -27,55 +30,75 @@ import type {
 
 /* ── projects ──────────────────────────────────────────────────────────── */
 
-/** ENDPOINT: GET /api/projects */
-export const listProjects = (): Promise<Project[]> => mock.listProjects();
+/* LIVE: served by the FastAPI backend, stored in data/projects.csv. */
 
-/** ENDPOINT: GET /api/projects/{id} */
-export const getProject = (id: string): Promise<Project> => mock.getProject(id);
+export const listProjects = (): Promise<Project[]> => request('/projects');
 
-/** ENDPOINT: POST /api/projects */
+export const getProject = (id: string): Promise<Project> => request(`/projects/${id}`);
+
 export const createProject = (payload: NewProjectPayload): Promise<Project> =>
-  mock.createProject(payload);
+  request('/projects', { method: 'POST', body: JSON.stringify(payload) });
 
-/** ENDPOINT: DELETE /api/projects/{id} */
-export const deleteProject = (id: string): Promise<void> => mock.deleteProject(id);
+/**
+ * Forget a project. Removes its rows from the CSVs and nothing else — the
+ * folders it pointed at are the user's data and are left where they are.
+ */
+export const deleteProject = (id: string): Promise<void> =>
+  request(`/projects/${id}`, { method: 'DELETE' });
 
 /* ── meshes ────────────────────────────────────────────────────────────── */
 
-/** ENDPOINT: GET /api/meshes — the GeoJSON meshes already on disk. */
-export const listMeshes = (): Promise<Mesh[]> => mock.listMeshes();
+/** LIVE: GET /api/meshes — still a fixed list server-side. */
+export const listMeshes = (): Promise<Mesh[]> => request('/meshes');
 
 /** ENDPOINT: POST /api/meshes (multipart) — upload a new mesh GeoJSON. */
 export const uploadMesh = (file: File): Promise<Mesh> => mock.uploadMesh(file);
 
 /**
- * ENDPOINT: POST /api/fs/pick-folder
+ * LIVE: POST /api/fs/pick-folder
  *
- * Opens a native directory picker on the machine running the backend. The
- * browser cannot do this on its own, so it has to be a server call — the UI
- * is local-only by design.
+ * Opens a native directory dialog on the machine running the backend. Often
+ * there is not one — a headless box, or WSL without the Tk bindings — so the
+ * result says why instead of failing silently, and pasting a path is the way
+ * that always works.
  */
-export const pickFolder = (): Promise<string | null> => mock.pickFolder();
+export const pickFolder = (): Promise<PickedFolder> =>
+  request('/fs/pick-folder', { method: 'POST' });
+
+/**
+ * LIVE: POST /api/fs/inspect
+ *
+ * Checks a typed path before it is committed. The browser deliberately cannot
+ * read an absolute path out of a file picker, so every path is text the user
+ * typed — this is what stands between a typo and a confusing empty folder.
+ */
+export const inspectPath = (path: string): Promise<PathInspection> =>
+  request('/fs/inspect', { method: 'POST', body: JSON.stringify({ path }) });
 
 /* ── data folders ──────────────────────────────────────────────────────── */
 
-/** ENDPOINT: GET /api/projects/{id}/folders */
+/* LIVE: stored in data/folders.csv, existence re-checked on every read. */
+
 export const listFolders = (projectId: string): Promise<DataFolder[]> =>
-  mock.listFolders(projectId);
+  request(`/projects/${projectId}/folders`);
 
-/**
- * ENDPOINT: POST /api/projects/{id}/folders
- *
- * Registers folders dropped onto the dropzone. The browser only hands us
- * relative paths, so the backend resolves them against the project root and
- * reports back the real file counts and sizes.
- */
+/** Absolute paths. The server validates each one and rejects the batch if any fails. */
 export const addFolders = (projectId: string, paths: string[]): Promise<DataFolder[]> =>
-  mock.addFolders(projectId, paths);
+  request(`/projects/${projectId}/folders`, { method: 'POST', body: JSON.stringify({ paths }) });
 
-/** ENDPOINT: DELETE /api/projects/{id}/folders/{folderId} */
 export const removeFolder = (projectId: string, folderId: string): Promise<void> =>
-  mock.removeFolder(projectId, folderId);
+  request(`/projects/${projectId}/folders/${folderId}`, { method: 'DELETE' });
+
+/** Point a folder at a new location, for when the one on record has moved. */
+export const relocateFolder = (
+  projectId: string,
+  folderId: string,
+  path: string,
+): Promise<DataFolder> =>
+  request(`/projects/${projectId}/folders/${folderId}/path`, {
+    method: 'PUT',
+    body: JSON.stringify({ path }),
+  });
 
 /* ── processing ────────────────────────────────────────────────────────── */
 

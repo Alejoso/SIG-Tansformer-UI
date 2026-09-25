@@ -6,51 +6,8 @@
  * so components written against the mocks work unchanged against the server.
  */
 
-import type {
-  DataFolder,
-  LayerTree,
-  Mesh,
-  ModelConfig,
-  ModelExample,
-  Project,
-  ProjectSettings,
-} from '../../types';
+import type { LayerTree, ModelConfig, ModelExample, ProjectSettings } from '../../types';
 
-export const MESHES: Mesh[] = [
-  { id: 'ireland_5km_mesh.geojson', label: 'Ireland — 5 km mesh' },
-  { id: 'iberia_10km_mesh.geojson', label: 'Iberia — 10 km mesh' },
-  { id: 'north_sea_2km_mesh.geojson', label: 'North Sea — 2 km mesh' },
-];
-
-/**
- * No sample projects: the app starts empty, so the first thing anyone sees is
- * the real "create a project" path rather than someone else's data.
- *
- * `LAYER_TREE` below is deliberately kept — one set of layers to look at while
- * the engine is not wired up yet.
- */
-export const PROJECTS: Project[] = [];
-
-export const AVAILABLE_FOLDERS: DataFolder[] = [
-  { id: 'f0', name: 'wind_atlas_2024', path: '/data/in/wind_atlas_2024', fileCount: 18, sizeBytes: 412e6, state: 'pending' },
-  { id: 'f1', name: 'srtm_terrain_tiles', path: '/data/in/srtm_terrain_tiles', fileCount: 64, sizeBytes: 1.2e9, state: 'pending' },
-  { id: 'f2', name: 'grid_substations', path: '/data/in/grid_substations', fileCount: 3, sizeBytes: 8e6, state: 'pending' },
-  { id: 'f3', name: 'corine_landcover', path: '/data/in/corine_landcover', fileCount: 22, sizeBytes: 640e6, state: 'pending' },
-  { id: 'f4', name: 'natura2000_protected', path: '/data/in/natura2000_protected', fileCount: 7, sizeBytes: 96e6, state: 'pending' },
-  { id: 'f5', name: 'population_grid_1km', path: '/data/in/population_grid_1km', fileCount: 4, sizeBytes: 128e6, state: 'pending' },
-  { id: 'f6', name: 'road_network', path: '/data/in/road_network', fileCount: 11, sizeBytes: 210e6, state: 'pending' },
-  { id: 'f7', name: 'existing_wind_farms', path: '/data/in/existing_wind_farms', fileCount: 2, sizeBytes: 4e6, state: 'pending' },
-];
-
-/**
- * The structure the engine would report after rendering a project.
- *
- * This is the one thing to replace when the backend lands: it will send the
- * same shape, built from what it actually generated. Nesting here is
- * deliberately uneven — two levels under `grid_access`, one under
- * `protected_areas`, and flat leaves elsewhere — so the tree is exercised
- * rather than assumed.
- */
 export const LAYER_TREE: LayerTree = {
   model: {
     combined: {
@@ -118,9 +75,9 @@ export const LAYER_TREE: LayerTree = {
     ],
   },
   /**
-   * One per uploaded folder, matching `AVAILABLE_FOLDERS`. Deliberately not in
-   * alphabetical order here — the UI sorts them, so the list stays findable
-   * whatever order the backend happens to send.
+   * One per uploaded folder. Deliberately not in alphabetical order here —
+   * the UI sorts them, so the list stays findable whatever order the backend
+   * happens to send.
    */
   inputs: [
     { id: 'wind_atlas_2024', label: 'Mean wind speed', description: 'Metres per second at 100 m', hasDocument: true },

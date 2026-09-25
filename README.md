@@ -8,6 +8,8 @@ running against an in-memory mock of the backend.
 SIG-UI/
 ├── design/      the source mockup (Maphex.dc.html + the Organic design system)
 ├── HTML/        the engine's pre-rendered layer documents (git-ignored)
+├── backend/     FastAPI — projects and data folders, stored as CSV
+├── data/        projects.csv + folders.csv (git-ignored, machine-specific)
 ├── frontend/    React + Vite + TypeScript
 └── README.md
 ```
@@ -42,12 +44,68 @@ contradict what is inside it.
 
 ## Running it
 
+Two processes. The backend first:
+
+```bash
+cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && ./run.sh
+```
+
+Then the frontend:
+
 ```bash
 cd frontend && npm install && npm run dev
 ```
 
-Opens on http://localhost:5173. `npm run build` emits `frontend/dist`, which
-FastAPI will serve once it exists.
+Opens on http://localhost:5173; Vite proxies `/api` to uvicorn on :8000. The
+UI still runs without the backend, but the projects list will be empty and
+creating one will fail — that half is no longer pretend.
+
+`npm run build` emits `frontend/dist`, which the backend serves at `/` when it
+is present.
+
+## What is real and what is still mocked
+
+| Area | State |
+|---|---|
+| Projects, data folders, meshes, path checking | **Live** — FastAPI, stored in `data/*.csv` |
+| Layer tree, rendered maps, the model, processing, apply | Mocked in `frontend/src/api/mock/` |
+
+## The project store
+
+Two CSV files, because the point is that you can open them, read them, and fix
+them by hand:
+
+```
+data/projects.csv   id, name, mesh_id, mesh_label, description, out_folder, created_at, updated_at
+data/folders.csv    project_id, folder_id, name, path, added_at
+```
+
+Two files rather than one so a project with no folders is still a row, and so
+neither file needs a column saying what kind of row it is. Writes are
+whole-file rewrites through a temp file and an atomic replace — the data is
+tiny and single-user, so a crash cannot leave a half-written store.
+
+Override the location with `MAPHEX_DATA_DIR`.
+
+### Folders are paths, and paths go stale
+
+A browser will not reveal an absolute path from a file picker, so folders are
+**typed or pasted**, and the server is what validates them — it resolves `~`
+and `$VARS`, checks the path is a readable directory, and reports the real
+file count and size before anything is committed.
+
+Because a path is only a path, the server re-checks every folder on **every
+read**. When one has gone:
+
+- the project card says how many are missing,
+- the data screen offers **Locate…** to point it at its new home,
+- or **Remove project**, which deletes the CSV rows and *nothing else*. The
+  folders are the user's data; forgetting a project never touches disk.
+
+There is a `POST /api/fs/pick-folder` that opens a native dialog, but there
+often is not one — a headless box, or WSL without the Tk bindings — so it
+reports why rather than failing silently, and pasting a path is the route that
+always works.
 
 ## Screens
 
@@ -74,16 +132,18 @@ No component changes.
 
 | Function | Route | Notes |
 |---|---|---|
-| `listProjects` | `GET /api/projects` | |
-| `getProject` | `GET /api/projects/{id}` | |
-| `createProject` | `POST /api/projects` | |
-| `deleteProject` | `DELETE /api/projects/{id}` | not yet called from the UI |
-| `listMeshes` | `GET /api/meshes` | GeoJSON meshes on disk |
-| `uploadMesh` | `POST /api/meshes` | multipart |
-| `pickFolder` | `POST /api/fs/pick-folder` | **native dialog on the server** — the browser cannot do this |
-| `listFolders` | `GET /api/projects/{id}/folders` | |
-| `addFolders` | `POST /api/projects/{id}/folders` | browser sends folder names; server resolves paths, counts files, sizes |
-| `removeFolder` | `DELETE /api/projects/{id}/folders/{folderId}` | |
+| `listProjects` | `GET /api/projects` | **live** |
+| `getProject` | `GET /api/projects/{id}` | **live** |
+| `createProject` | `POST /api/projects` | **live** |
+| `deleteProject` | `DELETE /api/projects/{id}` | **live** — CSV rows only, never the folders |
+| `listMeshes` | `GET /api/meshes` | **live** — still a fixed list server-side |
+| `uploadMesh` | `POST /api/meshes` | mocked; no server route yet |
+| `pickFolder` | `POST /api/fs/pick-folder` | **live** — reports when no dialog exists |
+| `inspectPath` | `POST /api/fs/inspect` | **live** — validates a typed path |
+| `listFolders` | `GET /api/projects/{id}/folders` | **live** — existence re-checked each read |
+| `addFolders` | `POST /api/projects/{id}/folders` | **live** — absolute paths, validated server-side |
+| `removeFolder` | `DELETE /api/projects/{id}/folders/{folderId}` | **live** |
+| `relocateFolder` | `PUT /api/projects/{id}/folders/{folderId}/path` | **live** — re-point a folder that moved |
 | `startProcessing` | `POST /api/projects/{id}/process` | |
 | `abortProcessing` | `POST /api/projects/{id}/process/abort` | **signalling the engine is not built yet** — see below |
 | `watchProcessing` | `GET /api/projects/{id}/process/stream` | **SSE**, driven by `watchfiles` on the results folder |

@@ -9,25 +9,19 @@
 
 import type {
   ApplyProgress,
-  DataFolder,
   LayerTree,
   Mesh,
   ModelConfig,
   ModelExample,
-  NewProjectPayload,
   ProcessingProgress,
-  Project,
   ProjectSettings,
   ValueScale,
 } from '../../types';
 import {
-  AVAILABLE_FOLDERS,
   DEFAULT_MODEL,
   DEFAULT_SETTINGS,
   EXAMPLES,
   LAYER_TREE,
-  MESHES,
-  PROJECTS,
 } from './fixtures';
 
 const delay = <T>(value: T, ms = 180): Promise<T> =>
@@ -38,109 +32,14 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 /** The dropzone caps at ten folders — one per variable. */
 export const MAX_FOLDERS = 10;
 
-/* ── in-memory store ───────────────────────────────────────────────────── */
-
-let projects: Project[] = clone(PROJECTS);
-const foldersByProject = new Map<string, DataFolder[]>();
-const modelByProject = new Map<string, ModelConfig>();
-const settingsByProject = new Map<string, ProjectSettings>();
-
-/** Projects that arrive already processed start with their folders filled in. */
-function seedFolders(project: Project): DataFolder[] {
-  if (project.status === 'draft') {
-    return clone(AVAILABLE_FOLDERS.slice(0, 3));
-  }
-  return clone(AVAILABLE_FOLDERS.slice(0, 6)).map((f) => ({ ...f, state: 'ready' as const }));
-}
-
-/* ── projects ──────────────────────────────────────────────────────────── */
-
-export const listProjects = () => delay(clone(projects));
-
-export async function getProject(id: string): Promise<Project> {
-  const found = projects.find((p) => p.id === id);
-  if (!found) throw new Error(`No project ${id}`);
-  return delay(clone(found));
-}
-
-export async function createProject(payload: NewProjectPayload): Promise<Project> {
-  const mesh = MESHES.find((m) => m.id === payload.meshId);
-  const project: Project = {
-    id: `p-${Date.now()}`,
-    name: payload.name.trim() || 'Untitled project',
-    meshId: payload.meshId,
-    meshLabel: mesh?.label ?? payload.meshId,
-    status: 'draft',
-    description: payload.description,
-    outFolder: payload.outFolder,
-    variableCount: 0,
-    hexagonCount: 0,
-    updatedAt: 'just now',
-  };
-  projects = [project, ...projects];
-  foldersByProject.set(project.id, []);
-  return delay(clone(project));
-}
-
-export async function deleteProject(id: string): Promise<void> {
-  projects = projects.filter((p) => p.id !== id);
-  foldersByProject.delete(id);
-  await delay(null);
-}
-
-/* ── meshes ────────────────────────────────────────────────────────────── */
-
-export const listMeshes = (): Promise<Mesh[]> => delay(clone(MESHES));
+/**
+ * Meshes, projects and data folders now come from the backend; what is left
+ * here is only the parts the engine has not been wired up for yet.
+ */
 
 export async function uploadMesh(file: File): Promise<Mesh> {
-  const mesh: Mesh = { id: file.name, label: file.name.replace(/\.geojson$/i, '') };
-  return delay(mesh, 500);
-}
-
-export async function pickFolder(): Promise<string | null> {
-  // The real one opens a native dialog on the machine running the backend.
-  return delay('/Projects/Ridgeline/results', 250);
-}
-
-/* ── data folders ──────────────────────────────────────────────────────── */
-
-function foldersOf(projectId: string): DataFolder[] {
-  if (!foldersByProject.has(projectId)) {
-    const project = projects.find((p) => p.id === projectId);
-    foldersByProject.set(projectId, project ? seedFolders(project) : []);
-  }
-  return foldersByProject.get(projectId)!;
-}
-
-export const listFolders = (projectId: string) => delay(clone(foldersOf(projectId)));
-
-/**
- * The mock ignores the paths and pulls the next unused folders from the pool,
- * which is what lets the dropzone work without a file system behind it.
- */
-export async function addFolders(projectId: string, paths: string[]): Promise<DataFolder[]> {
-  const current = foldersOf(projectId);
-  const taken = new Set(current.map((f) => f.id));
-  let remaining = Math.max(1, paths.length);
-
-  for (const candidate of AVAILABLE_FOLDERS) {
-    if (remaining === 0 || current.length >= MAX_FOLDERS) break;
-    if (taken.has(candidate.id)) continue;
-    current.push(clone(candidate));
-    taken.add(candidate.id);
-    remaining -= 1;
-  }
-
-  foldersByProject.set(projectId, current);
-  return delay(clone(current));
-}
-
-export async function removeFolder(projectId: string, folderId: string): Promise<void> {
-  foldersByProject.set(
-    projectId,
-    foldersOf(projectId).filter((f) => f.id !== folderId),
-  );
-  await delay(null, 80);
+  // Mesh upload has no server route yet, so this still only pretends.
+  return delay({ id: file.name, label: file.name.replace(/\.geojson$/i, '') }, 500);
 }
 
 /* ── processing ────────────────────────────────────────────────────────── */
@@ -195,10 +94,6 @@ export function watchProcessing(
     if (progress >= 100) {
       clearInterval(timer);
       processingTimers.delete(projectId);
-      foldersByProject.set(
-        projectId,
-        foldersOf(projectId).map((f) => ({ ...f, state: 'ready' as const })),
-      );
       onProgress({ phase: 'done', progress: 100, statusText: 'Finishing up', hexagonCount: 4812 });
       return;
     }
@@ -248,13 +143,12 @@ export async function getLayerUrl(
 
 /* ── model ─────────────────────────────────────────────────────────────── */
 
+const modelByProject = new Map<string, ModelConfig>();
+const settingsByProject = new Map<string, ProjectSettings>();
+
 export async function getModel(projectId: string): Promise<ModelConfig> {
   if (!modelByProject.has(projectId)) {
-    const project = projects.find((p) => p.id === projectId);
-    modelByProject.set(projectId, {
-      ...clone(DEFAULT_MODEL),
-      project: (project?.name ?? 'project').toLowerCase().replace(/[^a-z0-9]+/g, '_'),
-    });
+    modelByProject.set(projectId, clone(DEFAULT_MODEL));
   }
   return delay(clone(modelByProject.get(projectId)!));
 }

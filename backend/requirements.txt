@@ -1,0 +1,4 @@
+# Backend for the Maphex UI. Pinned loosely; the app uses nothing exotic.
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9

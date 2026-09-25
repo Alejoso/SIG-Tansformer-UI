@@ -37,9 +37,15 @@ export function NewProjectScreen() {
     showToast(`${mesh.label} added`);
   };
 
+  /**
+   * Ask the server for a native dialog. There often is not one — headless, or
+   * WSL without the Tk bindings — so say why rather than appearing to do
+   * nothing; the field beside the button always works.
+   */
   const chooseFolder = async () => {
     const picked = await api.pickFolder();
-    if (picked) setOutFolder(picked);
+    if (picked.path) setOutFolder(picked.path);
+    else if (picked.unavailable) showToast(picked.unavailable);
   };
 
   const create = async () => {

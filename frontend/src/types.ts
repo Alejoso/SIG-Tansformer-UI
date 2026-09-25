@@ -25,6 +25,12 @@ export interface Project {
   hexagonCount: number;
   /** ISO-8601. Rendered as "2 days ago". */
   updatedAt: string;
+  /**
+   * How many of the project's folders are no longer on disk. Counted by the
+   * server on every read, because the whole point of storing a path is that
+   * what it points at can move.
+   */
+  missingFolders: number;
 }
 
 export interface NewProjectPayload {
@@ -51,6 +57,30 @@ export interface DataFolder {
   sizeBytes: number;
   /** `ready` once the engine has converted it into H3. */
   state: 'pending' | 'ready' | 'failed';
+  /**
+   * False when the recorded path is not a directory on this machine any more.
+   * The UI then offers to re-point it or to forget the project.
+   */
+  exists: boolean;
+}
+
+/** What the server found at a path the user typed. */
+export interface PathInspection {
+  /** The resolved absolute path — `~` and `$VARS` expanded. */
+  path: string;
+  exists: boolean;
+  isDirectory: boolean;
+  fileCount: number;
+  sizeBytes: number;
+  /** Why the path cannot be used, if it cannot. */
+  problem: string | null;
+}
+
+/** The result of asking the server to open a native folder dialog. */
+export interface PickedFolder {
+  path: string | null;
+  /** Set when no dialog could be opened, so the UI can say why. */
+  unavailable: string | null;
 }
 
 export type ProcessingPhase = 'empty' | 'processing' | 'done';

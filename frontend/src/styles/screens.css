@@ -147,31 +147,6 @@
 .data-title { font-size: 34px; margin: 0 0 8px; }
 .data-lede { margin: 0 0 24px; font-size: 15px; max-width: 520px; text-wrap: pretty; }
 
-.dropzone {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  width: 100%;
-  height: 190px;
-  text-align: center;
-  font-family: inherit;
-  color: inherit;
-  border-radius: var(--radius-lg);
-  border: 2px dashed var(--color-accent-400);
-  background: color-mix(in srgb, var(--color-accent-100) 70%, transparent);
-  cursor: pointer;
-}
-.dropzone-title { font-family: var(--font-heading); font-size: 19px; }
-.dropzone.is-over { border-color: var(--color-accent); background: var(--color-accent-100); }
-.dropzone.is-locked {
-  border-color: var(--color-neutral-300);
-  background: var(--color-neutral-100);
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-
 .folders { margin-top: 24px; }
 .folders-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
 .folders-head h4 { margin: 0; }
@@ -246,4 +221,79 @@
   gap: 6px;
   padding-inline: 12px;
   font-size: 12.5px;
+}
+
+/* ── adding a folder by path ────────────────────────────────────────────── */
+
+.path-add {
+  padding: 18px 20px;
+  border-radius: var(--radius-lg);
+  border: 2px dashed var(--color-accent-400);
+  background: color-mix(in srgb, var(--color-accent-100) 70%, transparent);
+}
+.path-add.is-locked {
+  border-color: var(--color-neutral-300);
+  background: var(--color-neutral-100);
+  opacity: 0.75;
+}
+
+.path-add-label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 6px;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+
+/* Reserves a line so the panel does not jump as the message changes. */
+.path-add-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  margin-top: 9px;
+  font-size: 12px;
+}
+.path-add-problem { color: var(--color-accent-700); font-weight: 600; }
+.path-add-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-accent-2-800);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.path-add-ok .mono { font-size: 11px; opacity: 0.75; }
+
+/* ── a folder that has gone missing ─────────────────────────────────────── */
+
+.folder-alert {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 14px 18px;
+  border-radius: var(--radius-lg);
+  background: var(--color-accent-100);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent-300);
+}
+.folder-alert-body { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.folder-alert-body strong { font-size: 14px; }
+
+.folder-row.is-missing {
+  background: var(--color-accent-100);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent-300);
+}
+.folder-row.is-missing .folder-name { text-decoration: line-through; opacity: 0.7; }
+
+.folder-missing-tag {
+  flex: none;
+  background: var(--color-accent-200);
+  color: var(--color-accent-900);
+  white-space: nowrap;
+}
+
+.project-status.is-missing {
+  background: var(--color-accent-200);
+  color: var(--color-accent-900);
 }

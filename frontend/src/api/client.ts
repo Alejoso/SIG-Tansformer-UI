@@ -21,6 +21,30 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Pull a readable sentence out of a FastAPI error body.
+ *
+ * A plain rejection is `{detail: "No such folder"}`; a validation failure is
+ * `{detail: [{msg, loc}, …]}`. Both are worth showing; neither is worth making
+ * every call site unpack.
+ */
+function describe(detail: unknown): string | null {
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail === 'object' && 'detail' in detail) {
+    const inner = (detail as { detail: unknown }).detail;
+    if (typeof inner === 'string') return inner;
+    if (Array.isArray(inner)) {
+      const messages = inner
+        .map((item) =>
+          item && typeof item === 'object' && 'msg' in item ? String((item as { msg: unknown }).msg) : null,
+        )
+        .filter((m): m is string => Boolean(m));
+      if (messages.length) return messages.join('; ').replace(/^Value error, /, '');
+    }
+  }
+  return null;
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -34,7 +58,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       detail = await res.text();
     }
-    throw new ApiError(`${init?.method ?? 'GET'} ${path} failed`, res.status, detail);
+    // FastAPI puts the useful sentence in `detail` — surface it as the error
+    // message so the UI can show what actually went wrong rather than "500".
+    throw new ApiError(describe(detail) ?? `${init?.method ?? 'GET'} ${path} failed`, res.status, detail);
   }
 
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
