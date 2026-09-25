@@ -41,6 +41,18 @@ class NewProjectPayload(BaseModel):
         return value.strip()
 
 
+class Mesh(BaseModel):
+    """A study area to build a project on. Today that means a country."""
+
+    id: str
+    label: str
+    continent: str = ""
+    iso: str = ""
+    #: Every name and code this row answers to, joined, so the UI can filter
+    #: on one field without knowing which of them exist.
+    search: str = ""
+
+
 class DataFolder(BaseModel):
     id: str
     name: str

@@ -39,7 +39,8 @@ export const MAX_FOLDERS = 10;
 
 export async function uploadMesh(file: File): Promise<Mesh> {
   // Mesh upload has no server route yet, so this still only pretends.
-  return delay({ id: file.name, label: file.name.replace(/\.geojson$/i, '') }, 500);
+  const label = file.name.replace(/\.geojson$/i, '');
+  return delay({ id: file.name, label, continent: '', iso: '', search: label }, 500);
 }
 
 /* ── processing ────────────────────────────────────────────────────────── */

@@ -3,6 +3,7 @@ import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import type { Mesh } from '../../types';
 import { Icon } from '../ui/Icon';
+import { SearchableSelect } from '../ui/SearchableSelect';
 import { SettingsDialog } from './SettingsDialog';
 
 export function NewProjectScreen() {
@@ -26,7 +27,6 @@ export function NewProjectScreen() {
       .then((list) => {
         if (!live) return;
         setMeshes(list);
-        setMeshId((current) => current || list[0]?.id || '');
       })
       .catch(() => {
         if (live) showToast('Could not load meshes — is the backend running?');
@@ -108,19 +108,21 @@ export function NewProjectScreen() {
           <div className="field">
             <label htmlFor="project-mesh">Map mesh</label>
             <div className="field-row">
-              <select
-                id="project-mesh"
-                className="input"
-                value={meshId}
-                onChange={(e) => setMeshId(e.target.value)}
-                style={{ flex: 1, paddingRight: 12 }}
-              >
-                {meshes.map((mesh) => (
-                  <option key={mesh.id} value={mesh.id}>
-                    {mesh.label}
-                  </option>
-                ))}
-              </select>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <SearchableSelect
+                  id="project-mesh"
+                  options={meshes.map((mesh) => ({
+                    id: mesh.id,
+                    label: mesh.label,
+                    hint: mesh.continent,
+                    search: mesh.search,
+                  }))}
+                  value={meshId}
+                  onChange={setMeshId}
+                  placeholder="Search 177 countries…"
+                  emptyText="No country matches that"
+                />
+              </div>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -143,8 +145,8 @@ export function NewProjectScreen() {
             </div>
             {showHints && (
               <p className="field-hint muted-55">
-                The mesh is the outline of the area you want to study. Pick a saved one or upload
-                your own.
+                The outline of the area you want to study. Search for a country, or upload your own
+                outline.
               </p>
             )}
           </div>

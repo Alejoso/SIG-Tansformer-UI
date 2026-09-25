@@ -1,4 +1,9 @@
-# Backend for the Maphex UI. Pinned loosely; the app uses nothing exotic.
+# Backend for the Maphex UI.
 fastapi>=0.115
 uvicorn[standard]>=0.32
 pydantic>=2.9
+
+# Country outlines for the study-area picker, and the geometry the H3 mesh
+# step will need. Imported lazily — it is a couple of seconds of startup the
+# server should not pay until a country is actually asked for.
+geopandas>=1.0

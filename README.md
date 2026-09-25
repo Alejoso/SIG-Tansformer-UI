@@ -8,7 +8,8 @@ running against an in-memory mock of the backend.
 SIG-UI/
 ├── design/      the source mockup (Maphex.dc.html + the Organic design system)
 ├── HTML/        the engine's pre-rendered layer documents (git-ignored)
-├── backend/     FastAPI — projects and data folders, stored as CSV
+├── backend/     FastAPI — projects, data folders, and the country list
+│   └── reference/   vendored Natural Earth 110m countries (820 kB)
 ├── data/        projects.csv + folders.csv (git-ignored, machine-specific)
 ├── frontend/    React + Vite + TypeScript
 └── README.md
@@ -87,6 +88,33 @@ tiny and single-user, so a crash cannot leave a half-written store.
 
 Override the location with `MAPHEX_DATA_DIR`.
 
+### Study areas come from GeoPandas
+
+`GET /api/meshes` returns all 177 countries from Natural Earth's 110m admin-0
+set, read with GeoPandas.
+
+The `world` dataframe everyone remembers —
+`gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))` — **no longer
+exists**: `geopandas.datasets` was removed in GeoPandas 1.0, which now points
+you at naturalearthdata.com instead. So the file is vendored in
+`backend/reference/`, which also keeps the app working offline.
+
+Only names are served today. `countries.geometry_for(id)` loads the polygon
+alongside them and is the seam the H3 mesh step plugs into.
+
+Two details in that data worth knowing:
+
+- **ISO_A3 is not a key.** Five rows have `-99`, Norway and France among them.
+  The id is a slug of `NAME`, which is unique.
+- **`SOVEREIGNT` is left out of the search terms.** Every dependency carries
+  its parent's name there, so including it made "United States of America"
+  match Puerto Rico. Each row is still findable by what it is actually called,
+  by its short name, and by either ISO code.
+
+The picker is a searchable combobox rather than a `<select>`, which stops being
+usable well before 177 options. Matches on the label rank above matches on an
+alias.
+
 ### Folders are paths, and paths go stale
 
 A browser will not reveal an absolute path from a file picker, so folders are
@@ -144,7 +172,7 @@ No component changes.
 | `getProject` | `GET /api/projects/{id}` | **live** |
 | `createProject` | `POST /api/projects` | **live** |
 | `deleteProject` | `DELETE /api/projects/{id}` | **live** — CSV rows only, never the folders |
-| `listMeshes` | `GET /api/meshes` | **live** — still a fixed list server-side |
+| `listMeshes` | `GET /api/meshes` | **live** — 177 countries from Natural Earth via GeoPandas |
 | `uploadMesh` | `POST /api/meshes` | mocked; no server route yet |
 | `pickFolder` | `POST /api/fs/pick-folder` | **live** — zenity / kdialog / tkinter / Windows-under-WSL |
 | `inspectPath` | `POST /api/fs/inspect` | **live** — validates a typed path |

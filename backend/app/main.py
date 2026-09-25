@@ -16,11 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import fsutil, store
+from . import countries, fsutil, store
 from .models import (
     AddFoldersPayload,
     DataFolder,
     InspectResult,
+    Mesh,
     NewProjectPayload,
     PickFolderPayload,
     PickFolderResult,
@@ -39,17 +40,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#: The meshes offered when creating a project. Still a fixed list — real mesh
-#: discovery belongs with the engine, not here.
-MESHES = [
-    {"id": "ireland_5km_mesh.geojson", "label": "Ireland — 5 km mesh"},
-    {"id": "iberia_10km_mesh.geojson", "label": "Iberia — 10 km mesh"},
-    {"id": "north_sea_2km_mesh.geojson", "label": "North Sea — 2 km mesh"},
-]
-
-
 def _mesh_label(mesh_id: str) -> str:
-    return next((m["label"] for m in MESHES if m["id"] == mesh_id), mesh_id)
+    """The stored label, so an old project still reads correctly if the
+    reference data is later swapped for a different edition."""
+    return next(
+        (c["label"] for c in countries.list_countries() if c["id"] == mesh_id),
+        mesh_id,
+    )
 
 
 def _to_folder(row: store.FolderRow) -> DataFolder:
@@ -105,8 +102,15 @@ def health() -> dict[str, object]:
 
 
 @app.get("/api/meshes")
-def list_meshes() -> list[dict[str, str]]:
-    return MESHES
+def list_meshes() -> list[Mesh]:
+    """
+    The study areas a project can be built on: every country in Natural
+    Earth's 110m set, read through GeoPandas.
+
+    Names only for now. The polygons are loaded with them, ready for the step
+    that hands one to h3 to build the hexagon mesh.
+    """
+    return [Mesh(**country) for country in countries.list_countries()]
 
 
 # ── projects ──────────────────────────────────────────────────────────────

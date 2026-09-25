@@ -40,9 +40,18 @@ export interface NewProjectPayload {
   description: string;
 }
 
+/**
+ * A study area a project can be built on. Today that is a country, read from
+ * Natural Earth through GeoPandas on the server.
+ */
 export interface Mesh {
   id: string;
   label: string;
+  continent: string;
+  /** ISO 3166-1 alpha-3, where the dataset has one. Norway and France do not. */
+  iso: string;
+  /** Every name and code this row answers to, joined — what the filter matches. */
+  search: string;
 }
 
 /* ── data folders + processing ─────────────────────────────────────────── */
