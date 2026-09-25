@@ -92,7 +92,14 @@ def _is_wsl() -> bool:
 
 
 def _run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str] | None:
-    """Run a helper, returning None if it is missing or takes too long."""
+    """
+    Run a helper, returning None when the binary simply is not there.
+
+    A timeout is deliberately allowed to propagate: "this tool is not
+    installed" and "you left the dialog open" are different things, and
+    reporting the second as the first sends people looking for the wrong
+    problem.
+    """
     try:
         return subprocess.run(
             command,
@@ -102,7 +109,7 @@ def _run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str] | Non
             check=False,
             **kwargs,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except (FileNotFoundError, OSError):
         return None
 
 
@@ -147,19 +154,27 @@ def _pick_with_tk(start: Path) -> PickFolderResult | None:
     return PickFolderResult(path=chosen or None)
 
 
-#: Opens the standard Windows folder chooser. `-STA` is required for
-#: FolderBrowserDialog, and the owner form is what keeps it in front of the
-#: browser instead of behind it.
+#: Opens the standard Windows folder chooser.
+#:
+#: The starting directory arrives in the environment as MAPHEX_START rather
+#: than being interpolated into this text. PowerShell uses braces for every
+#: block, so a `str.format` template has to escape each one and a single miss
+#: breaks the whole script — which is exactly what happened. Reading it from
+#: the environment also means a path containing a quote cannot end the string
+#: it sits in.
+#:
+#: `-STA` is required for FolderBrowserDialog, and the owner form is what
+#: keeps the dialog in front of the browser instead of behind it.
 _POWERSHELL_PICKER = """
 Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = 'Choose a data folder'
 $dialog.ShowNewFolderButton = $false
-if ('{start}' -ne '') { $dialog.SelectedPath = '{start}' }
-$owner = New-Object System.Windows.Forms.Form -Property @{{ TopMost = $true }}
-if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {{
+if ($env:MAPHEX_START) { $dialog.SelectedPath = $env:MAPHEX_START }
+$owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true }
+if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
   [Console]::Out.Write($dialog.SelectedPath)
-}}
+}
 $owner.Dispose()
 """
 
@@ -170,38 +185,51 @@ def _pick_with_windows(start: Path) -> PickFolderResult | None:
 
     This machine has no Linux dialog toolkit, but WSL can run Windows
     binaries, and `wslpath` converts what comes back — including a folder
-    picked inside WSL, which the dialog reports as a `\\wsl.localhost\...`
+    picked inside WSL, which the dialog reports as a `\wsl.localhost\...`
     UNC path and which converts to a normal Linux path.
     """
     if not _is_wsl() or not shutil.which("powershell.exe"):
         return None
 
     # The dialog wants a Windows path to open at; if the start folder has no
-    # Windows equivalent, just let it open wherever it likes.
-    windows_start = ""
+    # Windows equivalent, let it open wherever it likes.
+    environment = dict(os.environ)
     converted = _run(["wslpath", "-w", str(start)])
-    if converted and converted.returncode == 0:
-        windows_start = converted.stdout.strip().replace("'", "''")
+    environment["MAPHEX_START"] = (
+        converted.stdout.strip() if converted and converted.returncode == 0 else ""
+    )
+    # WSLENV is what carries a variable across into the Windows process.
+    environment["WSLENV"] = "MAPHEX_START" + (
+        "/" if "WSLENV" not in os.environ else ":" + os.environ["WSLENV"]
+    )
 
-    script = _POWERSHELL_PICKER.format(start=windows_start)
-    # Run from a Windows-visible directory, or PowerShell warns about the cwd.
     result = _run(
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-STA", "-Command", script],
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-STA", "-Command", _POWERSHELL_PICKER],
+        # Run from a Windows-visible directory, or PowerShell warns about cwd.
         cwd="/mnt/c",
+        env=environment,
     )
     if result is None:
         return None
+    if result.returncode != 0:
+        return PickFolderResult(
+            unavailable=f"The folder dialog failed: {result.stderr.strip()[:200] or 'no output'}"
+        )
 
-    chosen = result.stdout.strip().strip("\r")
+    chosen = result.stdout.strip()
     if not chosen:
         return PickFolderResult(path=None)  # cancelled
 
     back = _run(["wslpath", "-u", chosen])
-    if back is None or back.returncode != 0:
+    converted_path = back.stdout.strip() if back and back.returncode == 0 else ""
+    # wslpath exits 0 and echoes the input back when handed something that is
+    # not a Windows path, so a zero exit code alone does not mean it worked —
+    # only an absolute result does.
+    if not converted_path.startswith("/"):
         return PickFolderResult(
             unavailable=f"Could not translate the Windows path {chosen} into a Linux one."
         )
-    return PickFolderResult(path=back.stdout.strip())
+    return PickFolderResult(path=converted_path)
 
 
 def pick_folder(start_at: str | None = None) -> PickFolderResult:
@@ -218,7 +246,12 @@ def pick_folder(start_at: str | None = None) -> PickFolderResult:
         start = Path.home()
 
     for strategy in (_pick_with_zenity, _pick_with_kdialog, _pick_with_tk, _pick_with_windows):
-        result = strategy(start)
+        try:
+            result = strategy(start)
+        except subprocess.TimeoutExpired:
+            return PickFolderResult(
+                unavailable="The folder dialog was left open too long — try again."
+            )
         if result is not None:
             return result
 
