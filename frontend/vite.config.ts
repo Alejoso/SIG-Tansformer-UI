@@ -63,11 +63,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Forwards to uvicorn in dev. Nothing uses it yet — the UI runs against
-      // the mock adapter in src/api/mock — but it is here so the switch to the
-      // real backend needs no config change.
+      // Forwards to uvicorn. Keep this in step with backend/run.sh: both
+      // default to 8765 and both read MAPHEX_PORT, so moving the backend is
+      // one variable rather than two edits.
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: `http://127.0.0.1:${process.env.MAPHEX_PORT ?? '8765'}`,
         changeOrigin: true,
       },
     },

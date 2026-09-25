@@ -57,9 +57,18 @@ Then the frontend:
 cd frontend && npm install && npm run dev
 ```
 
-Opens on http://localhost:5173; Vite proxies `/api` to uvicorn on :8000. The
-UI still runs without the backend, but the projects list will be empty and
-creating one will fail — that half is no longer pretend.
+Opens on http://localhost:5173; Vite proxies `/api` to uvicorn on **:8765**.
+The UI needs the backend — without it the projects list cannot load and says
+so.
+
+Port 8000 is crowded, so the default is 8765. To move it, set `MAPHEX_PORT`
+for **both** processes — `backend/run.sh` and `vite.config.ts` read the same
+variable:
+
+```bash
+MAPHEX_PORT=9000 ./run.sh          # in backend/
+MAPHEX_PORT=9000 npm run dev       # in frontend/
+```
 
 `npm run build` emits `frontend/dist`, which the backend serves at `/` when it
 is present.
