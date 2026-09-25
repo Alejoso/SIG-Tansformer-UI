@@ -36,6 +36,16 @@ export function MapScreen() {
   const projectId = project?.id ?? '';
   const { mode, scale, nodeId } = mapView;
 
+  /**
+   * Raw vs normalized only means something for input variables — model output
+   * is already weighted and on its own scale. So the toggle is hidden in model
+   * mode, and the value is pinned rather than merely ignored: a leftover
+   * `normalized` would otherwise go on quietly asking for a different
+   * document than the one the sidebar says is showing.
+   */
+  const showScale = mode === 'input';
+  const effectiveScale: ValueScale = showScale ? scale : 'raw';
+
   const [tree, setTree] = useState<LayerTreeData | null>(null);
   /** URL of the engine's pre-rendered document for the selected node. */
   const [layerUrl, setLayerUrl] = useState<string | null>(null);
@@ -74,7 +84,7 @@ export function MapScreen() {
   useEffect(() => {
     if (!projectId || !active) return;
     let live = true;
-    api.getLayerUrl(projectId, active.id, scale).then((url) => {
+    api.getLayerUrl(projectId, active.id, effectiveScale).then((url) => {
       if (live) setLayerUrl(url);
     });
     return () => {
@@ -82,7 +92,7 @@ export function MapScreen() {
     };
     // The resolutions are render settings for the engine, so saving them can
     // point at a freshly generated document.
-  }, [projectId, active, scale, settingsVersion]);
+  }, [projectId, active, effectiveScale, settingsVersion]);
 
   const select = (node: LayerNode) => setMapView({ ...mapView, nodeId: node.id });
 
@@ -110,30 +120,33 @@ export function MapScreen() {
           </label>
         </div>
 
-        <div className="seg mode-switch" role="group" aria-label="Value scale">
-          <label className="seg-opt">
-            <input
-              type="radio"
-              name="value-scale"
-              checked={scale === 'raw'}
-              onChange={() => setMapView({ ...mapView, scale: 'raw' })}
-            />
-            Raw data
-          </label>
-          <label className="seg-opt">
-            <input
-              type="radio"
-              name="value-scale"
-              checked={scale === 'normalized'}
-              onChange={() => setMapView({ ...mapView, scale: 'normalized' })}
-            />
-            Normalized
-          </label>
-        </div>
+        {showScale && (
+          <div className="seg mode-switch" role="group" aria-label="Value scale">
+            <label className="seg-opt">
+              <input
+                type="radio"
+                name="value-scale"
+                checked={scale === 'raw'}
+                onChange={() => setMapView({ ...mapView, scale: 'raw' })}
+              />
+              Raw data
+            </label>
+            <label className="seg-opt">
+              <input
+                type="radio"
+                name="value-scale"
+                checked={scale === 'normalized'}
+                onChange={() => setMapView({ ...mapView, scale: 'normalized' })}
+              />
+              Normalized
+            </label>
+          </div>
+        )}
 
         {showHints && (
           <p className="mode-hint muted-55">
-            {MODE_HINTS[mode]} {SCALE_HINTS[scale]}
+            {MODE_HINTS[mode]}
+            {showScale && ` ${SCALE_HINTS[scale]}`}
           </p>
         )}
 
@@ -201,7 +214,7 @@ export function MapScreen() {
           url={layerUrl}
           title={active.label}
           subtitle={
-            scale === 'normalized' && active.description
+            effectiveScale === 'normalized' && active.description
               ? `${active.description} · normalized`
               : active.description
           }
