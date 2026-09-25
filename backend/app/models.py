@@ -73,6 +73,12 @@ class InspectResult(BaseModel):
     problem: str | None = None
 
 
+class PickFolderPayload(BaseModel):
+    #: Where the dialog should open. Usually whatever is already in the field,
+    #: so the user does not restart from home every time.
+    startAt: str | None = None
+
+
 class PickFolderResult(BaseModel):
     path: str | None = None
     #: Set when no native dialog could be opened, so the UI can say why

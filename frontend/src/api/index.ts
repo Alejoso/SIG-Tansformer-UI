@@ -57,13 +57,18 @@ export const uploadMesh = (file: File): Promise<Mesh> => mock.uploadMesh(file);
 /**
  * LIVE: POST /api/fs/pick-folder
  *
- * Opens a native directory dialog on the machine running the backend. Often
- * there is not one — a headless box, or WSL without the Tk bindings — so the
- * result says why instead of failing silently, and pasting a path is the way
- * that always works.
+ * Opens a folder chooser on the machine running the backend — a Linux dialog
+ * if one is installed, otherwise the Windows one under WSL.
+ *
+ * This request blocks for as long as the dialog is open, so call it from a
+ * control that can show it is waiting. When nothing can be opened the result
+ * says so rather than failing silently, and pasting a path still works.
  */
-export const pickFolder = (): Promise<PickedFolder> =>
-  request('/fs/pick-folder', { method: 'POST' });
+export const pickFolder = (startAt?: string): Promise<PickedFolder> =>
+  request('/fs/pick-folder', {
+    method: 'POST',
+    body: JSON.stringify({ startAt: startAt?.trim() || null }),
+  });
 
 /**
  * LIVE: POST /api/fs/inspect

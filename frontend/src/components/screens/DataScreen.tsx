@@ -32,6 +32,8 @@ export function DataScreen() {
   const [draftPath, setDraftPath] = useState('');
   const [inspected, setInspected] = useState<{ path: string; result: PathInspection } | null>(null);
   const [adding, setAdding] = useState(false);
+  /** The folder dialog blocks this request for as long as it is open. */
+  const [browsing, setBrowsing] = useState(false);
 
   /** The folder whose location is being corrected, if any. */
   const [relocating, setRelocating] = useState<DataFolder | null>(null);
@@ -108,9 +110,16 @@ export function DataScreen() {
   };
 
   const browse = async () => {
-    const picked = await api.pickFolder();
-    if (picked.path) setDraftPath(picked.path);
-    else if (picked.unavailable) showToast(picked.unavailable);
+    setBrowsing(true);
+    try {
+      const picked = await api.pickFolder(draftPath);
+      if (picked.path) setDraftPath(picked.path);
+      else if (picked.unavailable) showToast(picked.unavailable);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not open a folder chooser');
+    } finally {
+      setBrowsing(false);
+    }
   };
 
   const removeFolder = async (folderId: string) => {
@@ -232,11 +241,15 @@ export function DataScreen() {
               type="button"
               className="btn btn-secondary"
               onClick={browse}
-              disabled={locked || full}
+              disabled={locked || full || browsing}
               style={{ gap: 7, flex: 'none' }}
             >
-              <Icon name="folder" size={15} />
-              Browse
+              {browsing ? (
+                <Icon name="spinner" size={15} className="spin" />
+              ) : (
+                <Icon name="folder" size={15} />
+              )}
+              {browsing ? 'Choosing…' : 'Browse'}
             </button>
             <button
               type="button"
@@ -267,10 +280,11 @@ export function DataScreen() {
                 <span className="mono">{inspection.path}</span>
               </span>
             )}
-            {!locked && !full && !checking && !inspection && showHints && (
+            {browsing && <span className="muted-55">Waiting for the folder chooser…</span>}
+            {!browsing && !locked && !full && !checking && !inspection && showHints && (
               <span className="muted-55">
-                Paste an absolute path. The local server reads it, so <span className="mono">~</span>{' '}
-                and environment variables work.
+                Browse for a folder, or paste a path — <span className="mono">~</span> and
+                environment variables work.
               </span>
             )}
           </div>

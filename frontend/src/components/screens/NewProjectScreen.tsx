@@ -14,6 +14,8 @@ export function NewProjectScreen() {
   const [outFolder, setOutFolder] = useState('');
   const [description, setDescription] = useState('');
   const [creating, setCreating] = useState(false);
+  /** The folder dialog blocks this request for as long as it is open. */
+  const [choosing, setChoosing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const meshUpload = useRef<HTMLInputElement>(null);
 
@@ -43,9 +45,16 @@ export function NewProjectScreen() {
    * nothing; the field beside the button always works.
    */
   const chooseFolder = async () => {
-    const picked = await api.pickFolder();
-    if (picked.path) setOutFolder(picked.path);
-    else if (picked.unavailable) showToast(picked.unavailable);
+    setChoosing(true);
+    try {
+      const picked = await api.pickFolder(outFolder);
+      if (picked.path) setOutFolder(picked.path);
+      else if (picked.unavailable) showToast(picked.unavailable);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not open a folder chooser');
+    } finally {
+      setChoosing(false);
+    }
   };
 
   const create = async () => {
@@ -150,10 +159,15 @@ export function NewProjectScreen() {
                 type="button"
                 className="btn btn-secondary"
                 onClick={chooseFolder}
+                disabled={choosing}
                 style={{ gap: 7, flex: 'none' }}
               >
-                <Icon name="folder" size={15} />
-                Choose
+                {choosing ? (
+                  <Icon name="spinner" size={15} className="spin" />
+                ) : (
+                  <Icon name="folder" size={15} />
+                )}
+                {choosing ? 'Choosing…' : 'Choose'}
               </button>
             </div>
             {showHints && (

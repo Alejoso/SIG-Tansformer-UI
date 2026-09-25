@@ -22,6 +22,7 @@ from .models import (
     DataFolder,
     InspectResult,
     NewProjectPayload,
+    PickFolderPayload,
     PickFolderResult,
     Project,
     RelocatePayload,
@@ -211,8 +212,15 @@ def inspect_path(payload: RelocatePayload) -> InspectResult:
 
 
 @app.post("/api/fs/pick-folder")
-def pick_folder() -> PickFolderResult:
-    return fsutil.pick_folder()
+def pick_folder(payload: PickFolderPayload | None = None) -> PickFolderResult:
+    """
+    Open a folder chooser on this machine.
+
+    Blocks until the dialog is answered, so the request is as long as the user
+    is slow — bounded by a timeout in fsutil. FastAPI runs sync endpoints in a
+    worker thread, so the rest of the API keeps serving meanwhile.
+    """
+    return fsutil.pick_folder(payload.startAt if payload else None)
 
 
 # ── the built frontend ────────────────────────────────────────────────────

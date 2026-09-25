@@ -10,6 +10,8 @@ list — it is where paths get checked, not the UI.
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 from .models import InspectResult, PickFolderResult
@@ -78,29 +80,148 @@ def folder_exists(raw: str) -> bool:
         return False
 
 
-def pick_folder() -> PickFolderResult:
-    """
-    Open a native directory chooser on this machine, if one exists.
+#: A dialog left open must not hang the request forever.
+PICKER_TIMEOUT_SECONDS = 300
 
-    Often there is not one — a headless box, or WSL without the Tk bindings
-    installed — so this reports why rather than failing silently, and the UI
-    keeps its "paste a path" field as the way that always works.
-    """
+
+def _is_wsl() -> bool:
     try:
-        import tkinter  # noqa: PLC0415 — optional, and importing costs nothing when unused
+        return "microsoft" in Path("/proc/version").read_text().lower()
+    except OSError:
+        return False
+
+
+def _run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str] | None:
+    """Run a helper, returning None if it is missing or takes too long."""
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=PICKER_TIMEOUT_SECONDS,
+            check=False,
+            **kwargs,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+
+
+def _pick_with_zenity(start: Path) -> PickFolderResult | None:
+    if not shutil.which("zenity"):
+        return None
+    result = _run(
+        ["zenity", "--file-selection", "--directory", "--title=Choose a data folder",
+         f"--filename={start}/"]
+    )
+    if result is None:
+        return None
+    # Exit code 1 is the user cancelling, which is not a failure.
+    return PickFolderResult(path=result.stdout.strip() or None)
+
+
+def _pick_with_kdialog(start: Path) -> PickFolderResult | None:
+    if not shutil.which("kdialog"):
+        return None
+    result = _run(["kdialog", "--getexistingdirectory", str(start)])
+    if result is None:
+        return None
+    return PickFolderResult(path=result.stdout.strip() or None)
+
+
+def _pick_with_tk(start: Path) -> PickFolderResult | None:
+    try:
+        import tkinter  # noqa: PLC0415 — optional; importing costs nothing when unused
         from tkinter import filedialog  # noqa: PLC0415
     except Exception:
-        return PickFolderResult(
-            unavailable="No native folder dialog on this machine — paste the path instead."
-        )
+        return None
 
     try:
         root = tkinter.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
-        chosen = filedialog.askdirectory(title="Choose a data folder")
+        chosen = filedialog.askdirectory(title="Choose a data folder", initialdir=str(start))
         root.destroy()
-    except Exception as error:  # a missing display lands here
-        return PickFolderResult(unavailable=f"Could not open a folder dialog ({error}).")
+    except Exception:
+        return None
 
     return PickFolderResult(path=chosen or None)
+
+
+#: Opens the standard Windows folder chooser. `-STA` is required for
+#: FolderBrowserDialog, and the owner form is what keeps it in front of the
+#: browser instead of behind it.
+_POWERSHELL_PICKER = """
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = 'Choose a data folder'
+$dialog.ShowNewFolderButton = $false
+if ('{start}' -ne '') { $dialog.SelectedPath = '{start}' }
+$owner = New-Object System.Windows.Forms.Form -Property @{{ TopMost = $true }}
+if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {{
+  [Console]::Out.Write($dialog.SelectedPath)
+}}
+$owner.Dispose()
+"""
+
+
+def _pick_with_windows(start: Path) -> PickFolderResult | None:
+    r"""
+    Use the Windows folder chooser from WSL.
+
+    This machine has no Linux dialog toolkit, but WSL can run Windows
+    binaries, and `wslpath` converts what comes back — including a folder
+    picked inside WSL, which the dialog reports as a `\\wsl.localhost\...`
+    UNC path and which converts to a normal Linux path.
+    """
+    if not _is_wsl() or not shutil.which("powershell.exe"):
+        return None
+
+    # The dialog wants a Windows path to open at; if the start folder has no
+    # Windows equivalent, just let it open wherever it likes.
+    windows_start = ""
+    converted = _run(["wslpath", "-w", str(start)])
+    if converted and converted.returncode == 0:
+        windows_start = converted.stdout.strip().replace("'", "''")
+
+    script = _POWERSHELL_PICKER.format(start=windows_start)
+    # Run from a Windows-visible directory, or PowerShell warns about the cwd.
+    result = _run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-STA", "-Command", script],
+        cwd="/mnt/c",
+    )
+    if result is None:
+        return None
+
+    chosen = result.stdout.strip().strip("\r")
+    if not chosen:
+        return PickFolderResult(path=None)  # cancelled
+
+    back = _run(["wslpath", "-u", chosen])
+    if back is None or back.returncode != 0:
+        return PickFolderResult(
+            unavailable=f"Could not translate the Windows path {chosen} into a Linux one."
+        )
+    return PickFolderResult(path=back.stdout.strip())
+
+
+def pick_folder(start_at: str | None = None) -> PickFolderResult:
+    """
+    Open a folder chooser on the machine running this server.
+
+    Tries a Linux dialog first, then falls back to the Windows one under WSL.
+    Every strategy returns None when it is simply not available, so the chain
+    moves on; only an outright failure produces a message. When nothing at all
+    can open, the UI still has its paste-a-path field.
+    """
+    start = Path(start_at).expanduser() if start_at else Path.home()
+    if not start.is_dir():
+        start = Path.home()
+
+    for strategy in (_pick_with_zenity, _pick_with_kdialog, _pick_with_tk, _pick_with_windows):
+        result = strategy(start)
+        if result is not None:
+            return result
+
+    return PickFolderResult(
+        unavailable="No folder dialog on this machine — paste the path instead."
+    )

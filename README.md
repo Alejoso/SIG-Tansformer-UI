@@ -102,10 +102,18 @@ read**. When one has gone:
 - or **Remove project**, which deletes the CSV rows and *nothing else*. The
   folders are the user's data; forgetting a project never touches disk.
 
-There is a `POST /api/fs/pick-folder` that opens a native dialog, but there
-often is not one — a headless box, or WSL without the Tk bindings — so it
-reports why rather than failing silently, and pasting a path is the route that
-always works.
+**Browse** opens a real folder chooser. `POST /api/fs/pick-folder` tries, in
+order: `zenity`, `kdialog`, Python's `tkinter`, and then — under WSL — the
+Windows dialog via `powershell.exe`, converting the result back with
+`wslpath`. That last one matters here: this machine has no Linux dialog
+toolkit and no passwordless sudo to install one, but WSL can run Windows
+binaries, and a folder picked *inside* WSL comes back as a
+`\\wsl.localhost\…` UNC path that `wslpath -u` turns into a normal Linux
+path.
+
+The request blocks for as long as the dialog is open, so the button shows it
+is waiting. If nothing can be opened, the result says so and pasting a path
+still works.
 
 ## Screens
 
@@ -138,7 +146,7 @@ No component changes.
 | `deleteProject` | `DELETE /api/projects/{id}` | **live** — CSV rows only, never the folders |
 | `listMeshes` | `GET /api/meshes` | **live** — still a fixed list server-side |
 | `uploadMesh` | `POST /api/meshes` | mocked; no server route yet |
-| `pickFolder` | `POST /api/fs/pick-folder` | **live** — reports when no dialog exists |
+| `pickFolder` | `POST /api/fs/pick-folder` | **live** — zenity / kdialog / tkinter / Windows-under-WSL |
 | `inspectPath` | `POST /api/fs/inspect` | **live** — validates a typed path |
 | `listFolders` | `GET /api/projects/{id}/folders` | **live** — existence re-checked each read |
 | `addFolders` | `POST /api/projects/{id}/folders` | **live** — absolute paths, validated server-side |
