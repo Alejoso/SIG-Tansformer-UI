@@ -18,7 +18,6 @@ import type {
   ValueScale,
 } from '../../types';
 import {
-  DEFAULT_MODEL,
   DEFAULT_SETTINGS,
   EXAMPLES,
   LAYER_TREE,
@@ -144,25 +143,7 @@ export async function getLayerUrl(
 
 /* ── model ─────────────────────────────────────────────────────────────── */
 
-const modelByProject = new Map<string, ModelConfig>();
 const settingsByProject = new Map<string, ProjectSettings>();
-
-export async function getModel(projectId: string): Promise<ModelConfig> {
-  if (!modelByProject.has(projectId)) {
-    modelByProject.set(projectId, clone(DEFAULT_MODEL));
-  }
-  return delay(clone(modelByProject.get(projectId)!));
-}
-
-export async function saveModel(projectId: string, model: ModelConfig): Promise<void> {
-  modelByProject.set(projectId, clone(model));
-  await delay(null, 220);
-}
-
-export async function applyModel(projectId: string, model: ModelConfig): Promise<void> {
-  modelByProject.set(projectId, clone(model));
-  await delay(null, 120);
-}
 
 /** Every variable in the tree, parents before children — the order the engine works in. */
 function flattenKeys(variables: ModelConfig['variables'], into: string[] = []): string[] {
@@ -218,27 +199,6 @@ export function watchModelApply(
     cancelled = true;
     clearInterval(timer);
   };
-}
-
-export async function validateModel(
-  model: ModelConfig,
-): Promise<{ valid: boolean; errors: string[] }> {
-  const errors: string[] = [];
-
-  const walk = (list: ModelConfig['variables'], trail: string) => {
-    for (const v of list) {
-      const weight = Number.parseFloat(v.weight);
-      if (Number.isNaN(weight) || weight < 0 || weight > 1) {
-        errors.push(`${trail}${v.key}: weight must be between 0 and 1`);
-      }
-      if (v.sub?.length) walk(v.sub, `${trail}${v.key}.`);
-    }
-  };
-  walk(model.variables, '');
-
-  if (!/^\d+$/.test(model.resolution)) errors.push('resolution must be a whole number');
-
-  return delay({ valid: errors.length === 0, errors }, 80);
 }
 
 export const listExamples = (): Promise<ModelExample[]> => delay(clone(EXAMPLES));

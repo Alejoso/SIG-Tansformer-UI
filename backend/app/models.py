@@ -85,6 +85,28 @@ class InspectResult(BaseModel):
     problem: str | None = None
 
 
+class ModelIssue(BaseModel):
+    message: str
+    #: 1-based, when the parser gives a position. Structural problems have none.
+    line: int | None = None
+    column: int | None = None
+
+
+class ModelFile(BaseModel):
+    #: Absolute path on the machine running the server, so the UI can say where
+    #: it is writing rather than naming a file that could be anywhere.
+    path: str
+    text: str
+    #: True when the file did not exist and was seeded with the default.
+    created: bool = False
+    syntaxErrors: list[ModelIssue] = Field(default_factory=list)
+    structureErrors: list[ModelIssue] = Field(default_factory=list)
+
+
+class SaveModelPayload(BaseModel):
+    text: str
+
+
 class PickFolderPayload(BaseModel):
     #: Where the dialog should open. Usually whatever is already in the field,
     #: so the user does not restart from home every time.

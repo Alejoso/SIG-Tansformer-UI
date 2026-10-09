@@ -254,13 +254,39 @@ export interface ApplyProgress {
   error?: string;
 }
 
+/** One thing wrong with the model file. */
+export interface ModelIssue {
+  message: string;
+  /** 1-based, when the parser gives a position. Structural problems have none. */
+  line: number | null;
+  column: number | null;
+}
+
+/**
+ * The model file as it sits on disk.
+ *
+ * The text is what was typed — comments, spacing and key order intact. It is
+ * never round-tripped through a parser on the way to or from the editor,
+ * because that would quietly rewrite someone's file.
+ */
+export interface ModelFile {
+  /** Absolute path on the machine running the server. */
+  path: string;
+  text: string;
+  /** True when the file did not exist and was seeded with the default. */
+  created: boolean;
+  /** The document does not parse. */
+  syntaxErrors: ModelIssue[];
+  /** It parses, but does not describe a model the engine could run. */
+  structureErrors: ModelIssue[];
+}
+
 export interface ModelExample {
   id: string;
   title: string;
   blurb: string;
-  /** Rendered verbatim in the examples dialog. */
+  /** Shown in the dialog, and inserted into the editor verbatim. */
   yaml: string;
-  variables: ModelVariable[];
 }
 
 /* ── advanced settings ─────────────────────────────────────────────────── */

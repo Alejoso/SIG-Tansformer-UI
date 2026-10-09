@@ -16,17 +16,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import countries, fsutil, store
+from . import countries, fsutil, model_store, store
 from .models import (
     AddFoldersPayload,
     DataFolder,
     InspectResult,
     Mesh,
+    ModelFile,
+    ModelIssue,
     NewProjectPayload,
     PickFolderPayload,
     PickFolderResult,
     Project,
     RelocatePayload,
+    SaveModelPayload,
 )
 
 app = FastAPI(title="Maphex", version="0.1.0")
@@ -204,6 +207,64 @@ def relocate_folder(project_id: str, folder_id: str, payload: RelocatePayload) -
     store.touch_project(project_id)
     row = next(r for r in store.folders_of(project_id) if r.folder_id == folder_id)
     return _to_folder(row)
+
+
+# ── the model file ────────────────────────────────────────────────────────
+
+
+def _describe_model(project: store.ProjectRow, text: str, created: bool = False) -> ModelFile:
+    """Pair the file with what is wrong with it, so one round trip tells all."""
+    syntax = [ModelIssue(**issue) for issue in model_store.parse_errors(text)]
+    structure = [ModelIssue(**issue) for issue in model_store.structure_errors(text)]
+    return ModelFile(
+        path=str(model_store.model_path(project)),
+        text=text,
+        created=created,
+        syntaxErrors=syntax,
+        structureErrors=structure,
+    )
+
+
+@app.get("/api/projects/{project_id}/model")
+def get_model(project_id: str) -> ModelFile:
+    """
+    The project's model file, created from the default if it is not there yet.
+
+    The text comes back exactly as stored — comments, spacing and key order
+    intact — because the editor is a text editor and round-tripping through a
+    parser would quietly rewrite what someone typed.
+    """
+    project = _require_project(project_id)
+    text, created = model_store.read_model(project)
+    return _describe_model(project, text, created)
+
+
+@app.put("/api/projects/{project_id}/model")
+def save_model(project_id: str, payload: SaveModelPayload) -> ModelFile:
+    """
+    Write the file.
+
+    Saving does not require the document to be valid. Refusing to save work in
+    progress would mean losing it, and the errors come back in the response
+    either way.
+    """
+    project = _require_project(project_id)
+    model_store.write_model(project, payload.text)
+    store.touch_project(project_id)
+    return _describe_model(project, payload.text)
+
+
+@app.post("/api/projects/{project_id}/model/apply")
+def apply_model(project_id: str, payload: SaveModelPayload) -> ModelFile:
+    """
+    Write the file, then — eventually — run the model from it.
+
+    Only the write is implemented. The run is the next step.
+    """
+    project = _require_project(project_id)
+    model_store.write_model(project, payload.text)
+    store.touch_project(project_id)
+    return _describe_model(project, payload.text)
 
 
 # ── filesystem ────────────────────────────────────────────────────────────

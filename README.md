@@ -78,6 +78,7 @@ is present.
 | Area | State |
 |---|---|
 | Projects, data folders, meshes, path checking | **Live** — FastAPI, stored in `data/*.csv` |
+| The model file | **Live** — a YAML file under the project's results folder |
 | Layer tree, rendered maps, the model, processing, apply | Mocked in `frontend/src/api/mock/` |
 
 ## The project store
@@ -96,6 +97,97 @@ whole-file rewrites through a temp file and an atomic replace — the data is
 tiny and single-user, so a crash cannot leave a half-written store.
 
 Override the location with `MAPHEX_DATA_DIR`.
+
+## The model file
+
+The model is a YAML file you edit directly. The editor is a real text editor —
+CodeMirror with YAML highlighting — so you can paste, restructure, keep
+comments and order keys however you like. Nothing round-trips through a parser
+on the way to or from disk, so the file stays exactly as you wrote it.
+
+Where it lives:
+
+```
+<project results folder>/model/model.yaml
+```
+
+Both parts are constants in `backend/app/model_store.py`, overridable with
+`MAPHEX_MODEL_DIRNAME` and `MAPHEX_MODEL_FILENAME`. A project with no results
+folder set falls back to `data/projects/<id>/model/model.yaml`, so the screen
+works before one is chosen. The file is created from a commented default the
+first time it is opened.
+
+**Save** writes the file. **Apply** writes it too — running the model from it
+is the next step and is not built yet.
+
+Saving does not require the document to be valid. Refusing to store work in
+progress would mean losing it, and the problems come back in the response
+either way.
+
+### What goes in it
+
+Checked in two places. **Syntax** is checked in the browser on every keystroke,
+and shows as a gutter mark, an underline and a line-numbered message. **Structure**
+is checked by the server on save, because the engine's rules are the ones that
+decide.
+
+```yaml
+project: ridgeline            # free-form; yours to use
+model: suitability_v2
+objective: maximize
+resolution: 8
+
+variables:
+  wind_speed:                 # any name you like
+    weight: 0.45              # 0 to 1. A weight of 0 means "carry it, do not count it"
+    exclusion_variable: false
+    normalization: minmax     # minmax | standard | intervals
+
+  land_cover:
+    weight: 0.10
+    exclusion_variable: false
+    normalization: intervals
+    intervals:                # [from, to, result]; null is unbounded
+      - [null, 0.2, 1]        # ranges are (from, to] — exclusive lower, inclusive upper
+      - [0.2, 0.4, 2]
+      - [0.8, null, 5]
+
+  grid_access:
+    weight: 0.30
+    exclusion_variable: false
+    normalization: minmax
+    subvariables:             # nest to any depth
+      distance_to_substation:
+        weight: 0.60
+        exclusion_variable: false
+        normalization: minmax
+
+  protected_area:
+    exclusion_variable: true  # rules a hexagon out; no weight, no normalization
+```
+
+The rules the server enforces, and nothing more:
+
+- `variables` must exist and be a mapping.
+- A variable either has `weight` **and** `normalization`, or
+  `exclusion_variable: true`. Never both — an exclusion variable rules a
+  hexagon out, so a weight on it would never be read.
+- `weight` is a number from 0 to 1.
+- `normalization` is `minmax`, `standard` or `intervals`.
+- With `intervals`, the list must be non-empty and every row `[from, to,
+  result]`: bounds are numbers or `null`, the result is a number, and a
+  bounded lower must sit below its upper.
+- `subvariables` is a mapping, checked the same way, to any depth.
+
+Anything else in the file is left alone. The editor is meant to be free, so
+the server rejects what cannot be run rather than everything unusual.
+
+### The diagram is a readout
+
+The pane beside the editor draws whatever the text currently parses to, and
+steps aside when it does not parse. It is deliberately **read-only**: writing a
+change back would mean rewriting your file — comments, ordering, formatting —
+which is the opposite of what a text editor is for.
 
 ### Study areas come from GeoPandas
 
@@ -160,7 +252,7 @@ still works.
 | New project | `screens/NewProjectScreen.tsx` | Name, mesh, results folder, description, advanced settings |
 | Add your data | `screens/DataScreen.tsx` | Folder dropzone (max 10), folder list, processing progress, "all done" dialog |
 | Map | `screens/MapScreen.tsx` + `map/LayerTree.tsx` + `map/LayerFrame.tsx` | A file-explorer tree of what the engine rendered, and the selected document in an iframe. Raw/normalized applies to input variables only |
-| Tune the model | `screens/TuneScreen.tsx` + `tune/*` | YAML editor and node diagram over one shared tree, examples dialog |
+| Tune the model | `screens/TuneScreen.tsx` + `tune/*` | A YAML text editor over the real file, with a read-only diagram of what it currently says |
 
 ## Where the backend plugs in
 
@@ -195,11 +287,10 @@ No component changes.
 | `listVariables` | `GET /api/projects/{id}/variables?mode=input\|model` | |
 | `getLayerTree` | `GET /api/projects/{id}/layers` | what was rendered: the model tree and the flat input list, labels and ids only |
 | `getLayerUrl` | `GET /api/projects/{id}/layers/{nodeId}?scale=raw\|normalized` | returns the URL of the pre-rendered document the iframe loads |
-| `getModel` | `GET /api/projects/{id}/model` | read with `ruamel.yaml` so comments and order survive |
-| `saveModel` | `PUT /api/projects/{id}/model` | validate with Pydantic before writing |
-| `applyModel` | `POST /api/projects/{id}/model/apply` | save, then re-run the weighting; returns once accepted |
+| `getModel` | `GET /api/projects/{id}/model` | **live** — the file verbatim, plus what is wrong with it |
+| `saveModel` | `PUT /api/projects/{id}/model` | **live** — writes the text as-is; valid or not |
+| `applyModel` | `POST /api/projects/{id}/model/apply` | **live for the write**; running the model is next |
 | `watchModelApply` | `GET /api/projects/{id}/model/apply/stream` | **SSE**, one `ApplyProgress` per variable — drives the loading dialog |
-| `validateModel` | `POST /api/model/validate` | the engine's rules are the ones that decide |
 | `listExamples` | `GET /api/model/examples` | |
 | `getSettings` | `GET /api/projects/{id}/settings` | |
 | `saveSettings` | `PUT /api/projects/{id}/settings` | |
@@ -260,9 +351,9 @@ uvicorn on its default port needs no extra config.
   per layer. The dev server sends `Cache-Control: no-store` so a regenerated
   file is picked up immediately; production wants the opposite — a long cache
   with a content hash or an ETag in the URL — or every layer switch re-downloads.
-- **Who owns validation.** The UI validates locally so Apply can react as you
-  type (`src/lib/model.ts`, `isValid`). `validateModel` exists for the server's
-  stricter answer but nothing gates on it yet.
+- **Who owns validation.** Syntax is checked in the browser so the editor
+  responds immediately; structure is checked by the server on save, because
+  the engine's rules decide. Nothing gates on a separate validate call.
 
 ## Notes on what was built
 

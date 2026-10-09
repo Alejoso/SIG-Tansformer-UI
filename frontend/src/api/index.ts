@@ -19,6 +19,7 @@ import type {
   Mesh,
   ModelConfig,
   ModelExample,
+  ModelFile,
   NewProjectPayload,
   ProcessingProgress,
   PathInspection,
@@ -174,26 +175,35 @@ export const getLayerUrl = (
 /* ── model ─────────────────────────────────────────────────────────────── */
 
 /**
- * ENDPOINT: GET /api/projects/{id}/model
+ * LIVE: GET /api/projects/{id}/model
  *
- * Reads the YAML with ruamel.yaml, so comments and key order survive a
- * round-trip through the editor.
+ * The model file, created from the default if it does not exist yet. The text
+ * arrives exactly as stored — the editor is a text editor, so nothing is
+ * reformatted on the way through.
  */
-export const getModel = (projectId: string): Promise<ModelConfig> => mock.getModel(projectId);
+export const getModel = (projectId: string): Promise<ModelFile> =>
+  request(`/projects/${projectId}/model`);
 
-/** ENDPOINT: PUT /api/projects/{id}/model — validates with Pydantic, then writes. */
-export const saveModel = (projectId: string, model: ModelConfig): Promise<void> =>
-  mock.saveModel(projectId, model);
+/**
+ * LIVE: PUT /api/projects/{id}/model
+ *
+ * Writes the file and returns what is wrong with it. Saving does not require
+ * the document to be valid — refusing to store work in progress would mean
+ * losing it.
+ */
+export const saveModel = (projectId: string, text: string): Promise<ModelFile> =>
+  request(`/projects/${projectId}/model`, { method: 'PUT', body: JSON.stringify({ text }) });
 
 /**
  * ENDPOINT: POST /api/projects/{id}/model/apply
  *
- * Saves, then re-runs the weighting so the model outputs on the map reflect
- * the new weights. Resolves once the run has been accepted, not once it has
- * finished — follow it with `watchModelApply` for progress.
+ * LIVE for the write; the run is not built yet.
+ *
+ * Today this saves the file. Re-running the weighting from it is the next
+ * step — `watchModelApply` still simulates that part.
  */
-export const applyModel = (projectId: string, model: ModelConfig): Promise<void> =>
-  mock.applyModel(projectId, model);
+export const applyModel = (projectId: string, text: string): Promise<ModelFile> =>
+  request(`/projects/${projectId}/model/apply`, { method: 'POST', body: JSON.stringify({ text }) });
 
 /**
  * ENDPOINT: GET /api/projects/{id}/model/apply/stream (SSE)
@@ -210,16 +220,6 @@ export const watchModelApply = (
   model: ModelConfig,
   onProgress: (p: ApplyProgress) => void,
 ): (() => void) => mock.watchModelApply(projectId, model, onProgress);
-
-/**
- * ENDPOINT: POST /api/model/validate
- *
- * Server-side validation. The UI validates locally too, but the engine's
- * rules are the ones that decide, so this is what gates Apply once the
- * backend exists.
- */
-export const validateModel = (model: ModelConfig): Promise<{ valid: boolean; errors: string[] }> =>
-  mock.validateModel(model);
 
 /** ENDPOINT: GET /api/model/examples — the starter structures in the dialog. */
 export const listExamples = (): Promise<ModelExample[]> => mock.listExamples();

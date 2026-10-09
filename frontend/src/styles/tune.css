@@ -60,67 +60,54 @@
 .yaml-filename { font-size: 13px; font-weight: 600; }
 .yaml-kind { margin-left: auto; font-size: 11.5px; }
 
-.yaml-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 0 20px; }
+/* The editor fills the pane; CodeMirror does its own scrolling. */
+.yaml-body-editor { flex: 1; min-height: 0; overflow: hidden; }
+.yaml-editor { height: 100%; }
+.yaml-editor .cm-editor { height: 100%; }
 
-.yaml-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 1px 10px 1px 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  line-height: 1.95;
+.yaml-filename {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;      /* keep the filename visible when the path is long */
+  text-align: left;
 }
-.yaml-gutter {
-  width: 34px;
+
+/* ── problems under the editor ──────────────────────────────────────────── */
+
+.yaml-problems {
   flex: none;
-  text-align: right;
-  color: var(--color-neutral-400);
-  font-size: 11.5px;
-  user-select: none;
-}
-.yaml-indent { flex: none; min-width: 0; }
-.yaml-key { font-weight: 600; white-space: nowrap; color: var(--color-accent-700); }
-.yaml-key.depth-1 { color: var(--color-accent-600); }
-.yaml-key.depth-2 { color: var(--color-accent-500); }
-.yaml-colon { color: var(--color-neutral-500); }
-.yaml-plain { color: var(--color-accent-2-700); }
-
-.yaml-input {
-  width: 62px;
-  font: inherit;
-  font-size: 13px;
-  padding: 1px 8px;
-  color: var(--color-accent-2-800);
-  background: var(--color-bg);
-  border: 1px solid var(--color-divider);
-  border-radius: 999px;
-  outline: none;
-}
-.yaml-input.is-invalid { border-color: var(--color-accent); background: var(--color-accent-100); }
-
-.yaml-select {
-  font: inherit;
-  font-size: 12.5px;
-  padding: 2px 8px;
-  color: var(--color-accent-2-800);
-  background: var(--color-bg);
-  border: 1px solid var(--color-divider);
-  border-radius: 999px;
-  outline: none;
+  max-height: 136px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-accent-100);
 }
 
-.yaml-bool {
-  font: inherit;
-  font-size: 12.5px;
-  padding: 1px 11px;
-  border-radius: 999px;
-  cursor: pointer;
-  border: 0;
-  background: var(--color-neutral-200);
-  color: var(--color-neutral-700);
+.yaml-problem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.45;
 }
-.yaml-bool.is-on { background: var(--color-accent-200); color: var(--color-accent-900); }
+
+.yaml-problem-kind {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.yaml-problem-kind.is-syntax { background: var(--color-accent-300); color: var(--color-accent-900); }
+.yaml-problem-kind.is-structure { background: var(--color-neutral-300); color: var(--color-neutral-800); }
+
+.yaml-problem-line { flex: none; font-size: 11px; color: var(--color-accent-700); }
+.yaml-problem-text { flex: 1; min-width: 0; }
 
 /* ── node diagram ───────────────────────────────────────────────────────── */
 
@@ -446,3 +433,53 @@
 
 /* An exclusive node has only its flag, so it needs no extra breathing room. */
 .node-meta-exclusive { justify-content: flex-start; }
+
+
+/* ── the diagram is a readout now, not a control surface ────────────────── */
+
+.node-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.node-readout-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
+.node-readout-value {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-accent-900);
+}
+
+.node-norm-readout {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* `excludes` is a label here, not a button. */
+.node-excl.is-on { cursor: default; }
+
+/* Shown in place of the diagram when the file does not describe a model. */
+.diagram-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px;
+  text-align: center;
+}
+.diagram-empty-title { font-family: var(--font-heading); font-size: 18px; }
+.diagram-empty p { margin: 0; max-width: 340px; font-size: 13px; }

@@ -6,7 +6,7 @@
  * so components written against the mocks work unchanged against the server.
  */
 
-import type { LayerTree, ModelConfig, ModelExample, ProjectSettings } from '../../types';
+import type { LayerTree, ModelExample, ProjectSettings } from '../../types';
 
 export const LAYER_TREE: LayerTree = {
   model: {
@@ -91,42 +91,6 @@ export const LAYER_TREE: LayerTree = {
   ],
 };
 
-export const DEFAULT_MODEL: ModelConfig = {
-  project: 'ridgeline_wind_phase_2',
-  model: 'suitability_v2',
-  objective: 'maximize',
-  resolution: '8',
-  variables: [
-    { key: 'wind_speed', weight: '0.45', exclusion_variable: false, normalization: 'minmax' },
-    { key: 'terrain_slope', weight: '0.15', exclusion_variable: false, normalization: 'standard' },
-    {
-      key: 'grid_access', weight: '0.30', exclusion_variable: false, normalization: 'minmax',
-      sub: [
-        { key: 'distance_to_substation', weight: '0.60', exclusion_variable: false, normalization: 'minmax' },
-        { key: 'distance_to_road', weight: '0.40', exclusion_variable: false, normalization: 'standard' },
-      ],
-    },
-    {
-      // Starts on intervals so the table is visible without configuring
-      // anything first. Bounds follow the engine's own 1-5 scoring bins.
-      key: 'land_cover',
-      weight: '0.10',
-      exclusion_variable: false,
-      normalization: 'intervals',
-      intervals: [
-        { from: '', to: '0.2', value: '1' },
-        { from: '0.2', to: '0.4', value: '2' },
-        { from: '0.4', to: '0.6', value: '3' },
-        { from: '0.6', to: '0.8', value: '4' },
-        { from: '0.8', to: '', value: '5' },
-      ],
-    },
-    // An exclusion variable, so it carries no weight and no transform — the other four
-    // add to 1.00 between them.
-    { key: 'protected_area', weight: '0', exclusion_variable: true, normalization: 'minmax' },
-  ],
-};
-
 export const EXAMPLES: ModelExample[] = [
   {
     id: 'a',
@@ -154,22 +118,6 @@ export const EXAMPLES: ModelExample[] = [
       '  hazard_zone:',
       '    exclusion_variable: true',
     ].join('\n'),
-    variables: [
-      { key: 'age', weight: '0.30', exclusion_variable: false, normalization: 'minmax' },
-      { key: 'household_income', weight: '0.40', exclusion_variable: false, normalization: 'standard' },
-      {
-        key: 'education_level',
-        weight: '0.30',
-        exclusion_variable: false,
-        normalization: 'intervals',
-        intervals: [
-          { from: '', to: '5', value: '1' },
-          { from: '5', to: '11', value: '2' },
-          { from: '11', to: '', value: '3' },
-        ],
-      },
-      { key: 'hazard_zone', weight: '0', exclusion_variable: true, normalization: 'minmax' },
-    ],
   },
   {
     id: 'b',
@@ -207,23 +155,6 @@ export const EXAMPLES: ModelExample[] = [
       '      welfare_register:',
       '        exclusion_variable: true',
     ].join('\n'),
-    variables: [
-      {
-        key: 'academic_performance', weight: '0.5', exclusion_variable: false, normalization: 'minmax',
-        sub: [
-          { key: 'mathematics', weight: '0.5', exclusion_variable: false, normalization: 'standard' },
-          { key: 'language', weight: '0.3', exclusion_variable: false, normalization: 'standard' },
-          { key: 'science', weight: '0.2', exclusion_variable: false, normalization: 'standard' },
-        ],
-      },
-      {
-        key: 'socioeconomic_context', weight: '0.5', exclusion_variable: false, normalization: 'minmax',
-        sub: [
-          { key: 'income_bracket', weight: '1.0', exclusion_variable: false, normalization: 'minmax' },
-          { key: 'welfare_register', weight: '0', exclusion_variable: true, normalization: 'minmax' },
-        ],
-      },
-    ],
   },
 ];
 

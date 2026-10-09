@@ -3,6 +3,10 @@ fastapi>=0.115
 uvicorn[standard]>=0.32
 pydantic>=2.9
 
+# Reads the model file to validate it. The file itself is written verbatim —
+# the editor is a text editor, so nothing here reformats what was typed.
+ruamel.yaml>=0.18
+
 # Country outlines for the study-area picker, and the geometry the H3 mesh
 # step will need. Imported lazily — it is a couple of seconds of startup the
 # server should not pay until a country is actually asked for.

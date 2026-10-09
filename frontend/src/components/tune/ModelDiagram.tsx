@@ -1,9 +1,14 @@
 /**
- * The right half of the tune screen: the same config as a node graph.
+ * The right half of the tune screen: the model as a node graph.
  *
- * Boxes are absolutely positioned from `buildDiagram`, with the bezier edges
- * drawn on an SVG underneath. Editing a weight here goes through the same
- * handlers as the YAML pane, so both views stay in step.
+ * Read-only, and deliberately so. The editor beside it is a text editor now,
+ * and writing a change back into someone's YAML means rewriting their file —
+ * their comments, their ordering, their formatting. A picture of what the
+ * text currently says is worth more than a second way to edit it that would
+ * damage the first.
+ *
+ * It is drawn from whatever the text parses to, so it follows along as the
+ * file is typed, and disappears when the file stops making sense.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -12,10 +17,9 @@ import {
   DIAGRAM_CANVAS_WIDTH,
   DIAGRAM_ROOT_WIDTH,
 } from '../../lib/diagram';
-import { NORMALIZATIONS, NORMALIZATION_LABELS } from '../../lib/model';
-import type { ModelConfig, ModelPath, Normalization } from '../../types';
+import { NORMALIZATION_LABELS } from '../../lib/model';
+import type { ModelConfig } from '../../types';
 import { Icon } from '../ui/Icon';
-import { ExclusionVariableTip } from '../ui/InfoTip';
 
 /** Padding subtracted when fitting the diagram to the pane. */
 const FIT_PADDING = 40;
@@ -27,20 +31,9 @@ const MIN_FIT_ZOOM = 0.62;
 interface ModelDiagramProps {
   model: ModelConfig;
   weightSum: number;
-  onWeight: (path: ModelPath, value: string) => void;
-  onBump: (path: ModelPath, delta: number) => void;
-  onExclusionVariable: (path: ModelPath, value: boolean) => void;
-  onNormalization: (path: ModelPath, value: Normalization) => void;
 }
 
-export function ModelDiagram({
-  model,
-  weightSum,
-  onWeight,
-  onBump,
-  onExclusionVariable,
-  onNormalization,
-}: ModelDiagramProps) {
+export function ModelDiagram({ model, weightSum }: ModelDiagramProps) {
   const pane = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(0.86);
 
@@ -105,88 +98,27 @@ export function ModelDiagram({
             style={{ left: node.left, top: node.top, width: node.width }}
           >
             <div className="node-label">
-              {/* The name truncates, the badge does not — it was being
-                  clipped by the label's ellipsis. */}
               <span className="node-label-name">{node.label}</span>
               {node.informative && <span className="node-badge">informative</span>}
             </div>
 
             {node.exclusion_variable ? (
-              /* An exclusion variable is a yes-or-no rule, not a weighted
-                 input: there is no weight and no transform to set, so only
-                 the flag and its explanation are shown. */
               <div className="node-meta node-meta-exclusive">
-                <button
-                  type="button"
-                  className="node-excl is-on"
-                  aria-pressed
-                  onClick={() => onExclusionVariable(node.path, false)}
-                >
-                  excludes
-                </button>
-                <ExclusionVariableTip />
+                <span className="node-excl is-on">excludes</span>
               </div>
             ) : (
               <>
-                <div className="node-weight">
-                  <button
-                    type="button"
-                    className="btn btn-icon btn-secondary node-step"
-                    aria-label={`Decrease ${node.label} weight`}
-                    onClick={() => onBump(node.path, -0.02)}
-                  >
-                    <Icon name="minus" size={12} strokeWidth={3} />
-                  </button>
-                  <input
-                    className={`node-input${
-                      Number.isNaN(Number.parseFloat(node.weight)) ? ' is-invalid' : ''
-                    }`}
-                    value={node.weight}
-                    aria-label={`${node.label} weight`}
-                    onChange={(e) => onWeight(node.path, e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-icon btn-secondary node-step"
-                    aria-label={`Increase ${node.label} weight`}
-                    onClick={() => onBump(node.path, 0.02)}
-                  >
-                    <Icon name="plus" size={12} strokeWidth={3} />
-                  </button>
+                <div className="node-readout">
+                  <span className="node-readout-label">weight</span>
+                  <span className="node-readout-value">{node.weight}</span>
                 </div>
-
-                {/* Stacked rather than side by side: "Standard scaler" does
-                    not fit beside a chip in a 190px node. */}
-                <select
-                  className="node-norm"
-                  value={node.normalization}
-                  aria-label={`${node.label} normalization`}
-                  onChange={(e) => onNormalization(node.path, e.target.value as Normalization)}
-                >
-                  {NORMALIZATIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {NORMALIZATION_LABELS[option]}
-                    </option>
-                  ))}
-                </select>
-
                 <div className="node-meta">
-                  {/* The table itself lives in the editor pane — a 190px box
-                      is no place for it — but the count keeps the two views
-                      honest about each other. */}
+                  <span className="node-norm-readout">
+                    {NORMALIZATION_LABELS[node.normalization]}
+                  </span>
                   {node.intervalCount > 0 && (
-                    <span className="node-intervals" title="Ranges, edited in the YAML pane">
-                      {node.intervalCount}
-                    </span>
+                    <span className="node-intervals">{node.intervalCount}</span>
                   )}
-                  <button
-                    type="button"
-                    className="node-excl"
-                    aria-pressed={false}
-                    onClick={() => onExclusionVariable(node.path, true)}
-                  >
-                    weighted
-                  </button>
                 </div>
               </>
             )}
@@ -195,7 +127,7 @@ export function ModelDiagram({
       </div>
 
       <div className="diagram-caption">
-        <span className="diagram-caption-label muted-55">Same config, as a diagram</span>
+        <span className="diagram-caption-label muted-55">The file, as a diagram</span>
         <span className="tag tag-accent-2" style={{ gap: 5 }}>
           <span>weights add to</span>
           <span>{weightSum.toFixed(2)}</span>
