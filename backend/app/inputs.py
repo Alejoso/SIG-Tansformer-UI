@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -228,27 +229,113 @@ def dimensions(project: store.ProjectRow) -> list[str]:
     return sorted(p.name for p in root.iterdir() if p.is_dir())
 
 
-def suggest_code(project: store.ProjectRow, dimension: str) -> str:
+def _strip_accents(text: str) -> str:
     """
-    The next free code in a dimension.
+    `técnico` -> `tecnico`, the way the engine does it.
 
-    The three-letter prefix comes from the codes already there — `REG` for
-    `09_regulatorio`, `SOE` for `10_socioeconomico`. It cannot be derived
-    from the dimension name (`socioeconomico` would give `SOC`), so an empty
-    dimension gets a guess from its letters that the user is expected to
-    correct.
+    NFD splits an accented letter into the letter plus a combining mark, and
+    the marks (category Mn) are dropped. Without this an accent becomes an
+    underscore and `técnico` sanitises to `t_cnico`.
+    """
+    return "".join(
+        char for char in unicodedata.normalize("NFD", text)
+        if unicodedata.category(char) != "Mn"
+    )
+
+
+def normalise_dimension(name: str) -> str:
+    """
+    A dimension name as the engine will end up storing it.
+
+    The pipeline's `lint_filenames` sanitises folder names under `data/in`:
+    lowercased, anything but a letter or digit turned into an underscore. So
+    a folder typed as `10-Socioeconomico` is renamed to `10_socioeconomico`
+    on the first run, and every variable under it changes id. Normalising
+    here means what the screen shows is what the engine will have.
+    """
+    return re.sub(r"[^A-Za-z0-9]+", "_", _strip_accents(name).strip()).strip("_").lower()
+
+
+def normalise_code(raw: str) -> str:
+    """
+    A code in the engine's own shape: three letters, underscore, three digits.
+
+    Typed codes copy the file they came from, and files are named `SOE-001`
+    as often as `SOE_001`. The engine's `DIM_CODE_RE` only recognises the
+    underscore form, and a code it does not recognise stops being a code —
+    it becomes part of the name and the variable loses its identity. So a
+    hyphen is corrected rather than rejected.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", _strip_accents(raw).strip()).strip("_").upper()
+    # `SOE001` is unambiguous too, and is what you get from a tidy filename.
+    match = re.fullmatch(r"([A-Za-z]{3})_?([0-9]{1,3})", cleaned)
+    if match:
+        return f"{match.group(1).upper()}_{int(match.group(2)):03d}"
+    return cleaned
+
+
+def _code_from_filename(filename: str) -> str:
+    """
+    The code a file names itself after, if it does.
+
+    `SOE-001.gpkg` is a variable announcing its own code, which is a better
+    suggestion than the next free number — and it is how these files arrive.
+    """
+    stem = filename.split(".")[0]
+    candidate = normalise_code(stem)
+    return candidate if CODE_PATTERN.match(candidate) else ""
+
+
+def suggest_dimension(project: store.ProjectRow, source: Path) -> str:
+    """
+    Which dimension a folder probably belongs to.
+
+    The folder is usually named after it — `10-Socioeconomico` holding
+    `SOE-001.gpkg`. Only offered when the project has no dimensions yet;
+    once there are some, the first is the better default because variables
+    arrive in batches.
+    """
+    existing = dimensions(project)
+    if existing:
+        return existing[0]
+    guess = normalise_dimension(source.name)
+    # A folder called `data` or `downloads` says nothing; one that looks like
+    # a dimension usually has a number or several words.
+    return guess if len(guess) > 3 else ""
+
+
+def suggest_code(project: store.ProjectRow, dimension: str, filename: str = "") -> str:
+    """
+    The code to offer for a new variable.
+
+    Three sources, in order of how much they know: the file's own name, the
+    codes already in the dimension, and failing both, the dimension's
+    letters. The prefix cannot be derived from the dimension name in general
+    — `socioeconomico` would give `SOC`, not `SOE` — so the existing codes
+    are what settle it.
     """
     existing = [
         variable.code for variable in scan(project)
         if variable.dimension == dimension and CODE_PATTERN.match(variable.code)
     ]
+    taken = set(existing)
+
+    from_file = _code_from_filename(filename) if filename else ""
+    if from_file and from_file not in taken:
+        return from_file
+
     if existing:
         prefix = existing[0][:3].upper()
         used = {int(code[4:]) for code in existing if code[:3].upper() == prefix}
+    elif from_file:
+        # The filename gave a code, but it is taken — keep its prefix and
+        # move to the next free number under it.
+        prefix, used = from_file[:3], {int(from_file[4:])}
     else:
         letters = re.sub(r"[^A-Za-z]", "", dimension)[:3].upper()
         prefix, used = (letters or "VAR").ljust(3, "X"), set()
 
+    used |= {int(code[4:]) for code in taken if code[:3].upper() == prefix}
     number = next(n for n in range(1, 1000) if n not in used)
     return f"{prefix}_{number:03d}"
 
@@ -296,13 +383,16 @@ def plan(project: store.ProjectRow, raw_source: str, dimension: str = "") -> Imp
     dataset = datasets[0]
     companions = _companions(dataset)
 
-    chosen = dimension or (dimensions(project) or [""])[0]
+    # With no dimension chosen yet, the folder's own name is the best guess —
+    # these arrive as `10-Socioeconomico/SOE-001.gpkg`, which says both.
+    chosen = normalise_dimension(dimension) if dimension else suggest_dimension(project, source)
+
     result.filename = dataset.name
     result.format = _format_of(dataset)
     result.files = [dataset.name] + [c.name for c in companions]
     result.sizeBytes = _measure([dataset, *companions])
     result.dimension = chosen
-    result.code = suggest_code(project, chosen) if chosen else ""
+    result.code = suggest_code(project, chosen, dataset.name)
     return result
 
 
@@ -318,17 +408,27 @@ def _destination(project: store.ProjectRow, dimension: str, code: str) -> Path:
     root = data_in(project)
     if root is None:
         raise ValueError("This project has no folder set.")
-    if not DIMENSION_PATTERN.match(dimension):
+
+    # Corrected rather than rejected where the intent is clear: `SOE-001` is
+    # the code the file is named after, and `10-Socioeconomico` is what the
+    # engine's own lint would turn into `10_socioeconomico` on the first run
+    # anyway. Normalising here means the path never changes under the user.
+    folder = normalise_dimension(dimension)
+    identifier = normalise_code(code)
+
+    if not folder or not DIMENSION_PATTERN.match(folder):
         raise ValueError(
-            "A dimension is a folder name: letters, digits, dashes and underscores."
+            "A dimension is a folder name — letters, digits and underscores, "
+            "like 10_socioeconomico."
         )
-    if not CODE_PATTERN.match(code):
+    if not CODE_PATTERN.match(identifier):
         raise ValueError(
-            "A code is three letters and three digits, like REG_007 — the engine "
-            "reads the variable's identity out of it."
+            f"{code!r} is not a code the engine can read. It wants three letters "
+            "and three digits, like SOE_001 — it reads the variable's identity "
+            "out of that."
         )
 
-    target = (root / dimension / code.upper()).resolve()
+    target = (root / folder / identifier).resolve()
     if root.resolve() not in target.parents:
         raise ValueError("That is not a place inside this project's input folder.")
     return target
@@ -349,9 +449,10 @@ def import_folder(
         raise ValueError(prepared.problem)
 
     target = _destination(project, dimension, code)
+    identifier = f"{target.parent.name}/{target.name}"
     if target.exists() and any(target.iterdir()):
         raise ValueError(
-            f"{dimension}/{code.upper()} already has data. Remove it first, or use another code."
+            f"{identifier} already has data. Remove it first, or use another code."
         )
 
     source = fsutil.expand(raw_source)
@@ -375,7 +476,6 @@ def import_folder(
         raise ValueError(f"Could not copy into the project: {error}") from error
 
     # Remember where it came from, so the screen can say so later.
-    identifier = f"{dimension}/{code.upper()}"
     rows = [row for row in store.folders_of(project.id) if row.name != identifier]
     rows.append(
         store.FolderRow(
@@ -400,10 +500,10 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> None:
     result, and removing an input is not a statement about results.
     """
     target = _destination(project, dimension, code)
+    identifier = f"{target.parent.name}/{target.name}"
     if not target.is_dir():
-        raise ValueError(f"No {dimension}/{code.upper()} in this project.")
+        raise ValueError(f"No {identifier} in this project.")
     shutil.rmtree(target)
 
-    identifier = f"{dimension}/{code.upper()}"
     rows = [row for row in store.folders_of(project.id) if row.name != identifier]
     store.replace_folders(project.id, rows)

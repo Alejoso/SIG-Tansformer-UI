@@ -21,6 +21,35 @@ function formatSize(bytes: number): string {
   return `${bytes} B`;
 }
 
+/*
+ * What the server will make of a typed dimension and code.
+ *
+ * Cosmetic only — `inputs.py` normalises for real, and is the authority. This
+ * exists so the "Copied to…" line shows the path that will actually be
+ * created rather than the keystrokes: files are named `SOE-001.gpkg` and
+ * folders `10-Socioeconomico`, while the engine reads `SOE_001` under
+ * `10_socioeconomico`, and silently landing somewhere other than what was
+ * previewed is worse than not previewing at all.
+ */
+const canonicalDimension = (name: string): string =>
+  name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+
+const canonicalCode = (raw: string): string => {
+  const cleaned = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+  const match = /^([A-Za-z]{3})_?([0-9]{1,3})$/.exec(cleaned);
+  return match ? `${match[1]}_${match[2].padStart(3, '0')}` : cleaned;
+};
+
 /** `1m 04s`, `12s` — how long a run took, from its own timestamps. */
 function formatDuration(run: { startedAt: number; finishedAt: number | null }): string {
   const seconds = Math.max(0, Math.round((run.finishedAt ?? Date.now() / 1000) - run.startedAt));
@@ -119,7 +148,12 @@ export function DataScreen() {
         setDimensions(dims);
         // Default to the dimension already in use, so the common case —
         // another variable alongside the others — needs no choice at all.
-        setDimension((current) => current || dims[0] || '');
+        // Not `|| ''`: a select whose value matches no option still *shows*
+        // its first option, and changing nothing fires no event — so state
+        // stayed empty, the new-dimension box never appeared and Add was
+        // disabled with nothing saying why. With no dimensions yet, the only
+        // option is "New dimension…", so that is what state must say.
+        setDimension((current) => current || dims[0] || NEW_DIMENSION);
       })
       .catch((error: unknown) => {
         if (live) {
@@ -156,6 +190,17 @@ export function DataScreen() {
         // The server suggests the next free code for that dimension; keep
         // whatever the user has typed over it.
         setCode((current) => current || result.code);
+        // It suggests a dimension too, from the folder's own name, which is
+        // usually right: these arrive as `10-Socioeconomico/SOE-001.gpkg`.
+        // A suggestion that is not an existing dimension has to select the
+        // "New dimension…" option, or the select and the state disagree.
+        setDimension((current) => {
+          if (current && current !== NEW_DIMENSION) return current;
+          if (!result.dimension) return NEW_DIMENSION;
+          if (dimensions.includes(result.dimension)) return result.dimension;
+          setNewDimension((typed) => typed || result.dimension);
+          return NEW_DIMENSION;
+        });
       } catch {
         if (live) setPlanned(null);
       }
@@ -166,7 +211,7 @@ export function DataScreen() {
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftPath, projectId, chosenDimension]);
+  }, [draftPath, projectId, chosenDimension, dimensions]);
 
   /**
    * What the server said about the folder currently in the box.
@@ -450,7 +495,10 @@ export function DataScreen() {
                 <select
                   id="variable-dimension"
                   className="input"
-                  value={dimension}
+                  /* Belt and braces for the bug above: anything not in the
+                     list is the "new dimension" case, so the shown option
+                     and the state always agree. */
+                  value={dimensions.includes(dimension) ? dimension : NEW_DIMENSION}
                   onChange={(e) => {
                     setDimension(e.target.value);
                     // The code is the next free one *within* a dimension, so
@@ -485,6 +533,9 @@ export function DataScreen() {
                   value={code}
                   placeholder="REG_007"
                   onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  // Not normalised while typing: deleting the hyphen out
+                  // of "SOE-" as it is typed fights the user. The line
+                  // below shows where it will land.
                   style={{ width: 110, flex: 'none' }}
                 />
 
@@ -499,10 +550,21 @@ export function DataScreen() {
                 </button>
               </div>
 
-              {chosenDimension && code && (
+              {/* A disabled button with no reason is the worst case here:
+                  everything looks filled in and nothing happens. */}
+              {!chosenDimension || !code ? (
                 <div className="muted-55" style={{ fontSize: 11.5 }}>
-                  Copied to <span className="mono">in/{chosenDimension}/{code}/</span> — the engine
-                  reads a variable's dimension and code from that path.
+                  {!chosenDimension
+                    ? 'Name the dimension this variable belongs to — the engine reads it from the folder path.'
+                    : 'Give it a code: three letters and three digits, like SOE_001.'}
+                </div>
+              ) : (
+                <div className="muted-55" style={{ fontSize: 11.5 }}>
+                  Copied to{' '}
+                  <span className="mono">
+                    in/{canonicalDimension(chosenDimension)}/{canonicalCode(code)}/
+                  </span>{' '}
+                  — the engine reads a variable's dimension and code from that path.
                 </div>
               )}
             </div>
