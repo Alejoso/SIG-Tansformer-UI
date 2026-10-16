@@ -13,7 +13,8 @@ import { API_BASE, request } from './client';
 import * as mock from './mock';
 import type {
   ApplyProgress,
-  DataFolder,
+  ImportPlan,
+  InputVariable,
   LayerTree,
   Mesh,
   ModelConfig,
@@ -22,7 +23,6 @@ import type {
   NewProjectPayload,
   PipelineReadiness,
   PipelineRun,
-  PathInspection,
   PickedFolder,
   Project,
   ProjectSettings,
@@ -71,40 +71,68 @@ export const pickFolder = (startAt?: string): Promise<PickedFolder> =>
     body: JSON.stringify({ startAt: startAt?.trim() || null }),
   });
 
+/* ── the data the engine will read ─────────────────────────────────────── */
+
+/* LIVE: the engine's own input tree, read and written on disk. */
+
 /**
- * LIVE: POST /api/fs/inspect
+ * ENDPOINT: GET /api/projects/{id}/inputs
  *
- * Checks a typed path before it is committed. The browser deliberately cannot
- * read an absolute path out of a file picker, so every path is text the user
- * typed — this is what stands between a typo and a confusing empty folder.
+ * The variables the pipeline will process, read from its input tree rather
+ * than from any record of ours — including anything put there by hand.
  */
-export const inspectPath = (path: string): Promise<PathInspection> =>
-  request('/fs/inspect', { method: 'POST', body: JSON.stringify({ path }) });
+export const listInputs = (projectId: string): Promise<InputVariable[]> =>
+  request(`/projects/${projectId}/inputs`);
 
-/* ── data folders ──────────────────────────────────────────────────────── */
+/** ENDPOINT: GET /api/projects/{id}/inputs/dimensions — the ones already in use. */
+export const listDimensions = (projectId: string): Promise<string[]> =>
+  request(`/projects/${projectId}/inputs/dimensions`);
 
-/* LIVE: stored in data/folders.csv, existence re-checked on every read. */
-
-export const listFolders = (projectId: string): Promise<DataFolder[]> =>
-  request(`/projects/${projectId}/folders`);
-
-/** Absolute paths. The server validates each one and rejects the batch if any fails. */
-export const addFolders = (projectId: string, paths: string[]): Promise<DataFolder[]> =>
-  request(`/projects/${projectId}/folders`, { method: 'POST', body: JSON.stringify({ paths }) });
-
-export const removeFolder = (projectId: string, folderId: string): Promise<void> =>
-  request(`/projects/${projectId}/folders/${folderId}`, { method: 'DELETE' });
-
-/** Point a folder at a new location, for when the one on record has moved. */
-export const relocateFolder = (
+/**
+ * ENDPOINT: POST /api/projects/{id}/inputs/plan
+ *
+ * A dry run of adding a folder: which dataset was found, which companion
+ * files travel with it, and where it would land. Nothing is written.
+ */
+export const planImport = (
   projectId: string,
-  folderId: string,
   path: string,
-): Promise<DataFolder> =>
-  request(`/projects/${projectId}/folders/${folderId}/path`, {
-    method: 'PUT',
-    body: JSON.stringify({ path }),
+  dimension: string,
+): Promise<ImportPlan> =>
+  request(`/projects/${projectId}/inputs/plan`, {
+    method: 'POST',
+    body: JSON.stringify({ path, dimension }),
   });
+
+/**
+ * ENDPOINT: POST /api/projects/{id}/inputs
+ *
+ * Copies the folder's dataset into the project as one variable. The server
+ * does the copying; the browser never touches the files.
+ */
+export const addInput = (
+  projectId: string,
+  path: string,
+  dimension: string,
+  code: string,
+): Promise<InputVariable> =>
+  request(`/projects/${projectId}/inputs`, {
+    method: 'POST',
+    body: JSON.stringify({ path, dimension, code }),
+  });
+
+/**
+ * ENDPOINT: DELETE /api/projects/{id}/inputs/{dimension}/{code}
+ *
+ * Removes the project's copy. The source folder and anything already
+ * produced from it are left alone.
+ */
+export const removeInput = (
+  projectId: string,
+  dimension: string,
+  code: string,
+): Promise<void> =>
+  request(`/projects/${projectId}/inputs/${dimension}/${code}`, { method: 'DELETE' });
 
 /* ── processing ────────────────────────────────────────────────────────── */
 

@@ -24,7 +24,9 @@ class Project(BaseModel):
     updatedAt: str = ""
     #: How many of the project's folders are no longer on disk. The UI uses
     #: this to flag a project in the list without fetching its folders.
-    missingFolders: int = 0
+    #: Variables whose folder is not one dataset the engine can read. It
+    #: skips them, so this is worth seeing without opening the project.
+    unreadableVariables: int = 0
 
 
 class NewProjectPayload(BaseModel):
@@ -193,3 +195,48 @@ class AbortResult(BaseModel):
     #: What was actually stopped, which is not always everything — see
     #: `Run.abort`.
     detail: str
+
+
+class InputVariable(BaseModel):
+    """One variable in the engine's input tree, as the pipeline will see it."""
+
+    #: `<dimension>/<CODE>` — both its identity and where it lives.
+    id: str
+    dimension: str
+    code: str
+    filename: str = ""
+    format: str = ""
+    sizeBytes: int = 0
+    fileCount: int = 0
+    #: Where it was copied from. Empty for data put there by hand.
+    source: str = ""
+    #: The source folder has moved. Informational — the data is already in
+    #: the project, so nothing is broken.
+    sourceMissing: bool = False
+    #: Set when the folder is not one readable dataset.
+    problem: str = ""
+
+
+class ImportPlan(BaseModel):
+    """What adding a folder would copy, and where, before anything is written."""
+
+    source: str
+    filename: str = ""
+    format: str = ""
+    sizeBytes: int = 0
+    files: list[str] = Field(default_factory=list)
+    dimension: str = ""
+    code: str = ""
+    problem: str = ""
+
+
+class PlanImportPayload(BaseModel):
+    path: str
+    #: The dimension being considered, which decides the suggested code.
+    dimension: str = ""
+
+
+class ImportPayload(BaseModel):
+    path: str
+    dimension: str
+    code: str

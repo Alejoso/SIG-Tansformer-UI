@@ -30,7 +30,8 @@ export interface Project {
    * server on every read, because the whole point of storing a path is that
    * what it points at can move.
    */
-  missingFolders: number;
+  /** Variables the engine will skip because their folder holds no dataset. */
+  unreadableVariables: number;
 }
 
 export interface NewProjectPayload {
@@ -54,42 +55,52 @@ export interface Mesh {
   search: string;
 }
 
-/* ── data folders + processing ─────────────────────────────────────────── */
-
-export interface DataFolder {
-  id: string;
-  /** Folder name as it appears on disk. */
-  name: string;
-  path: string;
-  fileCount: number;
-  /** Total size in bytes; the UI formats it. */
-  sizeBytes: number;
-  /** `ready` once the engine has converted it into H3. */
-  state: 'pending' | 'ready' | 'failed';
-  /**
-   * False when the recorded path is not a directory on this machine any more.
-   * The UI then offers to re-point it or to forget the project.
-   */
-  exists: boolean;
-}
-
-/** What the server found at a path the user typed. */
-export interface PathInspection {
-  /** The resolved absolute path — `~` and `$VARS` expanded. */
-  path: string;
-  exists: boolean;
-  isDirectory: boolean;
-  fileCount: number;
-  sizeBytes: number;
-  /** Why the path cannot be used, if it cannot. */
-  problem: string | null;
-}
+/* ── project data + processing ─────────────────────────────────────────── */
 
 /** The result of asking the server to open a native folder dialog. */
 export interface PickedFolder {
   path: string | null;
   /** Set when no dialog could be opened, so the UI can say why. */
   unavailable: string | null;
+}
+
+/**
+ * One variable in the engine's input tree.
+ *
+ * The pipeline does not take a list of folders: it walks `<DATA_DIR>/in` and
+ * reads each variable's dimension and code out of the path
+ * (`in/09_regulatorio/REG_001/file.csv`). So this is not a record of what
+ * someone added — it is what is actually there, and what will actually run.
+ */
+export interface InputVariable {
+  /** `<dimension>/<CODE>`, which is both its identity and where it lives. */
+  id: string;
+  dimension: string;
+  code: string;
+  filename: string;
+  /** GPKG, CSV, SHP… as the engine labels formats. */
+  format: string;
+  sizeBytes: number;
+  fileCount: number;
+  /** Where it was copied from. Empty for data put there by hand. */
+  source: string;
+  /** The source folder has moved. The copy still works, so this is a note. */
+  sourceMissing: boolean;
+  /** Set when the folder is not one readable dataset — the engine will skip it. */
+  problem: string;
+}
+
+/** What adding a folder would copy, and where, worked out before it happens. */
+export interface ImportPlan {
+  source: string;
+  filename: string;
+  format: string;
+  sizeBytes: number;
+  /** The dataset, then any companion files that must travel with it. */
+  files: string[];
+  dimension: string;
+  code: string;
+  problem: string;
 }
 
 export type ProcessingPhase = 'empty' | 'processing' | 'done';

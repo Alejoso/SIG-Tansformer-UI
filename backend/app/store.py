@@ -2,10 +2,14 @@
 The project store: two CSV files on disk.
 
 CSV rather than a database because the point is that you can open it, read it,
-and fix it by hand. `projects.csv` is one row per project; `folders.csv` is one
-row per folder, tied back by `project_id`. Two files rather than one so a
-project with no folders is still a row, and so neither file needs a "type"
-column to say what a row means.
+and fix it by hand. `projects.csv` is one row per project; `folders.csv` records
+where each imported variable was copied *from*, tied back by `project_id`, with
+`name` holding the `<dimension>/<CODE>` it became.
+
+That second file is provenance only. What the pipeline processes is its own
+input tree on disk — see `inputs.py` — so nothing here decides what runs, and
+a project whose rows are lost still works. It exists so the screen can say
+where a variable came from.
 
 Writes are whole-file rewrites through a temporary file and an atomic replace.
 The data is tiny and this is a single-user local app, so the simplicity is
@@ -159,6 +163,19 @@ def write_folders(rows: list[FolderRow]) -> None:
 
 def folders_of(project_id: str) -> list[FolderRow]:
     return [row for row in read_folders() if row.project_id == project_id]
+
+
+def replace_folders(project_id: str, rows: list[FolderRow]) -> list[FolderRow]:
+    """
+    Swap this project's folder rows for a new set, leaving other projects be.
+
+    Used where a row is keyed by what it describes rather than by its id —
+    an imported variable's `<dimension>/<CODE>` — so the caller filters and
+    appends, and hands back the whole set.
+    """
+    others = [row for row in read_folders() if row.project_id != project_id]
+    write_folders(others + rows)
+    return folders_of(project_id)
 
 
 def add_folders(project_id: str, entries: list[tuple[str, str]]) -> list[FolderRow]:

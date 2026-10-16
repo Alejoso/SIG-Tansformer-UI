@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
-import type { DataFolder, PathInspection, PipelineRun, PipelineStage } from '../../types';
+import type { ImportPlan, InputVariable, PipelineRun, PipelineStage } from '../../types';
 import { Dialog } from '../ui/Dialog';
 import { Icon } from '../ui/Icon';
 
-/** One folder per variable, as the design has it. A soft cap, not a rule. */
-const MAX_FOLDERS = 10;
+/* The mockup said "up to ten", and that was right when the list was a record
+   of folders someone had pointed at. It is now the engine's input tree, which
+   already holds twelve here and has no limit of its own — so a cap would do
+   nothing but refuse real data. The count is shown; nothing is blocked. */
+
+/** Chosen in the dimension list to type a new one instead of picking. */
+const NEW_DIMENSION = '\u0000new';
 
 /** `412 MB`, `1.2 GB` — matched to how the design writes sizes. */
 function formatSize(bytes: number): string {
@@ -60,10 +65,12 @@ function StageRow({ stage }: { stage: PipelineStage }) {
 }
 
 export function DataScreen() {
-  const { project, goTo, showHints, showToast, openProject } = useApp();
+  const { project, goTo, showHints, showToast } = useApp();
   const projectId = project?.id ?? '';
 
-  const [folders, setFolders] = useState<DataFolder[]>([]);
+  /** What the engine will actually read, straight from its input tree. */
+  const [variables, setVariables] = useState<InputVariable[]>([]);
+  const [dimensions, setDimensions] = useState<string[]>([]);
   /** The engine run, straight from the backend. Null until one is started. */
   const [run, setRun] = useState<PipelineRun | null>(null);
   const [showComplete, setShowComplete] = useState(false);
@@ -74,33 +81,49 @@ export function DataScreen() {
   /** Expanded by default while running: the stage list is the interesting part. */
   const [showStages, setShowStages] = useState(true);
 
-  /** The path being typed, and what the server makes of it. */
+  /** The folder being added, and what the server would do with it. */
   const [draftPath, setDraftPath] = useState('');
-  const [inspected, setInspected] = useState<{ path: string; result: PathInspection } | null>(null);
+  const [planned, setPlanned] = useState<{ path: string; result: ImportPlan } | null>(null);
   const [adding, setAdding] = useState(false);
   /** The folder dialog blocks this request for as long as it is open. */
   const [browsing, setBrowsing] = useState(false);
 
-  /** The folder whose location is being corrected, if any. */
-  const [relocating, setRelocating] = useState<DataFolder | null>(null);
+  /** Where the new variable will go. Both are editable before adding. */
+  const [dimension, setDimension] = useState('');
+  const [newDimension, setNewDimension] = useState('');
+  const [code, setCode] = useState('');
+  const [addError, setAddError] = useState('');
+
+  /**
+   * The dimension the new variable will go under.
+   *
+   * Declared here, above the effects, because the import plan depends on it:
+   * the suggested code is the next free one *within a dimension*, so changing
+   * the dimension has to re-ask.
+   */
+  const chosenDimension = dimension === NEW_DIMENSION ? newDimension.trim() : dimension;
 
   const unwatch = useRef<(() => void) | null>(null);
 
-  /** Bumped to refetch the folder list after something changes it. */
+  /** Bumped to reread the input tree after something changes it. */
   const [reloadToken, setReloadToken] = useState(0);
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
   useEffect(() => {
     if (!projectId) return;
     let live = true;
-    api
-      .listFolders(projectId)
-      .then((list) => {
-        if (live) setFolders(list);
+    Promise.all([api.listInputs(projectId), api.listDimensions(projectId)])
+      .then(([list, dims]) => {
+        if (!live) return;
+        setVariables(list);
+        setDimensions(dims);
+        // Default to the dimension already in use, so the common case —
+        // another variable alongside the others — needs no choice at all.
+        setDimension((current) => current || dims[0] || '');
       })
       .catch((error: unknown) => {
         if (live) {
-          showToast(error instanceof Error ? error.message : 'Could not load this project’s folders');
+          showToast(error instanceof Error ? error.message : 'Could not read this project’s data');
         }
       });
     return () => {
@@ -112,9 +135,12 @@ export function DataScreen() {
   useEffect(() => () => unwatch.current?.(), []);
 
   /**
-   * Check the typed path against the server, a beat after typing stops.
+   * Ask the server what adding this folder would do, a beat after typing stops.
    *
-   * The browser cannot read an absolute path out of a file picker, so what is
+   * A dry run rather than a plain existence check: copying into the engine's
+   * tree is the one thing this screen does to a directory, so what will be
+   * copied and where is shown before the button is pressed. The browser
+   * cannot read an absolute path out of a file picker either way, so what is
    * in the box is just text until the server has looked at it.
    */
   useEffect(() => {
@@ -123,25 +149,34 @@ export function DataScreen() {
 
     let live = true;
     const timer = setTimeout(async () => {
-      const result = await api.inspectPath(path);
-      if (live) setInspected({ path, result });
+      try {
+        const result = await api.planImport(projectId, path, chosenDimension);
+        if (!live) return;
+        setPlanned({ path, result });
+        // The server suggests the next free code for that dimension; keep
+        // whatever the user has typed over it.
+        setCode((current) => current || result.code);
+      } catch {
+        if (live) setPlanned(null);
+      }
     }, 350);
 
     return () => {
       live = false;
       clearTimeout(timer);
     };
-  }, [draftPath]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftPath, projectId, chosenDimension]);
 
   /**
-   * What the server said about the path currently in the box.
+   * What the server said about the folder currently in the box.
    *
    * Tagged with the path it describes and compared during render, so a
    * cleared or edited box shows "checking" immediately rather than briefly
    * showing a verdict about the previous path.
    */
-  const inspection = inspected?.path === draftPath.trim() ? inspected.result : null;
-  const checking = draftPath.trim().length > 0 && inspection === null;
+  const plan = planned?.path === draftPath.trim() ? planned.result : null;
+  const checking = draftPath.trim().length > 0 && plan === null;
 
   /**
    * The screen's three states, derived from the run rather than tracked
@@ -151,19 +186,33 @@ export function DataScreen() {
   const running = run?.status === 'starting' || run?.status === 'running';
   const phase = running ? 'processing' : run?.status === 'done' ? 'done' : 'empty';
   const locked = running;
-  const full = folders.length >= MAX_FOLDERS;
-  const missing = folders.filter((f) => !f.exists);
-  const canAdd = !locked && !full && inspection?.problem == null && inspection !== null;
+  /** Variables whose folder is not one readable dataset — the engine will skip them. */
+  const unreadable = variables.filter((v) => v.problem);
+  const canAdd =
+    !locked && plan !== null && !plan.problem && Boolean(chosenDimension) && Boolean(code);
 
-  const addFolder = async () => {
+  /**
+   * Copy the chosen folder into the project as a variable.
+   *
+   * The server does the copying — the browser never sees the files — and
+   * refuses anything it cannot place, so its message is shown as-is rather
+   * than reduced to "could not add".
+   */
+  const addVariable = async () => {
     if (!canAdd) return;
     setAdding(true);
+    setAddError('');
     try {
-      setFolders(await api.addFolders(projectId, [draftPath]));
+      const added = await api.addInput(projectId, draftPath, chosenDimension, code);
       setDraftPath('');
-      setInspected(null);
+      setPlanned(null);
+      setCode('');
+      setNewDimension('');
+      setDimension(added.dimension);
+      reload();
+      showToast(`${added.filename} added as ${added.id}`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Could not add that folder');
+      setAddError(error instanceof Error ? error.message : 'Could not add that folder');
     } finally {
       setAdding(false);
     }
@@ -182,21 +231,28 @@ export function DataScreen() {
     }
   };
 
-  const removeFolder = async (folderId: string) => {
-    await api.removeFolder(projectId, folderId);
-    reload();
-  };
-
   /**
-   * Forget the project because a folder it needs has gone.
+   * Take a variable out of the project.
    *
-   * Only the record goes — nothing on disk is touched, which is the whole
-   * point of offering this rather than trying to clean up after the user.
+   * Only the project's copy goes; the folder it came from is untouched, and
+   * so is anything the pipeline already made from it. Said out loud in the
+   * confirmation, because "remove" over data is worth being precise about.
    */
-  const forgetProject = async () => {
-    await api.deleteProject(projectId);
-    showToast(`${project?.name ?? 'Project'} removed from the list`);
-    goTo('projects');
+  const removeVariable = async (variable: InputVariable) => {
+    const sure = window.confirm(
+      `Remove ${variable.id} from this project?\n\n` +
+        `This deletes the project's copy of ${variable.filename}. ` +
+        `${variable.source ? 'The folder it came from is not touched. ' : ''}` +
+        'Anything already processed from it stays on the map until the next run.',
+    );
+    if (!sure) return;
+    try {
+      await api.removeInput(projectId, variable.dimension, variable.code);
+      reload();
+      showToast(`${variable.id} removed`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not remove it');
+    }
   };
 
   /**
@@ -258,7 +314,7 @@ export function DataScreen() {
   }, [projectId, follow]);
 
   const startProcessing = async () => {
-    if (locked || starting || folders.length === 0) return;
+    if (locked || starting || variables.length === 0) return;
     setStarting(true);
     setBlocked([]);
     try {
@@ -299,10 +355,10 @@ export function DataScreen() {
   };
 
   const processHint =
-    folders.length === 0
+    variables.length === 0
       ? 'Add at least one folder to continue.'
-      : missing.length > 0
-        ? 'Some folders are missing — fix them before processing.'
+      : unreadable.length > 0
+        ? `${unreadable.length} of these will be skipped — the engine reads one dataset per variable.`
         : phase === 'empty'
           ? 'This converts every location into a hexagon. You can keep working after it starts.'
           : 'Your data is being converted.';
@@ -312,46 +368,46 @@ export function DataScreen() {
       <div className="screen-body">
         <h1 className="data-title">Add your data</h1>
         <p className="data-lede muted">
-          One folder per variable — up to ten. Each folder becomes a layer you can look at on the
-          map.
+          One folder per variable. Each one is copied into the project and becomes a layer you
+          can look at on the map.
         </p>
 
-        {missing.length > 0 && (
+        {unreadable.length > 0 && (
           <div className="folder-alert">
             <div className="folder-alert-body">
               <strong>
-                {missing.length === 1
-                  ? 'A folder is no longer where it was'
-                  : `${missing.length} folders are no longer where they were`}
+                {unreadable.length === 1
+                  ? 'One variable has nothing the engine can read'
+                  : `${unreadable.length} variables have nothing the engine can read`}
               </strong>
               <span className="muted-55">
-                Point each one at its new location, or remove this project from the list. Removing
-                it only forgets the record — nothing on disk is touched.
+                The engine takes one dataset per variable and names the variable after it. These
+                will be skipped: {unreadable.map((v) => v.id).join(', ')}.
               </span>
             </div>
-            <button type="button" className="btn btn-secondary" onClick={forgetProject}>
-              Remove project
-            </button>
           </div>
         )}
 
-        {/* Paths are typed rather than dropped: a browser will not reveal a
-            real path from a file picker, and the record has to be a real
-            path for the folder to be found again. */}
-        <div className={`path-add${locked || full ? ' is-locked' : ''}`}>
+        {/* Paths are typed or browsed for, never dropped: a browser will not
+            reveal a real path from a file picker, and the server is the one
+            that has to find the folder in order to copy it. */}
+        <div className={`path-add${locked ? ' is-locked' : ''}`}>
           <label className="path-add-label" htmlFor="folder-path">
-            Folder path on this machine
+            Folder holding one variable
           </label>
           <div className="field-row">
             <input
               id="folder-path"
               className="input"
               value={draftPath}
-              disabled={locked || full}
+              disabled={locked}
               placeholder="/home/you/data/wind_atlas_2024"
-              onChange={(e) => setDraftPath(e.target.value)}
+              onChange={(e) => {
+                setDraftPath(e.target.value);
+                setAddError('');
+              }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') void addFolder();
+                if (e.key === 'Enter' && canAdd) void addVariable();
               }}
               style={{ flex: 1 }}
             />
@@ -359,7 +415,7 @@ export function DataScreen() {
               type="button"
               className="btn btn-secondary"
               onClick={browse}
-              disabled={locked || full || browsing}
+              disabled={locked || browsing}
               style={{ gap: 7, flex: 'none' }}
             >
               {browsing ? (
@@ -369,37 +425,98 @@ export function DataScreen() {
               )}
               {browsing ? 'Choosing…' : 'Browse'}
             </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={addFolder}
-              disabled={!canAdd || adding}
-              style={{ flex: 'none' }}
-            >
-              {adding ? 'Adding…' : 'Add'}
-            </button>
           </div>
 
+          {/* What the copy would do, before it does it. */}
+          {plan && !plan.problem && (
+            <div className="import-plan">
+              <div className="import-plan-file">
+                <Icon name="file" size={15} color="var(--color-accent-600)" />
+                <span className="mono">{plan.filename}</span>
+                <span className="tag tag-accent-2">{plan.format}</span>
+                <span className="muted-55">{formatSize(plan.sizeBytes)}</span>
+                {plan.files.length > 1 && (
+                  <span
+                    className="muted-55"
+                    title={plan.files.join(', ')}
+                  >
+                    + {plan.files.length - 1} companion{plan.files.length === 2 ? '' : 's'}
+                  </span>
+                )}
+              </div>
+
+              <div className="import-plan-where">
+                <label htmlFor="variable-dimension">Dimension</label>
+                <select
+                  id="variable-dimension"
+                  className="input"
+                  value={dimension}
+                  onChange={(e) => {
+                    setDimension(e.target.value);
+                    // The code is the next free one *within* a dimension, so
+                    // it has to be re-asked for rather than carried over.
+                    setCode('');
+                  }}
+                  style={{ flex: 1, minWidth: 0 }}
+                >
+                  {dimensions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                  <option value={NEW_DIMENSION}>New dimension…</option>
+                </select>
+
+                {dimension === NEW_DIMENSION && (
+                  <input
+                    className="input"
+                    value={newDimension}
+                    placeholder="11_ambiental"
+                    aria-label="New dimension name"
+                    onChange={(e) => setNewDimension(e.target.value)}
+                    style={{ flex: 1, minWidth: 0 }}
+                  />
+                )}
+
+                <label htmlFor="variable-code">Code</label>
+                <input
+                  id="variable-code"
+                  className="input mono"
+                  value={code}
+                  placeholder="REG_007"
+                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  style={{ width: 110, flex: 'none' }}
+                />
+
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={addVariable}
+                  disabled={!canAdd || adding}
+                  style={{ flex: 'none' }}
+                >
+                  {adding ? 'Copying…' : 'Add'}
+                </button>
+              </div>
+
+              {chosenDimension && code && (
+                <div className="muted-55" style={{ fontSize: 11.5 }}>
+                  Copied to <span className="mono">in/{chosenDimension}/{code}/</span> — the engine
+                  reads a variable's dimension and code from that path.
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="path-add-status">
-            {locked && <span className="muted-55">Folders are locked while a run is going.</span>}
-            {!locked && full && (
-              <span className="muted-55">
-                That is all {MAX_FOLDERS} folders — remove one to make room.
-              </span>
+            {locked && <span className="muted-55">Data is locked while a run is going.</span>}
+            {!locked && checking && <span className="muted-55">Checking…</span>}
+            {!locked && !checking && plan?.problem && (
+              <span className="path-add-problem">{plan.problem}</span>
             )}
-            {!locked && !full && checking && <span className="muted-55">Checking…</span>}
-            {!locked && !full && !checking && inspection?.problem && (
-              <span className="path-add-problem">{inspection.problem}</span>
-            )}
-            {!locked && !full && !checking && inspection && !inspection.problem && (
-              <span className="path-add-ok">
-                <Icon name="check" size={12} strokeWidth={3} />
-                {inspection.fileCount} files · {formatSize(inspection.sizeBytes)} ·{' '}
-                <span className="mono">{inspection.path}</span>
-              </span>
-            )}
+            {addError && <span className="path-add-problem">{addError}</span>}
             {browsing && <span className="muted-55">Waiting for the folder chooser…</span>}
-            {!browsing && !locked && !full && !checking && !inspection && showHints && (
+            {!browsing && !locked && !checking && !plan && !addError && showHints && (
               <span className="muted-55">
                 Browse for a folder, or paste a path — <span className="mono">~</span> and
                 environment variables work.
@@ -408,56 +525,66 @@ export function DataScreen() {
           </div>
         </div>
 
-        {folders.length > 0 && (
+        {variables.length > 0 && (
           <div className="folders">
             <div className="folders-head">
-              <h4>Added folders</h4>
+              <h4>In this project</h4>
               <span className="muted-55" style={{ fontSize: 12 }}>
-                {folders.length} of {MAX_FOLDERS}
+                {variables.length} variable{variables.length === 1 ? '' : 's'}
               </span>
             </div>
             <div className="folders-list">
-              {folders.map((folder) => (
+              {variables.map((variable) => (
                 <div
-                  key={folder.id}
+                  key={variable.id}
                   className={`folder-row${locked ? ' is-locked' : ''}${
-                    folder.exists ? '' : ' is-missing'
+                    variable.problem ? ' is-unreadable' : ''
                   }`}
                 >
                   <Icon
-                    name="folder"
-                    size={19}
-                    color={folder.exists ? 'var(--color-accent-600)' : 'var(--color-accent)'}
+                    name="file"
+                    size={18}
+                    color={
+                      variable.problem ? 'var(--color-accent)' : 'var(--color-accent-600)'
+                    }
                   />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="folder-name">{folder.name}</div>
-                    <div className="folder-meta muted-50 mono">{folder.path}</div>
+                    <div className="folder-name">
+                      <span className="mono variable-code">{variable.code}</span>
+                      {variable.filename || 'nothing readable'}
+                    </div>
+                    <div className="folder-meta muted-50">
+                      <span className="mono">{variable.dimension}</span>
+                      {variable.source && (
+                        <>
+                          {' · from '}
+                          <span className="mono" title={variable.source}>
+                            {variable.source.split('/').pop()}
+                          </span>
+                          {/* The copy is what gets processed, so a moved
+                              source is worth noting and nothing more. */}
+                          {variable.sourceMissing && ' (moved since)'}
+                        </>
+                      )}
+                    </div>
                   </div>
 
-                  {folder.exists ? (
-                    <span className="muted-55" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
-                      {folder.fileCount} files · {formatSize(folder.sizeBytes)}
+                  {variable.problem ? (
+                    <span className="tag folder-missing-tag" title={variable.problem}>
+                      Will be skipped
                     </span>
                   ) : (
-                    <>
-                      <span className="tag folder-missing-tag">Not found</span>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        onClick={() => setRelocating(folder)}
-                        style={{ flex: 'none', height: 30, fontSize: 12.5 }}
-                      >
-                        Locate…
-                      </button>
-                    </>
+                    <span className="muted-55" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
+                      {variable.format} · {formatSize(variable.sizeBytes)}
+                    </span>
                   )}
 
-                  {phase === 'empty' && (
+                  {!locked && (
                     <button
                       type="button"
                       className="btn btn-icon btn-secondary"
-                      aria-label={`Remove ${folder.name}`}
-                      onClick={() => removeFolder(folder.id)}
+                      aria-label={`Remove ${variable.id}`}
+                      onClick={() => removeVariable(variable)}
                       style={{ width: 30, height: 30, borderColor: 'transparent' }}
                     >
                       <Icon name="close" size={15} />
@@ -595,7 +722,7 @@ export function DataScreen() {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={folders.length === 0 || locked || missing.length > 0}
+            disabled={variables.length === 0 || locked}
             onClick={startProcessing}
             style={{ height: 44, paddingInline: 26, fontSize: 15 }}
           >
@@ -608,20 +735,6 @@ export function DataScreen() {
           )}
         </div>
       </div>
-
-      {relocating && (
-        <RelocateDialog
-          projectId={projectId}
-          folder={relocating}
-          onClose={() => setRelocating(null)}
-          onDone={async () => {
-            setRelocating(null);
-            reload();
-            // The project card counts missing folders, so refresh it too.
-            if (project) openProject(await api.getProject(projectId), 'data');
-          }}
-        />
-      )}
 
       {showComplete && (
         <Dialog
@@ -667,67 +780,5 @@ export function DataScreen() {
         </Dialog>
       )}
     </div>
-  );
-}
-
-interface RelocateDialogProps {
-  projectId: string;
-  folder: DataFolder;
-  onClose: () => void;
-  onDone: () => void;
-}
-
-/** Point a folder that has gone missing at wherever it lives now. */
-function RelocateDialog({ projectId, folder, onClose, onDone }: RelocateDialogProps) {
-  const [path, setPath] = useState(folder.path);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    try {
-      await api.relocateFolder(projectId, folder.id, path);
-      onDone();
-    } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'Could not use that path');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog onClose={onClose} width="min(520px, 100%)" labelledBy="relocate-title">
-      <div className="dialog-title" id="relocate-title">
-        Where is {folder.name}?
-      </div>
-      <p className="dialog-body" style={{ margin: 0 }}>
-        It was recorded at <span className="mono">{folder.path}</span>, and there is nothing there
-        now. Point it at its new home, or close this and remove the project instead.
-      </p>
-
-      <div className="field">
-        <label htmlFor="relocate-path">New folder path</label>
-        <input
-          id="relocate-path"
-          className={`input${error ? ' is-invalid' : ''}`}
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void save();
-          }}
-        />
-        {error && <p className="field-hint path-add-problem">{error}</p>}
-      </div>
-
-      <div className="dialog-actions">
-        <button type="button" className="btn btn-secondary" onClick={onClose}>
-          Cancel
-        </button>
-        <button type="button" className="btn btn-primary" onClick={save} disabled={saving}>
-          {saving ? 'Checking…' : 'Use this folder'}
-        </button>
-      </div>
-    </Dialog>
   );
 }

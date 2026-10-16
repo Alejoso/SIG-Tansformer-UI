@@ -161,13 +161,13 @@ export function ProjectsScreen() {
                       <span className={`project-status ${processed ? 'is-processed' : 'is-draft'}`}>
                         {processed ? 'Processed' : 'Draft'}
                       </span>
-                      {/* Flagged here so a broken project is visible without
-                          opening it — the server re-checks every folder on
-                          each read. */}
-                      {project.missingFolders > 0 && (
+                      {/* Flagged here so a project the engine would partly
+                          skip is visible without opening it — the server
+                          rereads the input tree on each request. */}
+                      {project.unreadableVariables > 0 && (
                         <span className="project-status is-missing">
-                          {project.missingFolders} folder
-                          {project.missingFolders === 1 ? '' : 's'} not found
+                          {project.unreadableVariables} variable
+                          {project.unreadableVariables === 1 ? '' : 's'} unreadable
                         </span>
                       )}
                       <span className="project-detail muted-50">{detailLine(project)}</span>

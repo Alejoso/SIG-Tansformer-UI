@@ -17,12 +17,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import countries, fsutil, model_store, outputs, pipeline, runs, store
+from . import countries, fsutil, inputs, model_store, outputs, pipeline, runs, store
 from .models import (
     AbortResult,
-    AddFoldersPayload,
-    DataFolder,
-    InspectResult,
+    ImportPayload,
+    ImportPlan,
+    InputVariable,
     Mesh,
     LayerNode,
     LayerTree,
@@ -31,11 +31,11 @@ from .models import (
     NewProjectPayload,
     PickFolderPayload,
     PickFolderResult,
+    PlanImportPayload,
     PipelineReadiness,
     PipelineRun,
     PipelineStageState,
     Project,
-    RelocatePayload,
     SaveModelPayload,
 )
 
@@ -59,31 +59,11 @@ def _mesh_label(mesh_id: str) -> str:
     )
 
 
-def _to_folder(row: store.FolderRow) -> DataFolder:
-    """
-    Turn a stored row into what the UI sees.
-
-    Existence is checked on every read rather than cached: the whole point of
-    recording a path is that the folder might move or vanish between visits.
-    """
-    exists = fsutil.folder_exists(row.path)
-    files, size = (0, 0)
-    if exists:
-        files, size = fsutil.measure(fsutil.expand(row.path))
-    return DataFolder(
-        id=row.folder_id,
-        name=row.name,
-        path=row.path,
-        fileCount=files,
-        sizeBytes=size,
-        state="pending",
-        exists=exists,
-    )
-
-
 def _to_project(row: store.ProjectRow) -> Project:
-    folders = store.folders_of(row.id)
-    missing = sum(1 for folder in folders if not fsutil.folder_exists(folder.path))
+    # Counted from the engine's input tree rather than from our folder rows:
+    # the tree is what gets processed, and it holds data put there by hand
+    # as well as data this app copied in.
+    variables = inputs.scan(row)
     return Project(
         id=row.id,
         name=row.name,
@@ -92,10 +72,10 @@ def _to_project(row: store.ProjectRow) -> Project:
         status="draft",
         description=row.description,
         outFolder=row.out_folder,
-        variableCount=len(folders),
+        variableCount=len(variables),
         hexagonCount=0,
         updatedAt=row.updated_at or row.created_at,
-        missingFolders=missing,
+        unreadableVariables=sum(1 for variable in variables if variable.problem),
     )
 
 
@@ -166,57 +146,7 @@ def delete_project(project_id: str) -> None:
         raise HTTPException(status_code=404, detail=f"No project {project_id}")
 
 
-# ── folders ───────────────────────────────────────────────────────────────
-
-
-@app.get("/api/projects/{project_id}/folders")
-def list_folders(project_id: str) -> list[DataFolder]:
-    _require_project(project_id)
-    return [_to_folder(row) for row in store.folders_of(project_id)]
-
-
-@app.post("/api/projects/{project_id}/folders")
-def add_folders(project_id: str, payload: AddFoldersPayload) -> list[DataFolder]:
-    _require_project(project_id)
-
-    entries: list[tuple[str, str]] = []
-    for raw in payload.paths:
-        result = fsutil.inspect(raw)
-        if result.problem:
-            raise HTTPException(status_code=400, detail=f"{raw}: {result.problem}")
-        entries.append((Path(result.path).name, result.path))
-
-    store.add_folders(project_id, entries)
-    store.touch_project(project_id)
-    return [_to_folder(row) for row in store.folders_of(project_id)]
-
-
-@app.delete("/api/projects/{project_id}/folders/{folder_id}", status_code=204)
-def remove_folder(project_id: str, folder_id: str) -> None:
-    _require_project(project_id)
-    if not store.remove_folder(project_id, folder_id):
-        raise HTTPException(status_code=404, detail=f"No folder {folder_id}")
-    store.touch_project(project_id)
-
-
-@app.put("/api/projects/{project_id}/folders/{folder_id}/path")
-def relocate_folder(project_id: str, folder_id: str, payload: RelocatePayload) -> DataFolder:
-    """Point a folder row at a new location, for when the old one has moved."""
-    _require_project(project_id)
-
-    result = fsutil.inspect(payload.path)
-    if result.problem:
-        raise HTTPException(status_code=400, detail=result.problem)
-
-    if not store.relocate_folder(project_id, folder_id, result.path, Path(result.path).name):
-        raise HTTPException(status_code=404, detail=f"No folder {folder_id}")
-
-    store.touch_project(project_id)
-    row = next(r for r in store.folders_of(project_id) if r.folder_id == folder_id)
-    return _to_folder(row)
-
-
-# ── rendered layers ───────────────────────────────────────────────────────
+# ── the rendered layers ───────────────────────────────────────────────────
 
 
 @app.get("/api/projects/{project_id}/layers")
@@ -436,6 +366,75 @@ def abort_processing(project_id: str) -> AbortResult:
     return AbortResult(detail=run.abort())
 
 
+# ── the data the engine will read ─────────────────────────────────────────
+
+
+@app.get("/api/projects/{project_id}/inputs")
+def list_inputs(project_id: str) -> list[InputVariable]:
+    """
+    The variables in the project's input tree.
+
+    Read from disk, not from our own records: the pipeline walks that tree,
+    so it is the only thing that decides what gets processed. Data someone
+    dropped in by hand appears here too, which is the point — the screen
+    should show what will actually run, not what we remember adding.
+    """
+    project = _require_project(project_id)
+    return [InputVariable(**vars(variable)) for variable in inputs.scan(project)]
+
+
+@app.get("/api/projects/{project_id}/inputs/dimensions")
+def list_dimensions(project_id: str) -> list[str]:
+    """The dimension folders that already exist, to offer rather than make people type."""
+    project = _require_project(project_id)
+    return inputs.dimensions(project)
+
+
+@app.post("/api/projects/{project_id}/inputs/plan")
+def plan_import(project_id: str, payload: PlanImportPayload) -> ImportPlan:
+    """
+    What adding this folder would do.
+
+    A dry run, so the copy is never a surprise: it names the dataset it
+    found, the companion files that have to travel with it, and where it
+    would land. Problems come back here rather than as a failed import.
+    """
+    project = _require_project(project_id)
+    return ImportPlan(**vars(inputs.plan(project, payload.path, payload.dimension)))
+
+
+@app.post("/api/projects/{project_id}/inputs", status_code=201)
+def add_input(project_id: str, payload: ImportPayload) -> InputVariable:
+    """
+    Copy a folder's dataset into the project as one variable.
+
+    Copied, not moved or referenced. The pipeline reads its own tree and
+    nothing else, so a path recorded elsewhere is not input to anything —
+    and the copy means the project survives the source being unplugged.
+    """
+    project = _require_project(project_id)
+    try:
+        variable = inputs.import_folder(project, payload.path, payload.dimension, payload.code)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return InputVariable(**vars(variable))
+
+
+@app.delete("/api/projects/{project_id}/inputs/{dimension}/{code}", status_code=204)
+def remove_input(project_id: str, dimension: str, code: str) -> None:
+    """
+    Take a variable out of the input tree.
+
+    Removes the project's copy; the folder it came from is untouched, and so
+    is anything the pipeline already produced from it.
+    """
+    project = _require_project(project_id)
+    try:
+        inputs.remove(project, dimension, code)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
 # ── the model file ────────────────────────────────────────────────────────
 
 
@@ -495,12 +494,6 @@ def apply_model(project_id: str, payload: SaveModelPayload) -> ModelFile:
 
 
 # ── filesystem ────────────────────────────────────────────────────────────
-
-
-@app.post("/api/fs/inspect")
-def inspect_path(payload: RelocatePayload) -> InspectResult:
-    """Check a path before it is committed, so the UI can validate as you type."""
-    return fsutil.inspect(payload.path)
 
 
 @app.post("/api/fs/pick-folder")
