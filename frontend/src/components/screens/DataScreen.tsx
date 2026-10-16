@@ -576,7 +576,10 @@ export function DataScreen() {
             {!locked && !checking && plan?.problem && (
               <span className="path-add-problem">{plan.problem}</span>
             )}
-            {addError && <span className="path-add-problem">{addError}</span>}
+            {/* Its own block, not a span: the server's refusals can carry a
+                command to run, and a command folded into a paragraph is one
+                nobody can copy. */}
+            {addError && <div className="path-add-error">{addError}</div>}
             {browsing && <span className="muted-55">Waiting for the folder chooser…</span>}
             {!browsing && !locked && !checking && !plan && !addError && showHints && (
               <span className="muted-55">

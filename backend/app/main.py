@@ -126,6 +126,8 @@ def create_project(payload: NewProjectPayload) -> Project:
         updated_at=store.now(),
     )
     store.add_project(row)
+    # Create the input folder now, while we still can — see `inputs.prepare`.
+    inputs.prepare(row)
     return _to_project(row)
 
 

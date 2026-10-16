@@ -103,6 +103,27 @@ def data_in(project: store.ProjectRow) -> Path | None:
     return None if root is None else root / "in"
 
 
+def prepare(project: store.ProjectRow) -> None:
+    """
+    Make sure the project's input folder exists, owned by whoever runs this.
+
+    Best effort, and worth doing early. `data/` is not in the engine's
+    repository, so on a fresh checkout the first `docker compose up -d` is
+    what creates it — and Docker creates a missing bind-mount source as root,
+    after which nothing here can write to it. Creating it first means Docker
+    mounts what is already there and the question never comes up.
+    """
+    root = data_in(project)
+    if root is None or root.is_dir():
+        return
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # The folder may be unreachable or not ours to create; that is the
+        # import's problem to report, with a message about this exact thing.
+        pass
+
+
 def _format_of(path: Path) -> str:
     suffix = path.suffix.lower()
     return {
@@ -396,6 +417,60 @@ def plan(project: store.ProjectRow, raw_source: str, dimension: str = "") -> Imp
     return result
 
 
+def _first_existing(path: Path) -> Path | None:
+    """The nearest folder up the chain that exists, which is the one we need to write in."""
+    for candidate in [path, *path.parents]:
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def _explain_permission(path: Path) -> str:
+    """
+    Why a folder in the project cannot be written to, and how to fix it.
+
+    Two different causes, and the wrong explanation sends people looking in
+    the wrong place for an hour — so the owner is checked rather than
+    assumed. `[Errno 13] Permission denied` on its own has people blaming
+    WSL, Windows paths and the app, when it is usually neither.
+    """
+    try:
+        owner = path.owner()
+    except (KeyError, OSError):
+        owner = ""
+
+    try:
+        ours = os.getuid() == path.stat().st_uid
+    except OSError:
+        ours = False
+
+    # Walk up past the pipeline's own subfolders: `chown` belongs on the
+    # data directory, not on `in/` alone.
+    root = path
+    while root.parent != root and root.name in ("in", "out"):
+        root = root.parent
+
+    fix = f"    sudo chown -R $(id -un):$(id -gn) {root}"
+
+    if ours:
+        # Ours, but with the write bit off. Nothing to do with Docker.
+        return (
+            f"Cannot write to {path}. It belongs to you, so this is its permissions "
+            f"rather than its owner — something has it read-only. `chmod u+w` on it, "
+            f"or check whether it is on a read-only mount."
+        )
+
+    whose = f"belongs to {owner}" if owner else "belongs to another user"
+    return (
+        f"Cannot write to {path} — it {whose}. That usually means Docker created it: "
+        f"the engine's `data/` folder is not in its repository, so the first "
+        f"`docker compose up -d` is what makes it, and the daemon runs as root. "
+        f"Give it back with:\n\n{fix}\n\n"
+        f"The engine keeps working afterwards — inside the container it runs as root "
+        f"and can write either way."
+    )
+
+
 def _destination(project: store.ProjectRow, dimension: str, code: str) -> Path:
     """
     Where a variable goes, checked.
@@ -455,6 +530,13 @@ def import_folder(
             f"{identifier} already has data. Remove it first, or use another code."
         )
 
+    # Checked up front rather than discovered mid-copy: the useful answer is
+    # about ownership, and it is the same answer whether the dimension folder
+    # exists yet or not.
+    writable = target.parent if target.parent.is_dir() else _first_existing(target.parent)
+    if writable is not None and not os.access(writable, os.W_OK | os.X_OK):
+        raise ValueError(_explain_permission(writable))
+
     source = fsutil.expand(raw_source)
     dataset = _datasets_in(source)[0]
     wanted = [dataset, *_companions(dataset)]
@@ -471,6 +553,9 @@ def import_folder(
         if target.exists():
             target.rmdir()  # empty, checked above
         staging.rename(target)
+    except PermissionError as error:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise ValueError(_explain_permission(Path(error.filename or staging).parent)) from error
     except OSError as error:
         shutil.rmtree(staging, ignore_errors=True)
         raise ValueError(f"Could not copy into the project: {error}") from error
