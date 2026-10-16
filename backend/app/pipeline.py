@@ -144,6 +144,39 @@ def _running_services() -> set[str]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
+def _explain_blocked(blocked: list[Path]) -> str:
+    """
+    Why the pipeline cannot write to its own folders, and how to fix it.
+
+    Ownership is checked rather than assumed. Docker-made-it-as-root is the
+    usual cause and the fix is a `chown`, but a folder that is already ours
+    and merely read-only needs `chmod` — and being sent to the wrong one of
+    those is an afternoon gone.
+    """
+    names = ", ".join(str(path) for path in blocked)
+    try:
+        theirs = [path for path in blocked if path.stat().st_uid != os.getuid()]
+    except OSError:
+        theirs = blocked
+
+    if not theirs:
+        return (
+            f"The pipeline cannot write to {names}. They are yours, so it is their "
+            f"permissions rather than their owner — `chmod u+w` on them, or check "
+            f"whether they are on a read-only mount."
+        )
+
+    owners = sorted({path.owner() for path in theirs if path.exists()})
+    whose = f" (owned by {', '.join(owners)})" if owners else ""
+    return (
+        f"The pipeline cannot write to {names}{whose}. `run_full.sh` creates a folder "
+        f"there from the host before any container starts, so a run fails on its first "
+        f"line. These are not in the engine's repository, so Docker creates them when "
+        f"it starts before anything else has — as root, because the daemon runs as "
+        f"root. Fix with: sudo chown -R $(id -un):$(id -gn) {PIPELINE_DIR}"
+    )
+
+
 def status() -> PipelineStatus:
     """
     What is in place and what is not.
@@ -172,6 +205,11 @@ def status() -> PipelineStatus:
         if not compose:
             problems.append("`docker compose` is not available.")
 
+    if found:
+        blocked = unwritable_host_folders()
+        if blocked:
+            problems.append(_explain_blocked(blocked))
+
     services = _running_services() if (found and compose) else set()
     app_up, db_up = APP_SERVICE in services, "db" in services
     if found and compose and not app_up:
@@ -188,8 +226,73 @@ def status() -> PipelineStatus:
     )
 
 
+#: Folders the pipeline needs on the host, and who makes them.
+#:
+#: None are in the engine's repository — they are all gitignored — so on a
+#: fresh checkout they do not exist. Whatever runs first creates them, and if
+#: that is `docker compose up`, Docker creates them as **root**, because the
+#: daemon runs as root. After that `run_full.sh` fails on its own first line:
+#: it does `mkdir -p logs/<execution_id>` from the host, as the user, before
+#: any container is involved.
+#:
+#: `admin` is listed because the script does `mkdir -p admin/in admin/out`
+#: the same way.
+HOST_FOLDERS = ("logs", "admin", "toytest")
+
+#: The subset whose ownership actually stops a run, which is not the same
+#: list. `toytest` is only touched when TOYTEST=1, and `data` is written from
+#: inside the container, where the engine runs as root and permissions do not
+#: apply — refusing to process over either would be a refusal with nothing
+#: behind it. (A root-owned `data` does stop *adding* data, and `inputs.py`
+#: says so at the point where it matters.)
+RUN_FOLDERS = ("logs", "admin")
+
+
+def _host_paths() -> list[Path]:
+    return [PIPELINE_DIR / name for name in HOST_FOLDERS] + [engine_data_dir()]
+
+
+def prepare_host_folders() -> None:
+    """
+    Create what the pipeline needs, as us, before Docker can do it as root.
+
+    Best effort and cheap. Called before `docker compose up`, which is the
+    step that would otherwise create these — once they exist, Docker mounts
+    them rather than making them.
+    """
+    for path in _host_paths():
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # reported properly by `unwritable_host_folders`
+
+
+def unwritable_host_folders() -> list[Path]:
+    """
+    Which of them we cannot write to — the ones that will fail a run.
+
+    Checked before starting rather than discovered during: the script's very
+    first action is a host-side mkdir, so this is the difference between a
+    clear message and `mkdir: Permission denied` with no context.
+
+    Only the folders a run genuinely needs — see `RUN_FOLDERS`.
+    """
+    blocked = []
+    for path in (PIPELINE_DIR / name for name in RUN_FOLDERS):
+        target = path if path.is_dir() else path.parent
+        if target.is_dir() and not os.access(target, os.W_OK | os.X_OK):
+            blocked.append(path)
+    return blocked
+
+
 def compose_up() -> subprocess.CompletedProcess[str] | None:
-    """Bring up Postgres and the idle app container."""
+    """
+    Bring up Postgres and the idle app container.
+
+    The folders are made first: this is the call that would otherwise have
+    Docker create them as root. See `prepare_host_folders`.
+    """
+    prepare_host_folders()
     return _run(["docker", "compose", "up", "-d"], cwd=PIPELINE_DIR, timeout=600)
 
 

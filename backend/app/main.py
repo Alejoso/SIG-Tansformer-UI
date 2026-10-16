@@ -321,6 +321,11 @@ def start_processing(project_id: str) -> PipelineRun:
             ),
         )
 
+    # Create what the run needs as us, in case nothing has yet — otherwise
+    # `run_full.sh`'s own `docker compose up` makes them as root and its very
+    # next line, a host-side mkdir, fails.
+    pipeline.prepare_host_folders()
+
     try:
         run = runs.start(project)
     except RuntimeError as error:
