@@ -636,10 +636,15 @@ export function DataScreen() {
           <div className="dialog-title" id="complete-title">
             All done
           </div>
+          {/* Deliberately not "N folders converted": the folder count is our
+              own record, not what the engine did with it — one folder can
+              hold a dozen variables, and the engine reads its whole input
+              tree regardless of what we listed. The hexagon count comes from
+              the stage that built the table, so it is the engine's own. */}
           <p className="dialog-body" style={{ margin: 0 }}>
             {run?.hexagonCount
-              ? `${folders.length} folders converted onto ${run.hexagonCount.toLocaleString()} hexagons. `
-              : `${folders.length} folders converted. `}
+              ? `Your data is on ${run.hexagonCount.toLocaleString()} hexagons. `
+              : 'Your data has been converted. '}
             {run && run.erroredFiles > 0
               ? `${run.erroredFiles} ${run.erroredFiles === 1 ? 'file' : 'files'} could not be processed — the rest is ready to explore on the map.`
               : 'Every variable is ready to explore on the map.'}

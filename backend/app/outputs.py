@@ -26,10 +26,18 @@ from pathlib import Path
 
 from . import store
 
-#: The rendered map that sits beside each artefact.
-HTML_SUFFIX = ".h3.html"
-#: The per-variable log the pipeline writes next to it.
-LOG_SUFFIX = ".pipeline.jsonl"
+#: The rendered map that sits beside each artefact, and the per-variable log
+#: next to it — each in both spellings the pipeline uses.
+#:
+#: Two spellings because the pipeline renames its own output. Its
+#: `lint_filenames` step sanitises `data/out` as well as `data/in`, and only
+#: `.h3.parquet` is on its list of suffixes to leave alone — so on the run
+#: after the one that wrote them, `x.h3.html` becomes `x_h3.html` and
+#: `x.pipeline.jsonl` becomes `x_pipeline.jsonl`. Matching only the freshly
+#: written spelling meant the sidebar emptied itself on the second run, with
+#: the files still sitting there under their other name.
+HTML_SUFFIXES = (".h3.html", "_h3.html")
+LOG_SUFFIXES = (".pipeline.jsonl", "_pipeline.jsonl")
 
 #: Folders under `out/` that hold pipeline bookkeeping rather than variables.
 NOT_DIMENSIONS = {"exports", "maestro", "verify", "render", "bck"}
@@ -55,6 +63,29 @@ def out_dir(project: store.ProjectRow) -> Path | None:
 
 def _slug(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_")
+
+
+def _strip_suffix(name: str, suffixes: tuple[str, ...]) -> str:
+    """The name without whichever of the suffixes it ends with."""
+    for suffix in suffixes:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _sibling_log(html: Path, stem: str) -> Path:
+    """
+    The per-variable log beside a rendered document.
+
+    Tries both spellings, because the document and its log are not always
+    renamed in the same pass — a run can leave `x.h3.html` next to
+    `x_pipeline.jsonl`.
+    """
+    for suffix in LOG_SUFFIXES:
+        candidate = html.with_name(stem + suffix)
+        if candidate.is_file():
+            return candidate
+    return html.with_name(stem + LOG_SUFFIXES[0])
 
 
 def _humanise(stem: str, code: str = "") -> str:
@@ -141,6 +172,27 @@ def _read_variable_log(log_path: Path) -> tuple[list[str], bool, str]:
     return stages, ok, execution_id
 
 
+def _documents(root: Path) -> list[Path]:
+    """
+    One rendered document per variable, newest spelling first.
+
+    Both spellings often sit in the same folder: the pipeline's lint renames
+    `x.h3.html` to `x_h3.html` on one run, and the next run's render writes
+    `x.h3.html` again beside it. They are the same map — byte-identical here —
+    so listing both would show every variable twice in the sidebar. The
+    freshly written spelling wins; the renamed one is only used when it is
+    all that is left.
+    """
+    best: dict[tuple[Path, str], tuple[int, Path]] = {}
+    for rank, suffix in enumerate(HTML_SUFFIXES):
+        for html in root.rglob(f"*{suffix}"):
+            key = (html.parent, _strip_suffix(html.name, HTML_SUFFIXES))
+            current = best.get(key)
+            if current is None or rank < current[0]:
+                best[key] = (rank, html)
+    return sorted(path for _, path in best.values())
+
+
 def scan_variables(project: store.ProjectRow) -> list[VariableLayer]:
     """Every rendered variable under `out/`, alphabetical by label."""
     root = out_dir(project)
@@ -148,7 +200,7 @@ def scan_variables(project: store.ProjectRow) -> list[VariableLayer]:
         return []
 
     found: list[VariableLayer] = []
-    for html in sorted(root.rglob(f"*{HTML_SUFFIX}")):
+    for html in _documents(root):
         relative = html.relative_to(root)
         parts = relative.parts
         # Expect <dimension>/<CODE>/<name>.h3.html; anything shallower is
@@ -157,8 +209,8 @@ def scan_variables(project: store.ProjectRow) -> list[VariableLayer]:
             continue
 
         dimension, code = parts[0], parts[1]
-        stem = html.name[: -len(HTML_SUFFIX)]
-        stages, ok, execution_id = _read_variable_log(html.with_name(stem + LOG_SUFFIX))
+        stem = _strip_suffix(html.name, HTML_SUFFIXES)
+        stages, ok, execution_id = _read_variable_log(_sibling_log(html, stem))
 
         found.append(
             VariableLayer(
