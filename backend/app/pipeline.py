@@ -35,47 +35,70 @@ APP_SERVICE = "app"
 class Stage:
     """One step of the pipeline, as `run_full.sh` invokes it."""
 
-    number: int
+    #: As numbered in run_full.sh and docs/pipeline.md. Some are fractional —
+    #: 10.5 and 12.5 were inserted between existing steps.
+    number: float
     key: str
     label: str
     #: Path inside the container.
     script: str
     #: Extra arguments `run_full.sh` passes.
     args: tuple[str, ...] = ()
-    #: `run_full.sh` skips these when their output already exists. That is why
-    #: a finished run can log fewer summaries than there are stages, and why
-    #: counting them against a fixed total under-reports progress.
+    #: `run_full.sh` skips these when their output already exists, or unless a
+    #: flag turns them on. That is why a finished run logs fewer summaries than
+    #: there are stages.
     conditional: bool = False
     #: Needs Postgres, not just the app container.
     needs_db: bool = False
+    #: Whether the stage writes a `script_summary` line. One does not, so it
+    #: can never be counted — see `reporting_stages`.
+    reports: bool = True
 
 
-#: Taken from the numbered sections of `run_full.sh`, in its order. Stages 0
-#: and 1 are validation and `docker compose up`, which this module does itself.
+#: Taken from the table in the pipeline's own docs/pipeline.md, which carries a
+#: "condición" column saying exactly when each stage runs. Stages 0-2 are
+#: validation, `docker compose up` and the SQL schema; this module does the
+#: first two itself and the third is handled by Postgres on first start.
 STAGES: tuple[Stage, ...] = (
     Stage(3, "normalize_dane", "Normalise administrative boundaries",
           "/app/app/pipeline/normalize_dane_mgn.py", conditional=True),
-    Stage(4, "fill_h3", "Fill the master table with H3 cells",
+    Stage(4, "fill_h3", "Build the H3 master table",
           "/app/app/pipeline/fill_h3_from_geojson.py", conditional=True, needs_db=True),
-    Stage(5, "h3_grid", "Generate the H3 grid",
+    Stage(5, "h3_grid", "Export the H3 grid",
           "/app/app/pipeline/generate_h3_grid.py", conditional=True, needs_db=True),
-    Stage(6, "h3_tiles", "Generate map tiles",
-          "/app/app/pipeline/generate_h3_tiles.py", conditional=True),
+    Stage(6, "h3_tiles", "Generate PMTiles",
+          "/app/app/pipeline/generate_h3_tiles.py", conditional=True, needs_db=True),
     Stage(7, "lint_filenames", "Clean up file names",
           "/app/app/tools/lint_filenames.py"),
-    Stage(8, "ingest", "Ingest vector data to GeoParquet",
+    Stage(8, "ingest", "Ingest vectors to GeoParquet",
           "/app/app/pipeline/ingest_to_geoparquet.py"),
     Stage(9, "raster_to_h3", "Sample rasters onto H3 cells",
           "/app/app/pipeline/raster_to_h3.py"),
     Stage(10, "parquet_to_h3", "Convert vectors to H3",
           "/app/app/pipeline/parquet_to_h3.py"),
+    # Runs on every pass but writes no manifest entry, so it is invisible to
+    # anything counting summaries.
+    Stage(10.5, "variable_fixes", "Apply per-variable corrections",
+          "/app/app/pipeline/apply_variable_fixes.py", reports=False),
+    Stage(10.6, "prune_stale", "Archive superseded outputs",
+          "/app/app/pipeline/prune_stale_outputs.py", conditional=True),
     Stage(11, "load_values", "Load H3 values into the database",
           "/app/app/pipeline/load_h3_values.py", needs_db=True),
     Stage(12, "render_html", "Render the interactive maps",
           "/app/app/tools/render_html.py"),
+    Stage(12.5, "collect_html", "Collect the verification renders",
+          "/app/app/tools/collect_verification_html.py", conditional=True),
     Stage(13, "export_master", "Export the master table",
           "/app/app/pipeline/export_hexagonos_csv.py", args=("--limit", "0"), needs_db=True),
 )
+
+#: The denominator for progress. The docs say to count `script_summary` lines
+#: against fourteen stages, but that is not what lands in the manifest:
+#: stages 0-2 write none, and `apply_variable_fixes` writes none either. Only
+#: these can ever appear.
+def reporting_stages() -> tuple[Stage, ...]:
+    return tuple(stage for stage in STAGES if stage.reports)
+
 
 STAGES_BY_KEY = {stage.key: stage for stage in STAGES}
 
@@ -294,7 +317,7 @@ def read_progress(execution_id: str) -> RunProgress:
     skipped_files = errored_files = 0
 
     if not path.exists():
-        return RunProgress(execution_id, completed, failed, len(STAGES), 0, False)
+        return RunProgress(execution_id, completed, failed, len(reporting_stages()), 0, False)
 
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
@@ -323,9 +346,10 @@ def read_progress(execution_id: str) -> RunProgress:
         # Counting cannot reach 100: the conditional stages are skipped once
         # their output exists, so a finished run logs fewer summaries than
         # there are stages. The terminal stage is what says it is over.
-        percent = 100 if finished else min(95, round(len(completed) / max(1, len(STAGES)) * 100))
+        total = len(reporting_stages())
+        percent = 100 if finished else min(95, round(len(completed) / max(1, total) * 100))
 
     return RunProgress(
-        execution_id, completed, failed, len(STAGES), percent, exact,
+        execution_id, completed, failed, len(reporting_stages()), percent, exact,
         finished=finished, skippedFiles=skipped_files, erroredFiles=errored_files,
     )
