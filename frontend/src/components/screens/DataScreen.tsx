@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
-import type { DataFolder, PathInspection, ProcessingPhase } from '../../types';
+import type { DataFolder, PathInspection, PipelineRun, PipelineStage } from '../../types';
 import { Dialog } from '../ui/Dialog';
 import { Icon } from '../ui/Icon';
 
@@ -16,17 +16,63 @@ function formatSize(bytes: number): string {
   return `${bytes} B`;
 }
 
+/** `1m 04s`, `12s` — how long a run took, from its own timestamps. */
+function formatDuration(run: { startedAt: number; finishedAt: number | null }): string {
+  const seconds = Math.max(0, Math.round((run.finishedAt ?? Date.now() / 1000) - run.startedAt));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
+}
+
+/**
+ * One step of the engine's pipeline.
+ *
+ * Both the numbers and the skips are shown rather than tidied away. A step
+ * that says "skipped — already up to date" is the engine explaining why a
+ * fifteen-minute job finished in two, and without it the run looks like it
+ * silently did nothing.
+ */
+function StageRow({ stage }: { stage: PipelineStage }) {
+  const mark =
+    stage.status === 'running' ? (
+      <Icon name="spinner" size={13} color="var(--color-accent)" className="spin" />
+    ) : stage.status === 'ok' ? (
+      <Icon name="check" size={13} color="var(--color-accent-2-800)" strokeWidth={3} />
+    ) : stage.status === 'failed' ? (
+      <Icon name="close" size={13} color="var(--color-accent-700)" strokeWidth={3} />
+    ) : (
+      <span className="stage-dot" />
+    );
+
+  return (
+    <li className={`stage-row is-${stage.status}`}>
+      <span className="stage-mark">{mark}</span>
+      <span className="stage-label">{stage.label}</span>
+      <span className="stage-detail muted-55">
+        {stage.status === 'skipped' && (stage.detail || 'Skipped')}
+        {stage.status === 'aborted' && 'Not run'}
+        {(stage.status === 'ok' || stage.status === 'failed') && stage.detail}
+      </span>
+      {stage.durationSeconds != null && (
+        <span className="stage-time muted-55">{Math.round(stage.durationSeconds)}s</span>
+      )}
+    </li>
+  );
+}
+
 export function DataScreen() {
   const { project, goTo, showHints, showToast, openProject } = useApp();
   const projectId = project?.id ?? '';
 
   const [folders, setFolders] = useState<DataFolder[]>([]);
-  const [phase, setPhase] = useState<ProcessingPhase>('empty');
-  const [progress, setProgress] = useState(0);
-  const [statusText, setStatusText] = useState('');
-  const [hexagonCount, setHexagonCount] = useState(0);
+  /** The engine run, straight from the backend. Null until one is started. */
+  const [run, setRun] = useState<PipelineRun | null>(null);
   const [showComplete, setShowComplete] = useState(false);
   const [aborting, setAborting] = useState(false);
+  const [starting, setStarting] = useState(false);
+  /** Why the engine cannot be driven, when it cannot. */
+  const [blocked, setBlocked] = useState<string[]>([]);
+  /** Expanded by default while running: the stage list is the interesting part. */
+  const [showStages, setShowStages] = useState(true);
 
   /** The path being typed, and what the server makes of it. */
   const [draftPath, setDraftPath] = useState('');
@@ -97,7 +143,14 @@ export function DataScreen() {
   const inspection = inspected?.path === draftPath.trim() ? inspected.result : null;
   const checking = draftPath.trim().length > 0 && inspection === null;
 
-  const locked = phase !== 'empty';
+  /**
+   * The screen's three states, derived from the run rather than tracked
+   * alongside it — one source of truth means the buttons cannot disagree
+   * with the progress bar.
+   */
+  const running = run?.status === 'starting' || run?.status === 'running';
+  const phase = running ? 'processing' : run?.status === 'done' ? 'done' : 'empty';
+  const locked = running;
   const full = folders.length >= MAX_FOLDERS;
   const missing = folders.filter((f) => !f.exists);
   const canAdd = !locked && !full && inspection?.problem == null && inspection !== null;
@@ -146,42 +199,100 @@ export function DataScreen() {
     goTo('projects');
   };
 
-  const startProcessing = async () => {
-    if (locked || folders.length === 0) return;
-    setPhase('processing');
-    setProgress(0);
-    setStatusText('Reading your mesh');
-    await api.startProcessing(projectId);
-
-    unwatch.current = api.watchProcessing(projectId, (tick) => {
-      setProgress(tick.progress);
-      setStatusText(tick.statusText);
-      if (tick.phase !== 'done') return;
-
-      setPhase('done');
-      setHexagonCount(tick.hexagonCount ?? 0);
-      setShowComplete(true);
+  /**
+   * Follow a run to its end, and react when it gets there.
+   *
+   * Used both for a run this screen started and for one it found already
+   * going, so the two paths cannot drift apart.
+   */
+  const follow = useCallback(
+    (initial: PipelineRun) => {
+      setRun(initial);
       unwatch.current?.();
-      unwatch.current = null;
-    });
+      unwatch.current = api.watchProcessing(
+        projectId,
+        (tick) => {
+          setRun(tick);
+          if (tick.status === 'starting' || tick.status === 'running') return;
+
+          unwatch.current = null;
+          if (tick.status === 'done') {
+            setShowComplete(true);
+            // The engine has just written new layers; the folder list shows
+            // what it made of each one.
+            reload();
+          }
+        },
+        (error) => showToast(error.message),
+      );
+    },
+    [projectId, reload, showToast],
+  );
+
+  /**
+   * Pick a run back up after a reload.
+   *
+   * The engine takes about a quarter of an hour, which is long enough that
+   * the user will navigate away, reload, or come back tomorrow. The backend
+   * holds the run, so asking once on mount is the difference between that
+   * being fine and the screen claiming nothing is happening while the engine
+   * is halfway through.
+   */
+  useEffect(() => {
+    if (!projectId) return;
+    let live = true;
+    api
+      .getProcessing(projectId)
+      .then((existing) => {
+        if (!live || !existing) return;
+        if (existing.status === 'starting' || existing.status === 'running') follow(existing);
+        else setRun(existing);
+      })
+      .catch(() => {
+        // Nothing to resume is the normal case, and a backend that cannot be
+        // reached is already reported by the folder list.
+      });
+    return () => {
+      live = false;
+    };
+  }, [projectId, follow]);
+
+  const startProcessing = async () => {
+    if (locked || starting || folders.length === 0) return;
+    setStarting(true);
+    setBlocked([]);
+    try {
+      follow(await api.startProcessing(projectId));
+    } catch (error) {
+      // The backend refuses with the reason — Docker not running, the folder
+      // gone, another project already processing — and each one is something
+      // the user can act on, so it is shown rather than reduced to a toast.
+      const message = error instanceof Error ? error.message : 'Could not start the engine';
+      setBlocked([message]);
+    } finally {
+      setStarting(false);
+    }
   };
 
   /**
    * Stop a run that is already going.
    *
-   * Returns to the pre-run state rather than a distinct "aborted" one: the
-   * folders are still there and Process is the obvious next move.
+   * Goes back to the pre-run state: the folders are still there and Process
+   * is the obvious next move. What the engine already wrote stays on disk —
+   * it commits variable by variable — so this is a stop, not an undo, and the
+   * backend says in as many words what it managed to stop.
    */
   const abort = async () => {
-    if (phase !== 'processing' || aborting) return;
+    if (!running || aborting) return;
     setAborting(true);
     try {
-      await api.abortProcessing(projectId);
+      const { detail } = await api.abortProcessing(projectId);
       unwatch.current?.();
       unwatch.current = null;
-      setPhase('empty');
-      setProgress(0);
-      setStatusText('');
+      setRun(null);
+      showToast(detail ? `Stopped — ${detail}` : 'Stopped');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not stop the run');
     } finally {
       setAborting(false);
     }
@@ -358,36 +469,125 @@ export function DataScreen() {
           </div>
         )}
 
-        {phase === 'processing' && (
+        {blocked.length > 0 && (
+          <div className="folder-alert">
+            <div className="folder-alert-body">
+              <strong>The engine could not be started</strong>
+              {blocked.map((problem) => (
+                <span key={problem} className="muted-55">
+                  {problem}
+                </span>
+              ))}
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={() => setBlocked([])}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {run && (
           <div className="card elev-sm process-card">
             <div className="process-head">
-              <Icon name="spinner" size={20} color="var(--color-accent)" className="spin" />
-              <div className="process-status">{statusText}</div>
+              {running ? (
+                <Icon name="spinner" size={20} color="var(--color-accent)" className="spin" />
+              ) : (
+                <Icon
+                  name={run.status === 'done' ? 'check' : 'close'}
+                  size={18}
+                  color={
+                    run.status === 'done'
+                      ? 'var(--color-accent-2-800)'
+                      : 'var(--color-accent-700)'
+                  }
+                  strokeWidth={3}
+                />
+              )}
+              <div className="process-status">{run.statusText}</div>
               <div className="muted-55" style={{ fontSize: 13 }}>
-                {progress}%
+                {run.percent}%
               </div>
-              <button
-                type="button"
-                className="btn btn-secondary process-abort"
-                onClick={abort}
-                disabled={aborting}
-              >
-                <Icon name="close" size={13} />
-                {aborting ? 'Stopping…' : 'Abort'}
-              </button>
+              {running ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary process-abort"
+                  onClick={abort}
+                  disabled={aborting}
+                >
+                  <Icon name="close" size={13} />
+                  {aborting ? 'Stopping…' : 'Abort'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary process-abort"
+                  onClick={() => setRun(null)}
+                >
+                  Dismiss
+                </button>
+              )}
             </div>
             <div
               className="progress-track"
               role="progressbar"
-              aria-valuenow={progress}
+              aria-valuenow={run.percent}
               aria-valuemin={0}
               aria-valuemax={100}
             >
-              <div className="progress-bar" style={{ width: `${progress}%` }} />
+              <div className="progress-bar" style={{ width: `${run.percent}%` }} />
             </div>
-            <div className="muted-55" style={{ fontSize: 12 }}>
-              Folders are locked while we convert them. This usually takes a couple of minutes.
+
+            <div className="process-meta">
+              <span className="muted-55">
+                {running
+                  ? 'Folders are locked while we convert them. This usually takes about a quarter of an hour.'
+                  : `Finished in ${formatDuration(run)}.`}
+              </span>
+              {run.executionId && (
+                <span className="muted-55 mono" title="The engine's own id for this run">
+                  {run.executionId}
+                </span>
+              )}
             </div>
+
+            {/* The engine does not stop for one damaged file — it logs it and
+                carries on, so a run can succeed with variables missing. That
+                has to be said out loud or the "all done" dialog is a lie. */}
+            {(run.erroredFiles > 0 || run.skippedFiles > 0) && (
+              <div className={run.erroredFiles > 0 ? 'process-warn' : 'muted-55'}>
+                {run.erroredFiles > 0 && (
+                  <>
+                    {run.erroredFiles} {run.erroredFiles === 1 ? 'file' : 'files'} could not be
+                    processed — the engine carried on without{' '}
+                    {run.erroredFiles === 1 ? 'it' : 'them'}.{' '}
+                  </>
+                )}
+                {run.skippedFiles > 0 && (
+                  <>
+                    {run.skippedFiles} already up to date, so{' '}
+                    {run.skippedFiles === 1 ? 'it was' : 'they were'} left alone.
+                  </>
+                )}
+              </div>
+            )}
+
+            {run.error && <pre className="process-error">{run.error}</pre>}
+
+            <button
+              type="button"
+              className={`process-stages-toggle${showStages ? ' is-open' : ''}`}
+              onClick={() => setShowStages((open) => !open)}
+            >
+              <Icon name="chevronRight" size={13} strokeWidth={3} />
+              {showStages ? 'Hide steps' : `Show all ${run.stages.length} steps`}
+            </button>
+
+            {showStages && (
+              <ol className="process-stages">
+                {run.stages.map((stage) => (
+                  <StageRow key={stage.key} stage={stage} />
+                ))}
+              </ol>
+            )}
           </div>
         )}
 
@@ -399,7 +599,7 @@ export function DataScreen() {
             onClick={startProcessing}
             style={{ height: 44, paddingInline: 26, fontSize: 15 }}
           >
-            {phase === 'done' ? 'Processed' : phase === 'processing' ? 'Processing…' : 'Process'}
+            {starting ? 'Starting…' : phase === 'done' ? 'Process again' : running ? 'Processing…' : 'Process'}
           </button>
           {showHints && (
             <span className="muted-55" style={{ fontSize: 12.5 }}>
@@ -437,8 +637,12 @@ export function DataScreen() {
             All done
           </div>
           <p className="dialog-body" style={{ margin: 0 }}>
-            {folders.length} folders converted into {hexagonCount.toLocaleString()} hexagons. Every
-            variable is ready to explore on the map.
+            {run?.hexagonCount
+              ? `${folders.length} folders converted onto ${run.hexagonCount.toLocaleString()} hexagons. `
+              : `${folders.length} folders converted. `}
+            {run && run.erroredFiles > 0
+              ? `${run.erroredFiles} ${run.erroredFiles === 1 ? 'file' : 'files'} could not be processed — the rest is ready to explore on the map.`
+              : 'Every variable is ready to explore on the map.'}
           </p>
           <div className="dialog-actions" style={{ alignSelf: 'stretch' }}>
             <button type="button" className="btn btn-secondary" onClick={() => setShowComplete(false)}>

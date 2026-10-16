@@ -94,18 +94,79 @@ export interface PickedFolder {
 
 export type ProcessingPhase = 'empty' | 'processing' | 'done';
 
+/** How one stage of the pipeline ended, or that it has not run. */
+export type StageStatus = 'pending' | 'running' | 'ok' | 'skipped' | 'failed' | 'aborted';
+
 /**
- * One tick of the processing run. The backend pushes these over SSE as
- * `watchfiles` sees the engine drop results into the project folder.
+ * One step of the engine's pipeline.
+ *
+ * `number` is the step's number in the engine's own documentation, fractional
+ * included — 10.5 and 12.5 were inserted between existing steps and keeping
+ * their real numbers means a question about "step 11" has one answer in the
+ * UI and in the engine's docs.
  */
-export interface ProcessingProgress {
-  phase: ProcessingPhase;
-  /** 0–100. */
-  progress: number;
-  /** Current step, e.g. `Turning locations into H3 hexagons`. */
+export interface PipelineStage {
+  number: number;
+  key: string;
+  label: string;
+  status: StageStatus;
+  /** The stage's own counts, in its own words. Empty until it reports. */
+  detail: string;
+  durationSeconds: number | null;
+}
+
+/** A run of the engine, as the backend sees it. */
+export interface PipelineRun {
+  projectId: string;
+  status: 'starting' | 'running' | 'done' | 'failed' | 'aborted';
+  /** The engine's id for the run, e.g. `2026-10-15_20-31_rf_001`. */
+  executionId: string;
+  /** 0–100, weighted by how long each stage takes rather than counting them. */
+  percent: number;
   statusText: string;
-  hexagonCount?: number;
-  error?: string;
+  stages: PipelineStage[];
+  startedAt: number;
+  finishedAt: number | null;
+  error: string;
+  hexagonCount: number | null;
+  /**
+   * Input files the engine skipped or failed on and carried on past.
+   *
+   * These matter more than they look: the engine deliberately does not abort
+   * a run over one damaged file, so it can finish successfully with variables
+   * missing. A run that says "done" with a non-zero count here did not do
+   * everything it was asked to.
+   */
+  skippedFiles: number;
+  erroredFiles: number;
+  /** The tail of the engine's output, for when something goes wrong. */
+  logTail: string[];
+}
+
+/**
+ * Whether the engine can be driven at all.
+ *
+ * Every reason it cannot be is something only the user can fix — Docker not
+ * running, WSL integration switched off, the pipeline checked out somewhere
+ * else — so the problems come back as sentences to show rather than a flag.
+ */
+export interface PipelineReadiness {
+  ready: boolean;
+  pipelineDir: string;
+  /**
+   * The folder the engine actually processes.
+   *
+   * Fixed inside the engine's own checkout, not taken from the project: the
+   * pipeline script accepts a `DATA_DIR` and then assigns over it. Until that
+   * changes upstream, a project has to point here or processing is refused.
+   */
+  dataDir: string;
+  pipelineFound: boolean;
+  dockerAvailable: boolean;
+  composeAvailable: boolean;
+  appRunning: boolean;
+  dbRunning: boolean;
+  problems: string[];
 }
 
 /* ── the layer tree ────────────────────────────────────────────────────── */

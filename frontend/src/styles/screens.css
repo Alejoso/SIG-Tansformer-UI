@@ -223,6 +223,87 @@
   font-size: 12.5px;
 }
 
+/* ── a run's steps ──────────────────────────────────────────────────────── */
+
+.process-meta { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+
+/* Files the engine could not process. Terracotta, as everywhere a path or a
+   value is wrong — the run itself still succeeded. */
+.process-warn { font-size: 12.5px; color: var(--color-accent-700); font-weight: 600; }
+
+.process-error {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+  color: var(--color-accent-800);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.process-stages-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.process-stages-toggle:hover { color: var(--color-text); }
+.process-stages-toggle svg { transition: transform 0.15s ease; }
+.process-stages-toggle.is-open svg { transform: rotate(90deg); }
+
+.process-stages {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.stage-row {
+  display: grid;
+  /* The detail column is the only flexible one: stage names and timings are
+     short and predictable, and the engine's own counts are not. */
+  grid-template-columns: 16px minmax(150px, max-content) 1fr max-content;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+  font-size: 12.5px;
+}
+.stage-row:last-child { border-bottom: 0; }
+.stage-row.is-pending,
+.stage-row.is-aborted { opacity: 0.5; }
+.stage-row.is-running { font-weight: 600; }
+.stage-row.is-failed .stage-label { color: var(--color-accent-700); font-weight: 600; }
+
+.stage-mark { display: grid; place-items: center; height: 16px; }
+.stage-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text) 30%, transparent);
+}
+.stage-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage-detail {
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-time { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
 /* ── adding a folder by path ────────────────────────────────────────────── */
 
 .path-add {

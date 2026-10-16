@@ -136,3 +136,60 @@ class PickFolderResult(BaseModel):
     #: Set when no native dialog could be opened, so the UI can say why
     #: instead of silently doing nothing.
     unavailable: str | None = None
+
+
+class PipelineStageState(BaseModel):
+    number: float
+    key: str
+    label: str
+    #: pending | running | ok | skipped | failed | aborted
+    status: str
+    #: The stage's own counts, in its own words — "variables db 12,
+    #: archivo valores db 9096593". Not curated into fixed fields: each stage
+    #: reports different things and upstream adds counters.
+    detail: str = ""
+    durationSeconds: float | None = None
+
+
+class PipelineRun(BaseModel):
+    projectId: str
+    #: starting | running | done | failed | aborted
+    status: str
+    #: The engine's own id for the run, once it has announced one.
+    executionId: str = ""
+    percent: int = 0
+    statusText: str = ""
+    stages: list[PipelineStageState] = Field(default_factory=list)
+    startedAt: float = 0.0
+    finishedAt: float | None = None
+    error: str = ""
+    hexagonCount: int | None = None
+    #: Input files the engine skipped or failed on and carried on past. A run
+    #: can finish successfully with variables missing; these are what say so.
+    skippedFiles: int = 0
+    erroredFiles: int = 0
+    #: The last few hundred lines of the engine's output.
+    logTail: list[str] = Field(default_factory=list)
+
+
+class PipelineReadiness(BaseModel):
+    """Whether a run could start at all, and what to fix if not."""
+
+    ready: bool
+    pipelineDir: str
+    #: The folder the engine will actually process, which is fixed inside its
+    #: own checkout rather than taken from the project — see
+    #: `pipeline.engine_data_dir`.
+    dataDir: str = ""
+    pipelineFound: bool
+    dockerAvailable: bool
+    composeAvailable: bool
+    appRunning: bool
+    dbRunning: bool
+    problems: list[str] = Field(default_factory=list)
+
+
+class AbortResult(BaseModel):
+    #: What was actually stopped, which is not always everything — see
+    #: `Run.abort`.
+    detail: str

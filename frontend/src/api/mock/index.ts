@@ -12,7 +12,6 @@ import type {
   Mesh,
   ModelConfig,
   ModelExample,
-  ProcessingProgress,
   ProjectSettings,
 } from '../../types';
 import { DEFAULT_SETTINGS, EXAMPLES } from './fixtures';
@@ -35,75 +34,6 @@ export async function uploadMesh(file: File): Promise<Mesh> {
   const label = file.name.replace(/\.geojson$/i, '');
   return delay({ id: file.name, label, continent: '', iso: '', search: label }, 500);
 }
-
-/* ── processing ────────────────────────────────────────────────────────── */
-
-const PROCESS_STEPS: [number, string][] = [
-  [0, 'Reading your mesh'],
-  [22, 'Turning locations into H3 hexagons'],
-  [52, 'Attaching data values to each hexagon'],
-  [78, 'Building color scales'],
-];
-
-const processingTimers = new Map<string, ReturnType<typeof setInterval>>();
-
-export async function startProcessing(projectId: string): Promise<void> {
-  await delay(null, 60);
-  void projectId;
-}
-
-/**
- * Stop a run in progress.
- *
- * The real one signals the engine to stop — the equivalent of Ctrl-C on the
- * pipeline process — and that part is not built yet. Here it only stops the
- * progress ticks, which is enough for the UI to be exercised.
- */
-export async function abortProcessing(projectId: string): Promise<void> {
-  const timer = processingTimers.get(projectId);
-  if (timer) {
-    clearInterval(timer);
-    processingTimers.delete(projectId);
-  }
-  await delay(null, 120);
-}
-
-/**
- * Stands in for the SSE stream. Ticks every 55 ms to 100%, marks every folder
- * ready, then reports `done` — the same sequence `watchfiles` will produce.
- */
-export function watchProcessing(
-  projectId: string,
-  onProgress: (p: ProcessingProgress) => void,
-): () => void {
-  let progress = 0;
-  let statusText = PROCESS_STEPS[0][1];
-
-  const timer = setInterval(() => {
-    progress = Math.min(100, progress + 2);
-    for (const [at, label] of PROCESS_STEPS) {
-      if (progress >= at) statusText = label;
-    }
-
-    if (progress >= 100) {
-      clearInterval(timer);
-      processingTimers.delete(projectId);
-      onProgress({ phase: 'done', progress: 100, statusText: 'Finishing up', hexagonCount: 4812 });
-      return;
-    }
-
-    onProgress({ phase: 'processing', progress, statusText });
-  }, 55);
-
-  processingTimers.set(projectId, timer);
-  return () => {
-    clearInterval(timer);
-    processingTimers.delete(projectId);
-  };
-}
-
-/* ── the layer tree ────────────────────────────────────────────────────── */
-
 
 /* ── model ─────────────────────────────────────────────────────────────── */
 

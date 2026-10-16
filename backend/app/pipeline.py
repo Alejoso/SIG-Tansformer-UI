@@ -50,9 +50,19 @@ class Stage:
     conditional: bool = False
     #: Needs Postgres, not just the app container.
     needs_db: bool = False
-    #: Whether the stage writes a `script_summary` line. One does not, so it
-    #: can never be counted — see `reporting_stages`.
+    #: Whether the stage writes a `script_summary` line to the run manifest.
+    #: `apply_variable_fixes` does not, so its row in the UI is filled in by
+    #: the next stage starting rather than by a summary of its own.
     reports: bool = True
+    #: Roughly how long this stage takes, in seconds. Measured from one real
+    #: run of the Colombia dataset at H3_RES=8, so these are the right order
+    #: of magnitude and nothing more. They exist only to weight the progress
+    #: bar: the stages differ by two orders of magnitude, so counting them
+    #: equally would park the bar for five minutes on `load_h3_values` alone
+    #: (324s of a 765s run) and then jump. A stage that has never been
+    #: observed carries a guess, which is still better than treating it as
+    #: equal to a one-second rename.
+    weight: float = 10.0
 
 
 #: Taken from the table in the pipeline's own docs/pipeline.md, which carries a
@@ -61,44 +71,36 @@ class Stage:
 #: first two itself and the third is handled by Postgres on first start.
 STAGES: tuple[Stage, ...] = (
     Stage(3, "normalize_dane", "Normalise administrative boundaries",
-          "/app/app/pipeline/normalize_dane_mgn.py", conditional=True),
+          "/app/app/pipeline/normalize_dane_mgn.py", conditional=True, weight=60),
     Stage(4, "fill_h3", "Build the H3 master table",
-          "/app/app/pipeline/fill_h3_from_geojson.py", conditional=True, needs_db=True),
+          "/app/app/pipeline/fill_h3_from_geojson.py", conditional=True, needs_db=True, weight=119),
     Stage(5, "h3_grid", "Export the H3 grid",
-          "/app/app/pipeline/generate_h3_grid.py", conditional=True, needs_db=True),
+          "/app/app/pipeline/generate_h3_grid.py", conditional=True, needs_db=True, weight=72),
     Stage(6, "h3_tiles", "Generate PMTiles",
-          "/app/app/pipeline/generate_h3_tiles.py", conditional=True, needs_db=True),
+          "/app/app/pipeline/generate_h3_tiles.py", conditional=True, needs_db=True, weight=133),
     Stage(7, "lint_filenames", "Clean up file names",
-          "/app/app/tools/lint_filenames.py"),
+          "/app/app/tools/lint_filenames.py", weight=1),
     Stage(8, "ingest", "Ingest vectors to GeoParquet",
-          "/app/app/pipeline/ingest_to_geoparquet.py"),
+          "/app/app/pipeline/ingest_to_geoparquet.py", weight=13),
     Stage(9, "raster_to_h3", "Sample rasters onto H3 cells",
-          "/app/app/pipeline/raster_to_h3.py"),
+          "/app/app/pipeline/raster_to_h3.py", weight=4),
     Stage(10, "parquet_to_h3", "Convert vectors to H3",
-          "/app/app/pipeline/parquet_to_h3.py"),
+          "/app/app/pipeline/parquet_to_h3.py", weight=61),
     # Runs on every pass but writes no manifest entry, so it is invisible to
     # anything counting summaries.
     Stage(10.5, "variable_fixes", "Apply per-variable corrections",
-          "/app/app/pipeline/apply_variable_fixes.py", reports=False),
+          "/app/app/pipeline/apply_variable_fixes.py", reports=False, weight=5),
     Stage(10.6, "prune_stale", "Archive superseded outputs",
-          "/app/app/pipeline/prune_stale_outputs.py", conditional=True),
+          "/app/app/pipeline/prune_stale_outputs.py", conditional=True, weight=5),
     Stage(11, "load_values", "Load H3 values into the database",
-          "/app/app/pipeline/load_h3_values.py", needs_db=True),
+          "/app/app/pipeline/load_h3_values.py", needs_db=True, weight=324),
     Stage(12, "render_html", "Render the interactive maps",
-          "/app/app/tools/render_html.py"),
+          "/app/app/tools/render_html.py", weight=8),
     Stage(12.5, "collect_html", "Collect the verification renders",
-          "/app/app/tools/collect_verification_html.py", conditional=True),
+          "/app/app/tools/collect_verification_html.py", conditional=True, weight=5),
     Stage(13, "export_master", "Export the master table",
-          "/app/app/pipeline/export_hexagonos_csv.py", args=("--limit", "0"), needs_db=True),
+          "/app/app/pipeline/export_hexagonos_csv.py", args=("--limit", "0"), needs_db=True, weight=33),
 )
-
-#: The denominator for progress. The docs say to count `script_summary` lines
-#: against fourteen stages, but that is not what lands in the manifest:
-#: stages 0-2 write none, and `apply_variable_fixes` writes none either. Only
-#: these can ever appear.
-def reporting_stages() -> tuple[Stage, ...]:
-    return tuple(stage for stage in STAGES if stage.reports)
-
 
 STAGES_BY_KEY = {stage.key: stage for stage in STAGES}
 
@@ -264,7 +266,8 @@ def mcda_command(config: str, site: str, master: str, execution_id: str) -> list
     ]
 
 
-# ── reading a run's progress ──────────────────────────────────────────────
+# ── where a run reports from ──────────────────────────────────────────────
+
 
 def manifest_path(execution_id: str) -> Path:
     """Host-side path to a run's manifest, via the bind-mounted logs folder."""
@@ -272,84 +275,172 @@ def manifest_path(execution_id: str) -> Path:
     return log_dir / execution_id / "run_manifest.jsonl"
 
 
-#: The last stage that writes a summary. `pipeline_summary` runs after it but
-#: logs nothing, so this is what marks a run as finished.
-TERMINAL_STAGE = "export_hexagonos_csv"
+# ── running the whole pipeline ────────────────────────────────────────────
+#
+# The stage list above exists to *name* the steps and to re-run one on its
+# own. A full pass goes through `run_full.sh` instead, and deliberately so:
+# the script is not a thin loop over the stages, it is where the decisions
+# live. Whether to rebuild the H3 master is a comparison between the H3
+# resolution, the bbox flag and the mtime of the normalised boundaries
+# against what the `pipeline_state` table recorded last time; when that says
+# rebuild, the script truncates seven tables and turns on three force flags
+# that the stages then read. Reimplementing it here would mean keeping a copy
+# of someone else's rules in step with theirs, and a copy that drifted would
+# not fail loudly — it would quietly skip the master rebuild, or truncate
+# when it should not have. So the script stays in charge and this module
+# watches it work.
+
+RUN_SCRIPT = "run_full.sh"
+
+#: What the script prints as it reaches each stage, as (substring, stage key,
+#: status) — matched case-insensitively against its stdout.
+#:
+#: This is screen-scraping another team's log lines, so it is written to fail
+#: softly. Progress and per-stage results come from the run manifest, which
+#: records the canonical script name; these markers only supply the live
+#: "what is happening now" label and the skip notices, which the manifest has
+#: no entry for. If upstream rewords a line, that label goes quiet and
+#: everything else still works.
+STAGE_LOG_MARKERS: tuple[tuple[str, str, str], ...] = (
+    ("normalizando shapefiles dane", "normalize_dane", "running"),
+    ("geojson normalizados ya existen", "normalize_dane", "skipped"),
+    ("llenando h3", "fill_h3", "running"),
+    ("tabla maestro ya tiene", "fill_h3", "skipped"),
+    ("generando malla h3", "h3_grid", "running"),
+    ("malla h3 ya existe", "h3_grid", "skipped"),
+    ("generando pmtiles", "h3_tiles", "running"),
+    ("pmtiles ya existe", "h3_tiles", "skipped"),
+    ("limpiando nombres de archivos", "lint_filenames", "running"),
+    ("ingesta vectorial", "ingest", "running"),
+    ("procesando rasters a h3", "raster_to_h3", "running"),
+    ("convirtiendo parquets vectoriales", "parquet_to_h3", "running"),
+    ("aplicando correcciones de variables", "variable_fixes", "running"),
+    ("archivando salidas obsoletas", "prune_stale", "running"),
+    ("sincronizando valores h3", "load_values", "running"),
+    ("generando renders html", "render_html", "running"),
+    ("recopilando renders html", "collect_html", "running"),
+    ("exportando tabla maestra", "export_master", "running"),
+)
 
 
-@dataclass
-class RunProgress:
-    executionId: str
-    #: Stages that have reported a summary, in order.
-    completed: list[str]
-    #: Stages that reported a summary with a non-ok status.
-    failed: list[str]
-    total: int
-    percent: int
-    #: True once the pipeline's own progress line exists, which the pipeline
-    #: team plan to add. Until then the percentage is an estimate.
-    exact: bool
-    #: The terminal stage has reported, so the run is over.
-    finished: bool = False
-    #: Per-stage counts of files the pipeline skipped or failed on.
-    #:
-    #: The pipeline deliberately carries on past a damaged file rather than
-    #: losing a two-hour run, so it can exit 0 with variables missing. These
-    #: are what say whether a "successful" run actually loaded everything.
-    skippedFiles: int = 0
-    erroredFiles: int = 0
+def match_stage_line(line: str) -> tuple[str, str] | None:
+    """Which stage a line of the script's output is about, if any."""
+    lowered = line.lower()
+    for marker, key, status in STAGE_LOG_MARKERS:
+        if marker in lowered:
+            return key, status
+    return None
 
 
-def read_progress(execution_id: str) -> RunProgress:
+#: The script announces the id it generated. We cannot choose it: the script
+#: sets EXECUTION_ID unconditionally at startup, so we read it back rather
+#: than passing one in.
+EXECUTION_ID_MARKER = "Execution ID:"
+
+
+def match_execution_id(line: str) -> str | None:
+    if EXECUTION_ID_MARKER not in line:
+        return None
+    return line.split(EXECUTION_ID_MARKER, 1)[1].strip() or None
+
+
+def run_full_command() -> list[str]:
     """
-    How far a run has got, from its manifest.
+    How to invoke a full pass.
 
-    Counts `script_summary` lines, which is what the pipeline team suggest.
-    The count is an estimate, not a measurement: five of the fourteen stages
-    are skipped when their output already exists, so a complete run can log
-    fewer summaries than there are stages. A `pipeline_progress` line is
-    planned upstream and is preferred here as soon as one appears.
+    Called through bash explicitly rather than relying on the execute bit,
+    which does not survive every way this repo gets onto a machine.
     """
-    path = manifest_path(execution_id)
-    completed: list[str] = []
-    failed: list[str] = []
-    percent, exact = 0, False
-    skipped_files = errored_files = 0
+    return ["bash", RUN_SCRIPT]
 
-    if not path.exists():
-        return RunProgress(execution_id, completed, failed, len(reporting_stages()), 0, False)
 
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue  # a partially written line while the run is going
+def engine_data_dir() -> Path:
+    """
+    The folder the engine will actually process. Not the project's.
 
-        event = entry.get("event")
-        if event == "script_summary":
-            name = str(entry.get("script", "?"))
-            completed.append(name)
-            if entry.get("status") not in ("ok", None) or entry.get("exit_code") not in (0, None):
-                failed.append(name)
-            skipped_files += int(entry.get("skip") or 0)
-            errored_files += int(entry.get("error") or 0) + int(entry.get("fallidos") or 0)
-        elif event == "pipeline_progress":
-            # Upstream's own figure, once it exists, beats counting.
-            percent, exact = int(entry.get("percent", percent)), True
+    `run_full.sh` lists `DATA_DIR` among the variables it accepts from the
+    environment, and then, twenty lines later, assigns over it:
 
-    finished = TERMINAL_STAGE in completed
+        if [[ "${TOYTEST}" == "1" ]]; then
+          DATA_DIR="${ROOT_DIR}/toytest/data"
+        else
+          DATA_DIR="${ROOT_DIR}/data"
+        fi
 
-    if not exact:
-        # Counting cannot reach 100: the conditional stages are skipped once
-        # their output exists, so a finished run logs fewer summaries than
-        # there are stages. The terminal stage is what says it is over.
-        total = len(reporting_stages())
-        percent = 100 if finished else min(95, round(len(completed) / max(1, total) * 100))
+    So the override is declared but discarded, and a run always works on the
+    folder inside the pipeline's own checkout. That is worth knowing rather
+    than working around: passing `DATA_DIR` and believing it took effect is
+    how a run silently processes one folder while the UI reads another.
 
-    return RunProgress(
-        execution_id, completed, failed, len(reporting_stages()), percent, exact,
-        finished=finished, skippedFiles=skipped_files, erroredFiles=errored_files,
+    A one-line change upstream — `DATA_DIR="${DATA_DIR:-${ROOT_DIR}/data}"` —
+    would make the declared override real, and is what per-project data
+    folders need.
+    """
+    env = read_env_file()
+    if env.get("TOYTEST") == "1":
+        return PIPELINE_DIR / "toytest" / "data"
+    return PIPELINE_DIR / "data"
+
+
+def run_full_env(*, skip_build: bool = True, extra: dict[str, str] | None = None) -> dict[str, str]:
+    """
+    The environment for a full pass.
+
+    `SKIP_BUILD=1` by default: left off, the script runs `docker compose up
+    --build` on every pass, so clicking Process would rebuild the image. The
+    image is ours to manage — `compose_up` and the setup path do that — and a
+    rebuild in the middle of what the user thinks is a data run would just
+    look like a hang.
+
+    `DATA_DIR` is deliberately *not* set here; see `engine_data_dir` for why
+    setting it would not work.
+    """
+    env = dict(os.environ)
+    if skip_build:
+        env["SKIP_BUILD"] = "1"
+    # Unbuffered, or the script's children trickle out in 4 KB blocks and the
+    # progress label lags minutes behind the work.
+    env["PYTHONUNBUFFERED"] = "1"
+    env.update(extra or {})
+    return env
+
+
+#: Kills whatever the pipeline is running inside the container.
+#:
+#: `docker compose exec` does not forward signals to the process it started,
+#: so stopping the client leaves the Python running — it would keep writing to
+#: the database after the UI said the run had stopped. The image has no pkill,
+#: so this walks /proc. The pattern is matched against the full command line,
+#: which for every stage contains `/app/app/`.
+KILL_SNIPPET = r"""
+killed=0
+for p in /proc/[0-9]*; do
+  pid=${p#/proc/}
+  [ "$pid" = "$$" ] && continue
+  cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null) || continue
+  case "$cmd" in
+    *"/app/app/"*|*"/app/MCDA/"*)
+      kill -TERM "$pid" 2>/dev/null && killed=$((killed+1)) ;;
+  esac
+done
+echo "killed=$killed"
+"""
+
+
+def kill_in_container() -> str:
+    """
+    Stop the pipeline inside the container. Returns what happened, for the log.
+
+    Best-effort by nature: if the container is already gone there is nothing
+    to kill, which is the same outcome by a different route.
+    """
+    result = _run(
+        ["docker", "compose", "exec", "-T", APP_SERVICE, "sh", "-c", KILL_SNIPPET],
+        cwd=PIPELINE_DIR,
+        timeout=30,
     )
+    if result is None:
+        return "could not reach the container to stop the pipeline"
+    if result.returncode != 0:
+        return (result.stderr or result.stdout or "").strip()[:200]
+    return (result.stdout or "").strip()

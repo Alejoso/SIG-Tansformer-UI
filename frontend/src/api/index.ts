@@ -2,12 +2,11 @@
  * The backend surface.
  *
  * Every call the UI makes to the server goes through this module — nothing
- * else imports `client.ts`, and no component fetches on its own. Today each
- * function forwards to the mock adapter in `./mock`; wiring the real FastAPI
- * server means replacing the bodies with `request(...)` calls and deleting
- * nothing else.
- *
- * The `ENDPOINT` comment on each function is the route it is expected to hit.
+ * else imports `client.ts`, and no component fetches on its own. Most of it
+ * is live now: projects, folders, meshes, the layer tree, the model file and
+ * processing all talk to FastAPI. What still forwards to the mock adapter in
+ * `./mock` is marked MOCK, and the `ENDPOINT` comment on each function is the
+ * route it hits — or is expected to, for the ones still pretending.
  */
 
 import { API_BASE, request } from './client';
@@ -21,7 +20,8 @@ import type {
   ModelExample,
   ModelFile,
   NewProjectPayload,
-  ProcessingProgress,
+  PipelineReadiness,
+  PipelineRun,
   PathInspection,
   PickedFolder,
   Project,
@@ -108,32 +108,101 @@ export const relocateFolder = (
 
 /* ── processing ────────────────────────────────────────────────────────── */
 
-/** ENDPOINT: POST /api/projects/{id}/process — kicks off the engine run. */
-export const startProcessing = (projectId: string): Promise<void> =>
-  mock.startProcessing(projectId);
+/* LIVE: drives the SIG-Transformer pipeline in Docker. */
+
+/**
+ * ENDPOINT: GET /api/pipeline
+ *
+ * Whether the engine could be driven right now. Asked before offering to
+ * process: a refusal here names something the user can fix, where a failure
+ * mid-run would not.
+ */
+export const getPipelineReadiness = (): Promise<PipelineReadiness> => request('/pipeline');
+
+/** ENDPOINT: POST /api/pipeline/up — starts Postgres and the engine container. */
+export const startPipelineContainers = (): Promise<PipelineReadiness> =>
+  request('/pipeline/up', { method: 'POST' });
+
+/** ENDPOINT: POST /api/projects/{id}/process — kicks off a full pipeline pass. */
+export const startProcessing = (projectId: string): Promise<PipelineRun> =>
+  request(`/projects/${projectId}/process`, { method: 'POST' });
+
+/**
+ * ENDPOINT: GET /api/projects/{id}/process
+ *
+ * The run's current state, or null when the project has never been
+ * processed. Null rather than a 404: never having been processed is the
+ * normal state for a new project, and a 404 shows up in the browser console
+ * as a failed request however carefully it is handled.
+ *
+ * A run the backend did not start is reconstructed from the engine's logs,
+ * so a restart mid-run reports what became of it rather than nothing.
+ */
+export const getProcessing = (projectId: string): Promise<PipelineRun | null> =>
+  request<PipelineRun | null>(`/projects/${projectId}/process`);
 
 /**
  * ENDPOINT: POST /api/projects/{id}/process/abort
  *
- * Stops a run that is already going. The backend is expected to signal the
- * engine process — the equivalent of Ctrl-C — and that part is NOT built yet:
- * today this only stops the progress stream. Whatever the engine had already
- * written to the results folder stays there, so a partial run leaves partial
- * output behind.
+ * Stops a run that is going — the real thing, not just the progress view:
+ * the backend signals the pipeline script and kills the Python inside the
+ * container, which `docker compose exec` does not do on its own.
+ *
+ * Whatever the engine had already written stays written. It commits variable
+ * by variable, so a stopped run leaves partial output rather than rolling
+ * back, and processing again carries on from there.
  */
-export const abortProcessing = (projectId: string): Promise<void> =>
-  mock.abortProcessing(projectId);
+export const abortProcessing = (projectId: string): Promise<{ detail: string }> =>
+  request(`/projects/${projectId}/process/abort`, { method: 'POST' });
+
+/** How often to ask for progress while a run is going. */
+const POLL_MS = 1000;
 
 /**
- * ENDPOINT: GET /api/projects/{id}/process/stream (SSE)
+ * Follow a run until it ends. Returns an unsubscribe function.
  *
- * Progress ticks driven by `watchfiles` watching the results folder.
- * Returns an unsubscribe function.
+ * Polling, not SSE. A run takes around a quarter of an hour, which is exactly
+ * the case a stream is meant for — but this is a local server over loopback,
+ * where a request per second costs nothing measurable, and a poll has no
+ * reconnect logic to get wrong. `client.ts` still has `subscribe` for when
+ * the backend grows a stream; the payload here is already the shape one would
+ * push, so that swap would touch neither side's logic.
  */
 export const watchProcessing = (
   projectId: string,
-  onProgress: (p: ProcessingProgress) => void,
-): (() => void) => mock.watchProcessing(projectId, onProgress);
+  onRun: (run: PipelineRun) => void,
+  onError?: (error: Error) => void,
+): (() => void) => {
+  let stopped = false;
+  let timer: number | undefined;
+
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const run = await getProcessing(projectId);
+      if (stopped) return;
+      // Nothing to follow: the backend has no run for this project and could
+      // not reconstruct one. Stop rather than poll an empty answer forever.
+      if (!run) return;
+      onRun(run);
+      // Stop on our own once the run is over, so a caller that forgets to
+      // unsubscribe does not leave a request-per-second running forever.
+      if (run.status !== 'starting' && run.status !== 'running') return;
+    } catch (error) {
+      if (stopped) return;
+      onError?.(error instanceof Error ? error : new Error(String(error)));
+      return; // a failing poll will keep failing; let the caller decide
+    }
+    timer = window.setTimeout(tick, POLL_MS);
+  };
+
+  void tick();
+
+  return () => {
+    stopped = true;
+    if (timer !== undefined) window.clearTimeout(timer);
+  };
+};
 
 /* ── map layers ────────────────────────────────────────────────────────── */
 

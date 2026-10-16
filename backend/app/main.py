@@ -1,10 +1,11 @@
 """
 Maphex backend.
 
-Scope is deliberately narrow: projects and their data folders, stored in CSV.
-Everything else the UI needs — meshes, the layer tree, the model, processing —
-is still served from mocks in the frontend. Endpoints are added here as they
-stop being pretend.
+Projects and their data folders live in CSV here; the layer tree and the
+model file are read from the project's own folder; and processing drives the
+SIG-Transformer pipeline in Docker. What is left in the frontend's mocks is
+the model run and the settings screen. Endpoints are added here as they stop
+being pretend.
 """
 
 from __future__ import annotations
@@ -16,8 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import countries, fsutil, model_store, outputs, store
+from . import countries, fsutil, model_store, outputs, pipeline, runs, store
 from .models import (
+    AbortResult,
     AddFoldersPayload,
     DataFolder,
     InspectResult,
@@ -29,6 +31,9 @@ from .models import (
     NewProjectPayload,
     PickFolderPayload,
     PickFolderResult,
+    PipelineReadiness,
+    PipelineRun,
+    PipelineStageState,
     Project,
     RelocatePayload,
     SaveModelPayload,
@@ -280,6 +285,155 @@ def get_layer_document(project_id: str, node_id: str) -> FileResponse:
     if path is None:
         raise HTTPException(status_code=404, detail=f"No rendered layer {node_id}")
     return FileResponse(path, media_type="text/html")
+
+
+# ── processing ────────────────────────────────────────────────────────────
+
+
+def _to_run(state: runs.RunState) -> PipelineRun:
+    return PipelineRun(
+        projectId=state.projectId,
+        status=state.status,
+        executionId=state.executionId,
+        percent=state.percent,
+        statusText=state.statusText,
+        stages=[PipelineStageState(**vars(stage)) for stage in state.stages],
+        startedAt=state.startedAt,
+        finishedAt=state.finishedAt,
+        error=state.error,
+        hexagonCount=state.hexagonCount,
+        skippedFiles=state.skippedFiles,
+        erroredFiles=state.erroredFiles,
+        logTail=state.logTail,
+    )
+
+
+@app.get("/api/pipeline")
+def pipeline_readiness() -> PipelineReadiness:
+    """
+    Whether the engine could be driven right now.
+
+    Asked before offering to process, because every reason it cannot be is
+    something only the user can fix — Docker not running, WSL integration
+    off, the pipeline checked out somewhere else. A generic failure once the
+    run has started would be far harder to act on.
+    """
+    status = pipeline.status()
+    return PipelineReadiness(
+        ready=status.ready,
+        pipelineDir=status.pipelineDir,
+        dataDir=str(pipeline.engine_data_dir()),
+        pipelineFound=status.pipelineFound,
+        dockerAvailable=status.dockerAvailable,
+        composeAvailable=status.composeAvailable,
+        appRunning=status.appRunning,
+        dbRunning=status.dbRunning,
+        problems=status.problems,
+    )
+
+
+@app.post("/api/pipeline/up")
+def pipeline_up() -> PipelineReadiness:
+    """
+    Start Postgres and the engine container.
+
+    Separate from processing so the wait happens once, visibly, rather than
+    inside the first run — the containers take a few seconds the first time
+    and `run_full.sh` would do it silently.
+    """
+    result = pipeline.compose_up()
+    if result is None:
+        raise HTTPException(status_code=503, detail="Could not run `docker compose up`.")
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[-600:]
+        raise HTTPException(status_code=503, detail=detail or "`docker compose up` failed.")
+    return pipeline_readiness()
+
+
+@app.post("/api/projects/{project_id}/process", status_code=202)
+def start_processing(project_id: str) -> PipelineRun:
+    """
+    Start a full pipeline pass over the project's folder.
+
+    Returns immediately with the run's starting state: the pass takes minutes,
+    so the UI polls rather than waits. 202 rather than 201 because what comes
+    back describes work that has been accepted, not a finished thing.
+    """
+    project = _require_project(project_id)
+
+    status = pipeline.status()
+    if not status.ready:
+        raise HTTPException(status_code=503, detail=" ".join(status.problems))
+
+    folder = outputs.data_dir(project)
+    if folder is None or not folder.is_dir():
+        raise HTTPException(
+            status_code=400,
+            detail="This project's folder is missing. Point it somewhere that exists first.",
+        )
+
+    # The engine ignores where the project points — see `engine_data_dir`. So
+    # a project pointed anywhere else would have its run read and write one
+    # folder while the map and the model file read another, and nothing would
+    # say so: the run would succeed and the layers would not change. Better
+    # to refuse and name both paths.
+    engine_folder = pipeline.engine_data_dir()
+    if folder.resolve() != engine_folder.resolve():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The engine only processes {engine_folder}, so this project's folder "
+                f"({folder}) would be ignored — the run would write somewhere the map "
+                "never reads. Point the project at the engine's folder, or make "
+                "DATA_DIR settable in the pipeline's run_full.sh."
+            ),
+        )
+
+    try:
+        run = runs.start(project)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return _to_run(run.snapshot())
+
+
+@app.get("/api/projects/{project_id}/process")
+def get_processing(project_id: str) -> PipelineRun | None:
+    """
+    How far the run has got.
+
+    Polled rather than pushed. An SSE stream would be a better fit for a
+    thirteen-minute job, but this is a local server on a loopback connection
+    and a poll every second costs nothing, while reconnecting a dropped
+    stream is real work. The shape here is already the shape a stream would
+    send, so swapping the transport later touches neither side's logic.
+
+    Answers for a run this server never started, too: the pipeline runs in
+    its own process group and outlives a backend restart, so when nothing is
+    held in memory the engine's logs are read instead.
+    """
+    project = _require_project(project_id)
+    run = runs.current_or_adopted(project)
+    # `null`, not 404: a project that has never been processed is the normal
+    # state, not an error. A 404 here would be handled fine in code and still
+    # logged as a failed request by the browser, so every fresh project would
+    # open with errors in the console for people to wonder about.
+    return None if run is None else _to_run(run.snapshot())
+
+
+@app.post("/api/projects/{project_id}/process/abort")
+def abort_processing(project_id: str) -> AbortResult:
+    """
+    Stop a run that is going.
+
+    The engine keeps whatever it had already written: it loads variable by
+    variable and commits as it goes, so a stopped run leaves partial output
+    rather than rolling back. Processing again picks up from there.
+    """
+    _require_project(project_id)
+    run = runs.current(project_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="No run for this project.")
+    return AbortResult(detail=run.abort())
 
 
 # ── the model file ────────────────────────────────────────────────────────

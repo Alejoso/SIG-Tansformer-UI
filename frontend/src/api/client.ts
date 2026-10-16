@@ -1,9 +1,9 @@
 /**
  * HTTP plumbing for the FastAPI backend.
  *
- * Nothing calls this yet — `src/api/index.ts` is wired to the mock adapter.
- * It exists so that swapping the mocks for the real server is a matter of
- * changing the implementations in `index.ts`, not the call sites.
+ * Only `src/api/index.ts` imports this, which is what keeps the call sites
+ * free of fetch details — and what made swapping each mock for the real
+ * server a change in one file.
  */
 
 /** Vite proxies `/api` to uvicorn in dev; same-origin once FastAPI serves the build. */
@@ -88,8 +88,10 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /**
- * Server-sent events, used for processing progress. The backend watches the
- * results folder with `watchfiles` and pushes a `ProcessingProgress` per tick.
+ * Server-sent events. Unused: processing progress is polled instead, which
+ * over loopback costs nothing and has no reconnect logic to get wrong. Kept
+ * for the first endpoint that genuinely needs a push — the payload shape on
+ * both sides is already stream-ready.
  */
 export function subscribe<T>(
   path: string,
