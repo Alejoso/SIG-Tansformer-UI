@@ -85,6 +85,24 @@ class InspectResult(BaseModel):
     problem: str | None = None
 
 
+class LayerNode(BaseModel):
+    id: str
+    label: str
+    description: str = ""
+    children: list["LayerNode"] = Field(default_factory=list)
+    hasDocument: bool = True
+    #: The file behind this layer, so the UI can name what is on screen.
+    filename: str = ""
+    #: False when the pipeline logged a problem for this variable. A rendered
+    #: layer can still have failed — the pipeline carries on past bad files.
+    ok: bool = True
+
+
+class LayerTree(BaseModel):
+    model: dict[str, object]
+    inputs: list[LayerNode]
+
+
 class ModelIssue(BaseModel):
     message: str
     #: 1-based, when the parser gives a position. Structural problems have none.

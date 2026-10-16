@@ -25,12 +25,14 @@ type FrameState = 'loading' | 'ready' | 'failed';
 interface LayerFrameProps {
   /** URL of the generated document, from `api.getLayerUrl`. */
   url: string;
+  /** The file's own name. The URL ends in `/document`, which names nothing. */
+  filename?: string;
   /** Shown in the corner so it is clear which layer is on screen. */
   title: string;
   subtitle?: string;
 }
 
-export function LayerFrame({ url, title, subtitle }: LayerFrameProps) {
+export function LayerFrame({ url, filename, title, subtitle }: LayerFrameProps) {
   /**
    * Tagged with the URL it describes, so a new layer reads as `loading`
    * during the same render the prop changes — no effect needed to reset it,
@@ -96,9 +98,9 @@ export function LayerFrame({ url, title, subtitle }: LayerFrameProps) {
         <div className="layer-frame-overlay">
           <div className="layer-frame-overlay-text">No generated map for this layer yet</div>
           <div className="muted-55" style={{ fontSize: 12, maxWidth: 380, textAlign: 'center' }}>
-            The engine has not produced <code className="mono">{url.split('/').pop()}</code>. Drop
-            it into the repo's <code className="mono">HTML/</code> folder, or point the layer at a
-            file that exists.
+            The pipeline has not produced{' '}
+            <code className="mono">{filename ?? 'this layer'}</code> yet. Run it for this project,
+            or pick a layer that already has output.
           </div>
         </div>
       )}
@@ -113,7 +115,7 @@ export function LayerFrame({ url, title, subtitle }: LayerFrameProps) {
           {/* Names the document actually on screen. While every variable maps
               to the same sample file this is the only way to tell that the
               heading and the map are not yet about the same thing. */}
-          <div className="layer-frame-source muted-45 mono">{url.split('/').pop()}</div>
+          {filename && <div className="layer-frame-source muted-45 mono">{filename}</div>}
         </>
       )}
     </div>

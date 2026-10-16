@@ -47,8 +47,12 @@ export function MapScreen() {
   const effectiveScale: ValueScale = showScale ? scale : 'raw';
 
   const [tree, setTree] = useState<LayerTreeData | null>(null);
-  /** URL of the engine's pre-rendered document for the selected node. */
-  const [layerUrl, setLayerUrl] = useState<string | null>(null);
+  /**
+   * The document URL, tagged with the node it belongs to. Compared during
+   * render so switching layers shows the loading state immediately instead of
+   * the previous layer's document for a frame.
+   */
+  const [fetched, setFetched] = useState<{ nodeId: string; url: string } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   /** Bumped when settings are saved, to force the document to refetch. */
   const [settingsVersion, setSettingsVersion] = useState(0);
@@ -82,10 +86,12 @@ export function MapScreen() {
   );
 
   useEffect(() => {
-    if (!projectId || !active) return;
+    // A node the engine produced nothing for has no document to fetch, and
+    // asking for one would 404 where an explanation belongs.
+    if (!projectId || !active || active.hasDocument === false) return;
     let live = true;
     api.getLayerUrl(projectId, active.id, effectiveScale).then((url) => {
-      if (live) setLayerUrl(url);
+      if (live) setFetched({ nodeId: active.id, url });
     });
     return () => {
       live = false;
@@ -93,6 +99,8 @@ export function MapScreen() {
     // The resolutions are render settings for the engine, so saving them can
     // point at a freshly generated document.
   }, [projectId, active, effectiveScale, settingsVersion]);
+
+  const layerUrl = fetched && active && fetched.nodeId === active.id ? fetched.url : null;
 
   const select = (node: LayerNode) => setMapView({ ...mapView, nodeId: node.id });
 
@@ -209,9 +217,20 @@ export function MapScreen() {
         </div>
       </aside>
 
-      {active && layerUrl ? (
+      {active && active.hasDocument === false ? (
+        <div className="map-canvas">
+          <div className="layer-frame-overlay">
+            <Icon name="hexagon" size={34} color="var(--color-accent-400)" />
+            <div className="layer-frame-overlay-text">{active.label}</div>
+            <div className="muted-55" style={{ fontSize: 12.5, maxWidth: 380, textAlign: 'center' }}>
+              {active.description || 'The pipeline has not produced this layer yet.'}
+            </div>
+          </div>
+        </div>
+      ) : active && layerUrl ? (
         <LayerFrame
           url={layerUrl}
+          filename={active.filename}
           title={active.label}
           subtitle={
             effectiveScale === 'normalized' && active.description

@@ -219,3 +219,19 @@
   backdrop-filter: blur(4px);
   box-shadow: var(--shadow-sm);
 }
+
+/* A layer the pipeline logged a problem for. It still rendered — the pipeline
+   carries on past bad files — so this warns rather than hides. */
+.layer-warn {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--color-accent-300);
+  color: var(--color-accent-900);
+  cursor: help;
+}

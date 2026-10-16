@@ -10,7 +10,7 @@
  * The `ENDPOINT` comment on each function is the route it is expected to hit.
  */
 
-import { request } from './client';
+import { API_BASE, request } from './client';
 import * as mock from './mock';
 import type {
   ApplyProgress,
@@ -143,34 +143,33 @@ export const watchProcessing = (
  * The structure of what the engine rendered: the whole-model document, and
  * the variables nested wherever one is composed of others.
  *
- * A tree rather than a list, because the engine renders composites and their
- * parts alike and the sidebar mirrors that the way a file explorer mirrors
- * folders. It carries labels and ids only — the documents themselves are
- * fetched one at a time by `getLayerUrl`.
+ * LIVE: discovered from the project's folder, which is the pipeline's
+ * DATA_DIR. Variables come back flat because the pipeline writes them as a
+ * mirror of the input tree; the model nests by criterion and is empty until
+ * a model run exists.
  */
 export const getLayerTree = (projectId: string): Promise<LayerTree> =>
-  mock.getLayerTree(projectId);
+  request(`/projects/${projectId}/layers`);
 
 /**
- * ENDPOINT: GET /api/projects/{id}/layers/{nodeId}?scale=raw|normalized
+ * LIVE: the URL of one layer's rendered document.
  *
- * Returns the URL of the engine's pre-rendered layer HTML, which the map
- * screen drops into an iframe.
+ * A URL rather than the markup: these are megabytes of pydeck document, and
+ * the browser streams and caches them natively in an iframe. Routing them
+ * through React state would not.
  *
- * The engine renders these itself, so the UI never receives per-hexagon
- * values and never paints the map. That is the whole point: a full mesh as
- * JSON would be tens of megabytes to serialise, transfer and re-draw, where
- * the generated document is already a finished map the browser can stream.
- *
- * Returning a URL rather than the markup matters — the browser fetches and
- * caches the document natively instead of routing 8 MB of HTML through
- * React state.
+ * `scale` is accepted but not yet used — the raw and normalised combined
+ * tables come from a newer pipeline run than any on disk, and each variable
+ * currently renders one document.
  */
 export const getLayerUrl = (
   projectId: string,
   nodeId: string,
   scale: ValueScale,
-): Promise<string> => mock.getLayerUrl(projectId, nodeId, scale);
+): Promise<string> => {
+  void scale;
+  return Promise.resolve(`${API_BASE}/projects/${projectId}/layers/${nodeId}/document`);
+};
 
 /* ── model ─────────────────────────────────────────────────────────────── */
 

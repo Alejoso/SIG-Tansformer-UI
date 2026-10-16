@@ -9,19 +9,13 @@
 
 import type {
   ApplyProgress,
-  LayerTree,
   Mesh,
   ModelConfig,
   ModelExample,
   ProcessingProgress,
   ProjectSettings,
-  ValueScale,
 } from '../../types';
-import {
-  DEFAULT_SETTINGS,
-  EXAMPLES,
-  LAYER_TREE,
-} from './fixtures';
+import { DEFAULT_SETTINGS, EXAMPLES } from './fixtures';
 
 const delay = <T>(value: T, ms = 180): Promise<T> =>
   new Promise((resolve) => setTimeout(() => resolve(value), ms));
@@ -110,36 +104,6 @@ export function watchProcessing(
 
 /* ── the layer tree ────────────────────────────────────────────────────── */
 
-/**
- * The structure of what the engine rendered.
- *
- * Returned whole: the tree is small (labels and ids, no data), and the sidebar
- * needs all of it to draw. Only the documents behind it are large.
- */
-export async function getLayerTree(projectId: string): Promise<LayerTree> {
-  void projectId;
-  return delay(clone(LAYER_TREE), 140);
-}
-
-/**
- * The one sample layer the engine has produced so far.
- *
- * Served by the dev middleware in `vite.config.ts` from the repo's `HTML/`
- * folder. Every variable resolves to this same file for now; once the engine
- * emits one per variable, only this function changes.
- */
-const SAMPLE_LAYER = 'soe_001_SOE-001_h3.html';
-
-export async function getLayerUrl(
-  projectId: string,
-  nodeId: string,
-  scale: ValueScale,
-): Promise<string> {
-  void projectId;
-  void nodeId;
-  void scale;
-  return delay(`/layers/${SAMPLE_LAYER}`, 80);
-}
 
 /* ── model ─────────────────────────────────────────────────────────────── */
 

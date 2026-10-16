@@ -147,6 +147,16 @@ export interface LayerNode {
    * it shows nothing.
    */
   hasDocument: boolean;
+  /** The file behind this layer, so the frame can name what is on screen. */
+  filename?: string;
+  /**
+   * False when the pipeline logged a problem for this layer.
+   *
+   * A rendered layer can still have failed: the pipeline deliberately carries
+   * on past a bad file rather than losing a long run, so its presence is not
+   * proof it is sound.
+   */
+  ok?: boolean;
 }
 
 /** Which side of the project the map sidebar is showing. */

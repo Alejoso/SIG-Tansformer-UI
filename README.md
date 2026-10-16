@@ -79,6 +79,7 @@ is present.
 |---|---|
 | Projects, data folders, meshes, path checking | **Live** — FastAPI, stored in `data/*.csv` |
 | The model file | **Live** — a YAML file under the project's results folder |
+| The map layers | **Live** — discovered from the project's `out/` folder |
 | Layer tree, rendered maps, the model, processing, apply | Mocked in `frontend/src/api/mock/` |
 
 ## The project store
@@ -97,6 +98,37 @@ whole-file rewrites through a temp file and an atomic replace — the data is
 tiny and single-user, so a crash cannot leave a half-written store.
 
 Override the location with `MAPHEX_DATA_DIR`.
+
+## A project folder is the pipeline's DATA_DIR
+
+The contract's advice for separating projects is to change `DATA_DIR`, so a
+project's folder *is* that directory:
+
+```
+<project folder>/in/<dimension>/<CODE>/<file>     what the pipeline reads
+<project folder>/out/<dimension>/<CODE>/<file>.h3.html     what it rendered
+                                        <file>.h3.parquet
+                                        <file>.pipeline.jsonl
+<project folder>/model/model.yaml                 the model, edited here
+```
+
+`GET /api/projects/{id}/layers` scans `out/` and returns what is actually
+there. Nothing is mocked and nothing is cached — the pipeline writes files,
+and this is the same view a person would get listing the folder.
+
+Two things fall out of that shape:
+
+- **Input variables are a flat list** because the pipeline writes them as a
+  mirror of the input tree, one folder per code. The model nests by criterion,
+  which is why that side is a tree.
+- **A rendered layer is not proof of success.** The pipeline carries on past a
+  bad file rather than losing a long run, so each variable's
+  `.pipeline.jsonl` is read for its per-stage status and a layer that logged a
+  problem is flagged in the sidebar.
+
+Layers are served by `GET …/layers/{nodeId}/document`, which also answers
+`HEAD` — the UI checks a document exists before pointing an iframe at it,
+because an iframe loads an error page as readily as a map.
 
 ## The model file
 

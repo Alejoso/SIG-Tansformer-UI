@@ -16,12 +16,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import countries, fsutil, model_store, store
+from . import countries, fsutil, model_store, outputs, store
 from .models import (
     AddFoldersPayload,
     DataFolder,
     InspectResult,
     Mesh,
+    LayerNode,
+    LayerTree,
     ModelFile,
     ModelIssue,
     NewProjectPayload,
@@ -207,6 +209,77 @@ def relocate_folder(project_id: str, folder_id: str, payload: RelocatePayload) -
     store.touch_project(project_id)
     row = next(r for r in store.folders_of(project_id) if r.folder_id == folder_id)
     return _to_folder(row)
+
+
+# ── rendered layers ───────────────────────────────────────────────────────
+
+
+@app.get("/api/projects/{project_id}/layers")
+def list_layers(project_id: str) -> LayerTree:
+    """
+    What the pipeline has actually rendered for this project.
+
+    Read off disk, not from a database — the pipeline writes its results as
+    files and this is the same view a person would get listing the folder.
+
+    Variables come back flat because that is how the pipeline writes them: a
+    mirror of the input tree, one folder per code. The model side is a tree
+    because its output nests by criterion, and it is empty until a model run
+    exists.
+    """
+    project = _require_project(project_id)
+
+    variables = [
+        LayerNode(
+            id=variable.id,
+            label=variable.label,
+            # The code and the dimension are what identify a variable in the
+            # pipeline's own documentation, so both are worth showing.
+            description=f"{variable.code} · {variable.dimension}",
+            filename=variable.filename,
+            hasDocument=True,
+            ok=variable.ok,
+        )
+        for variable in outputs.scan_variables(project)
+    ]
+
+    runs = outputs.scan_model_runs(project)
+    return LayerTree(
+        model={
+            "combined": LayerNode(
+                id="model",
+                label="Complete model",
+                description=(
+                    f"Run {runs[0]}" if runs else "No model run yet — apply the model to make one"
+                ),
+                hasDocument=bool(runs),
+            ),
+            "variables": [],
+        },
+        inputs=variables,
+    )
+
+
+@app.api_route("/api/projects/{project_id}/layers/{node_id}/document", methods=["GET", "HEAD"])
+def get_layer_document(project_id: str, node_id: str) -> FileResponse:
+    """
+    The rendered HTML for one layer.
+
+    Streamed straight from disk: these are megabytes of pydeck document and
+    the browser displays them in an iframe, so there is nothing to be gained
+    by reading them into memory first.
+
+    HEAD is declared alongside GET because the UI asks that way before
+    pointing an iframe at it — an iframe loads an error page as readily as a
+    document, so existence has to be checked separately. FastAPI does not add
+    HEAD to a GET route on its own, and without it the check 405s and every
+    layer looks missing.
+    """
+    project = _require_project(project_id)
+    path = outputs.document_path(project, node_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"No rendered layer {node_id}")
+    return FileResponse(path, media_type="text/html")
 
 
 # ── the model file ────────────────────────────────────────────────────────
