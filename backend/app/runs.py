@@ -120,8 +120,11 @@ class RunState:
 class Run:
     """A running pipeline, and the thread following it."""
 
-    def __init__(self, project: store.ProjectRow) -> None:
+    def __init__(self, project: store.ProjectRow, data_dir: Path | None = None) -> None:
         self.project_id = project.id
+        #: The folder this run processes. Passed as DATA_DIR when the script
+        #: honours one; None means the engine's own default.
+        self.data_dir = data_dir
         self._lock = threading.Lock()
         self._process: subprocess.Popen[str] | None = None
         self._abort_requested = False
@@ -384,10 +387,13 @@ class Run:
         self._recompute()
 
     def _run(self) -> None:
-        # No DATA_DIR here: the script assigns over it. `engine_data_dir`
-        # explains, and the route refuses a project pointed elsewhere rather
-        # than letting the two disagree silently.
-        env = pipeline.run_full_env()
+        # Only set when the script will actually use it: passing it to a
+        # version that assigns over it would run against one folder while the
+        # UI reads another, silently. `honours_data_dir` is what decides, and
+        # the route refuses the mismatch rather than letting it happen.
+        env = pipeline.run_full_env(
+            extra={"DATA_DIR": str(self.data_dir)} if self.data_dir else None,
+        )
         try:
             process = subprocess.Popen(
                 pipeline.run_full_command(),
@@ -725,7 +731,7 @@ def current_or_adopted(project: store.ProjectRow) -> Run | None:
         return _runs.setdefault(project.id, adopted)
 
 
-def start(project: store.ProjectRow) -> Run:
+def start(project: store.ProjectRow, data_dir: Path | None = None) -> Run:
     """
     Begin a run for a project, unless one is already going.
 
@@ -752,7 +758,7 @@ def start(project: store.ProjectRow) -> Run:
                     "Another project is already being processed. The engine has one "
                     "database, so one run at a time."
                 )
-        run = Run(project)
+        run = Run(project, data_dir)
         _runs[project.id] = run
     run.start()
     return run

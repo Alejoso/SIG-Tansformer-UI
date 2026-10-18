@@ -248,11 +248,11 @@ HOST_FOLDERS = ("logs", "admin", "toytest")
 RUN_FOLDERS = ("logs", "admin")
 
 
-def _host_paths() -> list[Path]:
-    return [PIPELINE_DIR / name for name in HOST_FOLDERS] + [engine_data_dir()]
+def _host_paths(data_dir: Path | None = None) -> list[Path]:
+    return [PIPELINE_DIR / name for name in HOST_FOLDERS] + [data_dir or engine_data_dir()]
 
 
-def prepare_host_folders() -> None:
+def prepare_host_folders(data_dir: Path | None = None) -> None:
     """
     Create what the pipeline needs, as us, before Docker can do it as root.
 
@@ -260,7 +260,7 @@ def prepare_host_folders() -> None:
     step that would otherwise create these — once they exist, Docker mounts
     them rather than making them.
     """
-    for path in _host_paths():
+    for path in _host_paths(data_dir):
         try:
             path.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -457,6 +457,28 @@ def run_full_command() -> list[str]:
     return ["bash", RUN_SCRIPT]
 
 
+def honours_data_dir() -> bool:
+    """
+    Whether the pipeline uses a `DATA_DIR` we hand it, or assigns over it.
+
+    Read from the script rather than assumed, because the two cases need
+    opposite behaviour and getting it wrong is silent: passing an override to
+    a script that discards it means the run processes one folder while the UI
+    reads another, and nothing anywhere says so. Checked by looking for the
+    default-assignment form, which is what makes the override real:
+
+        DATA_DIR="${DATA_DIR:-${ROOT_DIR}/data}"
+
+    An older checkout has the bare `DATA_DIR="${ROOT_DIR}/data"` instead, and
+    then a project has to point at the engine's own folder.
+    """
+    try:
+        text = (PIPELINE_DIR / RUN_SCRIPT).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return 'DATA_DIR="${DATA_DIR:-' in text
+
+
 def engine_data_dir() -> Path:
     """
     The folder the engine will actually process. Not the project's.
@@ -495,8 +517,8 @@ def run_full_env(*, skip_build: bool = True, extra: dict[str, str] | None = None
     rebuild in the middle of what the user thinks is a data run would just
     look like a hang.
 
-    `DATA_DIR` is deliberately *not* set here; see `engine_data_dir` for why
-    setting it would not work.
+    `DATA_DIR` is passed by the caller, but only once `honours_data_dir`
+    says the script will use it — see `engine_data_dir`.
     """
     env = dict(os.environ)
     if skip_build:

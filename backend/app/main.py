@@ -255,6 +255,7 @@ def pipeline_readiness() -> PipelineReadiness:
         ready=status.ready,
         pipelineDir=status.pipelineDir,
         dataDir=str(pipeline.engine_data_dir()),
+        perProjectData=pipeline.honours_data_dir(),
         pipelineFound=status.pipelineFound,
         dockerAvailable=status.dockerAvailable,
         composeAvailable=status.composeAvailable,
@@ -304,30 +305,33 @@ def start_processing(project_id: str) -> PipelineRun:
             detail="This project's folder is missing. Point it somewhere that exists first.",
         )
 
-    # The engine ignores where the project points — see `engine_data_dir`. So
-    # a project pointed anywhere else would have its run read and write one
-    # folder while the map and the model file read another, and nothing would
-    # say so: the run would succeed and the layers would not change. Better
-    # to refuse and name both paths.
-    engine_folder = pipeline.engine_data_dir()
-    if folder.resolve() != engine_folder.resolve():
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"The engine only processes {engine_folder}, so this project's folder "
-                f"({folder}) would be ignored — the run would write somewhere the map "
-                "never reads. Point the project at the engine's folder, or make "
-                "DATA_DIR settable in the pipeline's run_full.sh."
-            ),
-        )
+    # Older checkouts of the pipeline assign over the DATA_DIR they are
+    # given, so a project pointed anywhere else would have its run read and
+    # write one folder while the map and the model file read another — and
+    # nothing would say so, because the run would succeed and the layers
+    # simply would not change. Refuse that, naming both paths. Where the
+    # script does honour it, any folder works and this does not apply.
+    if not pipeline.honours_data_dir():
+        engine_folder = pipeline.engine_data_dir()
+        if folder.resolve() != engine_folder.resolve():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"This copy of the pipeline only processes {engine_folder}, so this "
+                    f"project's folder ({folder}) would be ignored — the run would write "
+                    "somewhere the map never reads. Point the project there, or update "
+                    "the pipeline: run_full.sh needs DATA_DIR=\"${DATA_DIR:-${ROOT_DIR}/data}\" "
+                    "so the override it already advertises takes effect."
+                ),
+            )
 
     # Create what the run needs as us, in case nothing has yet — otherwise
     # `run_full.sh`'s own `docker compose up` makes them as root and its very
     # next line, a host-side mkdir, fails.
-    pipeline.prepare_host_folders()
+    pipeline.prepare_host_folders(folder)
 
     try:
-        run = runs.start(project)
+        run = runs.start(project, folder if pipeline.honours_data_dir() else None)
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return _to_run(run.snapshot())

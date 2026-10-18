@@ -164,14 +164,15 @@ export interface PipelineRun {
 export interface PipelineReadiness {
   ready: boolean;
   pipelineDir: string;
-  /**
-   * The folder the engine actually processes.
-   *
-   * Fixed inside the engine's own checkout, not taken from the project: the
-   * pipeline script accepts a `DATA_DIR` and then assigns over it. Until that
-   * changes upstream, a project has to point here or processing is refused.
-   */
+  /** The folder the engine processes when a project does not choose one. */
   dataDir: string;
+  /**
+   * Whether each project can keep its data in its own folder.
+   *
+   * False on a pipeline checkout whose `run_full.sh` assigns over the
+   * `DATA_DIR` it is given — there, a project has to point at `dataDir`.
+   */
+  perProjectData: boolean;
   pipelineFound: boolean;
   dockerAvailable: boolean;
   composeAvailable: boolean;

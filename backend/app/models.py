@@ -179,10 +179,12 @@ class PipelineReadiness(BaseModel):
 
     ready: bool
     pipelineDir: str
-    #: The folder the engine will actually process, which is fixed inside its
-    #: own checkout rather than taken from the project — see
-    #: `pipeline.engine_data_dir`.
+    #: The folder the engine processes when a project does not choose one.
     dataDir: str = ""
+    #: True when the pipeline honours a DATA_DIR, so each project can keep its
+    #: data in its own folder. False on an older checkout, where a project has
+    #: to point at `dataDir` itself.
+    perProjectData: bool = False
     pipelineFound: bool
     dockerAvailable: bool
     composeAvailable: bool
