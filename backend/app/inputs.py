@@ -269,12 +269,16 @@ def normalise_dimension(name: str) -> str:
     A dimension name as the engine will end up storing it.
 
     The pipeline's `lint_filenames` sanitises folder names under `data/in`:
-    lowercased, anything but a letter or digit turned into an underscore. So
-    a folder typed as `10-Socioeconomico` is renamed to `10_socioeconomico`
-    on the first run, and every variable under it changes id. Normalising
-    here means what the screen shows is what the engine will have.
+    lowercased, anything but a letter or digit turned into an underscore, and
+    then `format_code` puts a leading `abc_123` back into capitals. So a
+    folder typed as `10-Socioeconomico` is renamed to `10_socioeconomico` on
+    the first run, and one typed `soe-001` comes back as `SOE_001` — either
+    way every variable under it changes id. Normalising here means what the
+    screen shows is what the engine will end up with.
     """
-    return re.sub(r"[^A-Za-z0-9]+", "_", _strip_accents(name).strip()).strip("_").lower()
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", _strip_accents(name).strip()).strip("_").lower()
+    # The engine's `format_code`, which applies to folders only.
+    return re.sub(r"^[a-z]{3}_[0-9]{3}(?=_|$)", lambda m: m.group(0).upper(), cleaned)
 
 
 def normalise_code(raw: str) -> str:
