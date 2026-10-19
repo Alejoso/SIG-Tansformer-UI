@@ -232,6 +232,17 @@ class ImportPlan(BaseModel):
     problem: str = ""
 
 
+class Removal(BaseModel):
+    """What removing a variable took away, so the UI can say it plainly."""
+
+    id: str
+    inputFiles: int
+    #: Files deleted from `out/`. Non-zero means processed results went too —
+    #: which is the point: the engine rebuilds its database from `out/`, so a
+    #: variable whose output survives comes back on the next run.
+    outputFiles: int
+
+
 class PlanImportPayload(BaseModel):
     path: str
     #: The dimension being considered, which decides the suggested code.

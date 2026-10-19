@@ -32,6 +32,7 @@ from .models import (
     PickFolderPayload,
     PickFolderResult,
     PlanImportPayload,
+    Removal,
     PipelineReadiness,
     PipelineRun,
     PipelineStageState,
@@ -431,19 +432,23 @@ def add_input(project_id: str, payload: ImportPayload) -> InputVariable:
     return InputVariable(**vars(variable))
 
 
-@app.delete("/api/projects/{project_id}/inputs/{dimension}/{code}", status_code=204)
-def remove_input(project_id: str, dimension: str, code: str) -> None:
+@app.delete("/api/projects/{project_id}/inputs/{dimension}/{code}")
+def remove_input(project_id: str, dimension: str, code: str) -> Removal:
     """
-    Take a variable out of the input tree.
+    Take a variable out of the project, input and results together.
 
-    Removes the project's copy; the folder it came from is untouched, and so
-    is anything the pipeline already produced from it.
+    Both: the engine rebuilds its database from `out/`, so a variable whose
+    output survives is loaded straight back on the next run — see
+    `inputs.remove`. The folder it was copied from is untouched.
+
+    Returns what went, so the UI can say how much rather than guess.
     """
     project = _require_project(project_id)
     try:
-        inputs.remove(project, dimension, code)
+        removal = inputs.remove(project, dimension, code)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    return Removal(**vars(removal))
 
 
 # ── the model file ────────────────────────────────────────────────────────

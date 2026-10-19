@@ -15,6 +15,7 @@ import type {
   ApplyProgress,
   ImportPlan,
   InputVariable,
+  Removal,
   LayerTree,
   Mesh,
   ModelConfig,
@@ -124,14 +125,16 @@ export const addInput = (
 /**
  * ENDPOINT: DELETE /api/projects/{id}/inputs/{dimension}/{code}
  *
- * Removes the project's copy. The source folder and anything already
- * produced from it are left alone.
+ * Removes the project's copy *and* what the pipeline made from it. Both,
+ * because the engine rebuilds its database from `out/` — a variable whose
+ * output survived would be loaded straight back on the next run. The folder
+ * it was copied from is untouched.
  */
 export const removeInput = (
   projectId: string,
   dimension: string,
   code: string,
-): Promise<void> =>
+): Promise<Removal> =>
   request(`/projects/${projectId}/inputs/${dimension}/${code}`, { method: 'DELETE' });
 
 /* ── processing ────────────────────────────────────────────────────────── */

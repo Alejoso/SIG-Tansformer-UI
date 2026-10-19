@@ -293,24 +293,31 @@ export function DataScreen() {
   };
 
   /**
-   * Take a variable out of the project.
+   * Take a variable out of the project, input and results together.
    *
-   * Only the project's copy goes; the folder it came from is untouched, and
-   * so is anything the pipeline already made from it. Said out loud in the
-   * confirmation, because "remove" over data is worth being precise about.
+   * The confirmation says so in those words. The results have to go — the
+   * engine rebuilds its database from `out/`, so a variable whose output
+   * survived would come back on the next run — but deleting someone's
+   * processed data on a button called "remove" is not something to do
+   * quietly.
    */
   const removeVariable = async (variable: InputVariable) => {
     const sure = window.confirm(
       `Remove ${variable.id} from this project?\n\n` +
-        `This deletes the project's copy of ${variable.filename}. ` +
-        `${variable.source ? 'The folder it came from is not touched. ' : ''}` +
-        'Anything already processed from it stays on the map until the next run.',
+        `This deletes the project's copy of ${variable.filename} and anything the ` +
+        'engine made from it — its hexagons and its map. It leaves the master table ' +
+        'and the model on the next run.\n\n' +
+        `${variable.source ? 'The folder it was copied from is not touched.' : ''}`,
     );
     if (!sure) return;
     try {
-      await api.removeInput(projectId, variable.dimension, variable.code);
+      const gone = await api.removeInput(projectId, variable.dimension, variable.code);
       reload();
-      showToast(`${variable.id} removed`);
+      showToast(
+        gone.outputFiles > 0
+          ? `${gone.id} removed, with ${gone.outputFiles} processed file${gone.outputFiles === 1 ? '' : 's'}`
+          : `${gone.id} removed`,
+      );
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not remove it');
     }

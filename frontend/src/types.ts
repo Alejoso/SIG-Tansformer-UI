@@ -90,6 +90,18 @@ export interface InputVariable {
   problem: string;
 }
 
+/** What removing a variable took away. */
+export interface Removal {
+  id: string;
+  inputFiles: number;
+  /**
+   * Files deleted from `out/`. Non-zero means processed results went too —
+   * which is the point: the engine rebuilds its database from `out/`, so a
+   * variable whose output survived would come back on the next run.
+   */
+  outputFiles: number;
+}
+
 /** What adding a folder would copy, and where, worked out before it happens. */
 export interface ImportPlan {
   source: string;

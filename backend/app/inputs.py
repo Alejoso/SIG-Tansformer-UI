@@ -580,19 +580,68 @@ def import_folder(
     return next(v for v in scan(project) if v.id == identifier)
 
 
-def remove(project: store.ProjectRow, dimension: str, code: str) -> None:
-    """
-    Take a variable out of the input tree.
+@dataclass
+class Removal:
+    """What removing a variable took away."""
 
-    Deletes the copy in the project, never the folder it came from. What the
-    pipeline already produced from it in `out/` is left alone: that is a
-    result, and removing an input is not a statement about results.
+    id: str
+    inputFiles: int
+    outputFiles: int
+
+
+def _count_files(folder: Path) -> int:
+    try:
+        return sum(1 for entry in folder.rglob("*") if entry.is_file())
+    except OSError:
+        return 0
+
+
+def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
+    """
+    Take a variable out of the project, input and results together.
+
+    Both, because the engine's database is derived rather than authoritative:
+    `load_h3_values` truncates `variables` and `archivo_valores` on a full
+    rebuild and repopulates them from whatever `.h3.parquet` files it finds
+    under `out/`, skipping any whose file has gone. So the output *is* the
+    variable as far as everything downstream is concerned — the master table,
+    the MCDA, the map.
+
+    Deleting only the input, which is what this did first, removed the
+    variable from the one place that lists inputs and left it in every place
+    that matters: it reappeared on the next run, loaded straight back from
+    the output nobody could see. Looking like it worked was worse than
+    refusing.
+
+    The folder it was copied from is still never touched.
     """
     target = _destination(project, dimension, code)
     identifier = f"{target.parent.name}/{target.name}"
     if not target.is_dir():
         raise ValueError(f"No {identifier} in this project.")
+
+    removal = Removal(id=identifier, inputFiles=_count_files(target), outputFiles=0)
     shutil.rmtree(target)
+
+    # The same two names under `out/`, confirmed to sit inside it before
+    # anything is deleted — the names came from the browser.
+    results_root = outputs.out_dir(project)
+    if results_root is not None and results_root.is_dir():
+        results = (results_root / target.parent.name / target.name).resolve()
+        if results_root.resolve() in results.parents and results.is_dir():
+            removal.outputFiles = _count_files(results)
+            shutil.rmtree(results)
+
+    # A dimension with nothing left in it would still be offered in the
+    # picker, which reads the folders. Drop it rather than leave a choice
+    # that means nothing.
+    for parent in (target.parent, results_root / target.parent.name if results_root else None):
+        if parent is not None and parent.is_dir() and not any(parent.iterdir()):
+            try:
+                parent.rmdir()
+            except OSError:
+                pass
 
     rows = [row for row in store.folders_of(project.id) if row.name != identifier]
     store.replace_folders(project.id, rows)
+    return removal
