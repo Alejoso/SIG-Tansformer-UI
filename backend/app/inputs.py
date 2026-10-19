@@ -28,7 +28,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import fsutil, outputs, store
+from . import fsutil, outputs, pipeline, store
 
 #: What `ingest_to_geoparquet` and `raster_to_h3` know how to read, taken from
 #: their own format tables. A folder whose only file is something else has
@@ -596,6 +596,19 @@ def _count_files(folder: Path) -> int:
         return 0
 
 
+def _owner_of(path: Path) -> str:
+    try:
+        return path.owner()
+    except (KeyError, OSError):
+        return "another user"
+
+
+def _removable(folder: Path) -> bool:
+    """Whether this process can delete a folder — which is the parent's business."""
+    parent = folder.parent
+    return parent.is_dir() and os.access(parent, os.W_OK | os.X_OK)
+
+
 def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
     """
     Take a variable out of the project, input and results together.
@@ -604,14 +617,18 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
     `load_h3_values` truncates `variables` and `archivo_valores` on a full
     rebuild and repopulates them from whatever `.h3.parquet` files it finds
     under `out/`, skipping any whose file has gone. So the output *is* the
-    variable as far as everything downstream is concerned — the master table,
-    the MCDA, the map.
+    variable as far as everything downstream is concerned.
 
-    Deleting only the input, which is what this did first, removed the
-    variable from the one place that lists inputs and left it in every place
-    that matters: it reappeared on the next run, loaded straight back from
-    the output nobody could see. Looking like it worked was worse than
-    refusing.
+    The results usually cannot be deleted from here: the pipeline runs as
+    root, so everything it wrote under `out/` belongs to root and no amount
+    of owning the folder above helps. Those go through the container, which
+    is root. Chowning would not fix it — the next run writes root-owned
+    files again.
+
+    Nothing is deleted until both parts are known to be deletable. Deleting
+    the input first and discovering the rest was impossible is what this did
+    before: a 500, and a variable that looked removed until the next run
+    brought it back from the output still sitting there.
 
     The folder it was copied from is still never touched.
     """
@@ -620,25 +637,57 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
     if not target.is_dir():
         raise ValueError(f"No {identifier} in this project.")
 
-    removal = Removal(id=identifier, inputFiles=_count_files(target), outputFiles=0)
-    shutil.rmtree(target)
-
-    # The same two names under `out/`, confirmed to sit inside it before
-    # anything is deleted — the names came from the browser.
     results_root = outputs.out_dir(project)
+    results: Path | None = None
     if results_root is not None and results_root.is_dir():
-        results = (results_root / target.parent.name / target.name).resolve()
-        if results_root.resolve() in results.parents and results.is_dir():
-            removal.outputFiles = _count_files(results)
+        candidate = (results_root / target.parent.name / target.name).resolve()
+        if results_root.resolve() in candidate.parents and candidate.is_dir():
+            results = candidate
+
+    # Decided before anything goes, so a half-removed variable is not a state
+    # this can end in.
+    by_hand = {"input": _removable(target), "results": results is None or _removable(results)}
+    if not all(by_hand.values()) and not pipeline.can_remove_as_root():
+        stuck = results if not by_hand["results"] else target
+        raise ValueError(
+            f"Cannot remove {identifier}: {stuck} belongs to {_owner_of(stuck)} and Docker "
+            "is not available to do it. The pipeline writes its results as root, so "
+            "removing them needs either the engine running or "
+            f"`sudo rm -rf {stuck}`."
+        )
+
+    removal = Removal(id=identifier, inputFiles=_count_files(target), outputFiles=0)
+
+    # Results first: it is the part that can fail, and failing before the
+    # input is gone leaves the variable intact rather than half-deleted.
+    if results is not None:
+        removal.outputFiles = _count_files(results)
+        if by_hand["results"]:
             shutil.rmtree(results)
+        else:
+            relative = f"out/{target.parent.name}/{target.name}"
+            problem = pipeline.remove_as_root(outputs.data_dir(project), relative)
+            if problem:
+                raise ValueError(f"Could not remove the results for {identifier}: {problem}")
+
+    if by_hand["input"]:
+        shutil.rmtree(target)
+    else:
+        problem = pipeline.remove_as_root(
+            outputs.data_dir(project), f"in/{target.parent.name}/{target.name}"
+        )
+        if problem:
+            raise ValueError(f"Removed the results, but not the input for {identifier}: {problem}")
 
     # A dimension with nothing left in it would still be offered in the
     # picker, which reads the folders. Drop it rather than leave a choice
-    # that means nothing.
-    for parent in (target.parent, results_root / target.parent.name if results_root else None):
-        if parent is not None and parent.is_dir() and not any(parent.iterdir()):
+    # that means nothing. Best effort: a root-owned empty folder is untidy,
+    # not broken.
+    for parent in (target.parent, results.parent if results is not None else None):
+        if parent is not None and parent.is_dir():
             try:
-                parent.rmdir()
+                if not any(parent.iterdir()):
+                    parent.rmdir()
             except OSError:
                 pass
 

@@ -126,10 +126,12 @@ class PipelineStatus:
         return not self.problems
 
 
-def _run(command: list[str], cwd: Path | None = None, timeout: int = 30):
+def _run(command: list[str], cwd: Path | None = None, timeout: int = 30,
+         env: dict[str, str] | None = None):
     try:
         return subprocess.run(
-            command, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
+            command, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+            check=False, env=env,
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return None
@@ -550,6 +552,45 @@ for p in /proc/[0-9]*; do
 done
 echo "killed=$killed"
 """
+
+
+def remove_as_root(data_dir: Path, relative: str) -> str:
+    """
+    Delete something inside a project's data folder from inside the container.
+
+    Needed because the pipeline runs as root — the daemon does — so
+    everything under `out/` belongs to root, and the server, running as the
+    user, cannot remove it however much it owns the folder above. Chowning is
+    not a fix either: the next run writes root-owned files again.
+
+    `compose run` rather than `exec`, with DATA_DIR set: the long-lived
+    container is mounted on whichever project ran last, which is not
+    necessarily the one being edited. `--no-deps` keeps it from starting
+    Postgres for a `rm`.
+
+    Returns "" on success, or why not. `relative` is built from the validated
+    dimension and code, which cannot contain a separator or a quote.
+    """
+    result = _run(
+        [
+            "docker", "compose", "run", "--rm", "--no-deps",
+            "--entrypoint", "sh", APP_SERVICE,
+            "-c", f'rm -rf "/data/{relative}"',
+        ],
+        cwd=PIPELINE_DIR,
+        timeout=120,
+        env=run_full_env(extra={"DATA_DIR": str(data_dir)}),
+    )
+    if result is None:
+        return "could not reach Docker"
+    if result.returncode != 0:
+        return (result.stderr or result.stdout or "").strip()[-200:] or "the container refused"
+    return ""
+
+
+def can_remove_as_root() -> bool:
+    """Whether the container route is available at all."""
+    return status().composeAvailable
 
 
 def kill_in_container() -> str:
