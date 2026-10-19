@@ -28,7 +28,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import fsutil, outputs, pipeline, store
+from . import engine_state, fsutil, outputs, pipeline, store
 
 #: What `ingest_to_geoparquet` and `raster_to_h3` know how to read, taken from
 #: their own format tables. A folder whose only file is something else has
@@ -693,4 +693,9 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
 
     rows = [row for row in store.folders_of(project.id) if row.name != identifier]
     store.replace_folders(project.id, rows)
+
+    # An incremental load upserts the files it finds and never deletes rows,
+    # so the engine's database still holds this variable. The next run has to
+    # clear the per-project tables or it comes back.
+    engine_state.mark_stale(project.id)
     return removal

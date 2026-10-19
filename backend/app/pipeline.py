@@ -509,6 +509,37 @@ def engine_data_dir() -> Path:
     return PIPELINE_DIR / "data"
 
 
+def reload_env(*, reset: bool, rebuild_everything: bool = False) -> dict[str, str]:
+    """
+    The flags that decide how much of the database a run throws away.
+
+    `.env` here sets `FORCE_MASTER_REBUILD=1`, which is a hammer: it truncates
+    seven tables *and* rebuilds the H3 master, the grid and the PMTiles. Those
+    three take 288 of a 340-second run and depend on the boundaries in
+    `admin/`, not on the project — so they are rebuilt every time for nothing.
+
+    They are separable:
+
+    * `RESET_ARCHIVOS=1` truncates `archivos`, `variables` and
+      `archivo_valores` and leaves the master alone. That is what switching
+      projects needs, and it is cheap.
+    * `FORCE_MASTER_REBUILD=1` is only for when the master itself is wrong —
+      and the script already detects that on its own, comparing H3_RES, the
+      bbox flag and the boundaries' mtime against `pipeline_state`.
+
+    So the master rebuild is turned off and left to the script's own
+    judgement, and the per-project tables are cleared only when
+    `engine_state` says they have to be.
+    """
+    if rebuild_everything:
+        return {"FORCE_MASTER_REBUILD": "1"}
+    return {
+        # Off, not absent: `.env` sets it, and a value here wins.
+        "FORCE_MASTER_REBUILD": "0",
+        "RESET_ARCHIVOS": "1" if reset else "0",
+    }
+
+
 def run_full_env(*, skip_build: bool = True, extra: dict[str, str] | None = None) -> dict[str, str]:
     """
     The environment for a full pass.

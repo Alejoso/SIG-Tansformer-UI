@@ -162,6 +162,17 @@ export interface PipelineRun {
    */
   skippedFiles: number;
   erroredFiles: number;
+  /**
+   * Whether this run clears the engine's per-project tables first, and why.
+   *
+   * The pipeline has one database and nothing in it is scoped to a project,
+   * so switching projects — or removing a variable — means the previous
+   * rows have to go before new ones are loaded.
+   */
+  reset: boolean;
+  resetReason: string;
+  /** The H3 master is being rebuilt too: minutes rather than seconds. */
+  rebuildEverything: boolean;
   /** The tail of the engine's output, for when something goes wrong. */
   logTail: string[];
 }

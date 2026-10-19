@@ -170,6 +170,14 @@ class PipelineRun(BaseModel):
     #: can finish successfully with variables missing; these are what say so.
     skippedFiles: int = 0
     erroredFiles: int = 0
+    #: True when this run clears the engine's per-project tables first, and
+    #: why. One database serves every project and nothing in it is scoped to
+    #: one, so switching projects — or removing a variable — means the
+    #: previous rows have to go before new ones are loaded.
+    reset: bool = True
+    resetReason: str = ""
+    #: True when the H3 master is being rebuilt too: minutes, not seconds.
+    rebuildEverything: bool = False
     #: The last few hundred lines of the engine's output.
     logTail: list[str] = Field(default_factory=list)
 
@@ -230,6 +238,15 @@ class ImportPlan(BaseModel):
     dimension: str = ""
     code: str = ""
     problem: str = ""
+
+
+class ProcessPayload(BaseModel):
+    """Options for a run. Everything defaults to the cheap, correct choice."""
+
+    #: Rebuild the H3 master, grid and tiles as well. The script decides this
+    #: for itself when the resolution or the boundaries change, so this is for
+    #: when you believe it is wrong.
+    rebuildEverything: bool = False
 
 
 class Removal(BaseModel):

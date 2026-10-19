@@ -50,6 +50,24 @@ const canonicalCode = (raw: string): string => {
   return match ? `${match[1]}_${match[2].padStart(3, '0')}` : cleaned;
 };
 
+/**
+ * What this run is doing differently, if anything.
+ *
+ * Most runs reuse the H3 master and only load what changed, which takes
+ * under a minute. The ones that clear the database first, or rebuild the
+ * master, take considerably longer — and without a word about it that reads
+ * as the app being slow at random rather than doing more work.
+ */
+function runNote(run: PipelineRun): string {
+  if (run.rebuildEverything) {
+    return 'Rebuilding the H3 master as well as your data — this takes several minutes.';
+  }
+  if (run.reset && run.resetReason) {
+    return `Reloading everything for this project, because ${run.resetReason}.`;
+  }
+  return 'Loading what changed. Data is locked until it finishes.';
+}
+
 /** `1m 04s`, `12s` — how long a run took, from its own timestamps. */
 function formatDuration(run: { startedAt: number; finishedAt: number | null }): string {
   const seconds = Math.max(0, Math.round((run.finishedAt ?? Date.now() / 1000) - run.startedAt));
@@ -785,7 +803,7 @@ export function DataScreen() {
             <div className="process-meta">
               <span className="muted-55">
                 {running
-                  ? 'Folders are locked while we convert them. This usually takes about a quarter of an hour.'
+                  ? runNote(run)
                   : `Finished in ${formatDuration(run)}.`}
               </span>
               {run.executionId && (

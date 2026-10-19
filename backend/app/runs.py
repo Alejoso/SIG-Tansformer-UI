@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import pipeline, store
+from . import engine_state, pipeline, store
 
 #: How many lines of the script's output to keep for the UI. Enough to show
 #: what a failure said without holding a thirteen-minute transcript in memory.
@@ -114,17 +114,37 @@ class RunState:
     #: A run can exit 0 with variables missing, and these are what say so.
     skippedFiles: int = 0
     erroredFiles: int = 0
+    #: True when this run clears the engine's per-project tables first, with
+    #: the reason. Shown because "this one is slower" otherwise looks like
+    #: the app being arbitrary.
+    reset: bool = True
+    resetReason: str = ""
+    #: True when the H3 master itself is being rebuilt — minutes, not seconds.
+    rebuildEverything: bool = False
     logTail: list[str] = field(default_factory=list)
 
 
 class Run:
     """A running pipeline, and the thread following it."""
 
-    def __init__(self, project: store.ProjectRow, data_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        project: store.ProjectRow,
+        data_dir: Path | None = None,
+        *,
+        reset: bool = True,
+        reset_reason: str = "",
+        rebuild_everything: bool = False,
+    ) -> None:
         self.project_id = project.id
         #: The folder this run processes. Passed as DATA_DIR when the script
         #: honours one; None means the engine's own default.
         self.data_dir = data_dir
+        #: Whether the engine's per-project tables are cleared first, and why.
+        #: See `engine_state.plan_reload` — one database serves every project.
+        self.reset = reset
+        self.reset_reason = reset_reason
+        self.rebuild_everything = rebuild_everything
         self._lock = threading.Lock()
         self._process: subprocess.Popen[str] | None = None
         self._abort_requested = False
@@ -136,6 +156,9 @@ class Run:
 
         self._state = RunState(
             projectId=project.id,
+            reset=reset,
+            resetReason=reset_reason,
+            rebuildEverything=rebuild_everything,
             status="starting",
             statusText="Starting the pipeline",
             startedAt=time.time(),
@@ -181,6 +204,9 @@ class Run:
                 hexagonCount=state.hexagonCount,
                 skippedFiles=state.skippedFiles,
                 erroredFiles=state.erroredFiles,
+                reset=state.reset,
+                resetReason=state.resetReason,
+                rebuildEverything=state.rebuildEverything,
                 logTail=list(state.logTail),
             )
 
@@ -391,9 +417,12 @@ class Run:
         # version that assigns over it would run against one folder while the
         # UI reads another, silently. `honours_data_dir` is what decides, and
         # the route refuses the mismatch rather than letting it happen.
-        env = pipeline.run_full_env(
-            extra={"DATA_DIR": str(self.data_dir)} if self.data_dir else None,
+        extra = pipeline.reload_env(
+            reset=self.reset, rebuild_everything=self.rebuild_everything
         )
+        if self.data_dir:
+            extra["DATA_DIR"] = str(self.data_dir)
+        env = pipeline.run_full_env(extra=extra)
         try:
             process = subprocess.Popen(
                 pipeline.run_full_command(),
@@ -489,7 +518,14 @@ class Run:
                     [f"The pipeline exited with code {code}."] + (flagged[-6:] or lines[-8:])
                 )
             self._state.finishedAt = time.time()
+            finished_ok = self._state.status == "done"
+            execution = self._state.executionId
         self._recompute()
+
+        # The engine's database now holds this project's variables — or, if
+        # the run did not finish, something we cannot vouch for. Either way
+        # the next run needs to know. See `engine_state`.
+        engine_state.record_run(self.project_id, execution, finished_ok)
 
     # ── the full transcript on disk ───────────────────────────────────────
 
@@ -731,7 +767,14 @@ def current_or_adopted(project: store.ProjectRow) -> Run | None:
         return _runs.setdefault(project.id, adopted)
 
 
-def start(project: store.ProjectRow, data_dir: Path | None = None) -> Run:
+def start(
+    project: store.ProjectRow,
+    data_dir: Path | None = None,
+    *,
+    reset: bool = True,
+    reset_reason: str = "",
+    rebuild_everything: bool = False,
+) -> Run:
     """
     Begin a run for a project, unless one is already going.
 
@@ -758,7 +801,13 @@ def start(project: store.ProjectRow, data_dir: Path | None = None) -> Run:
                     "Another project is already being processed. The engine has one "
                     "database, so one run at a time."
                 )
-        run = Run(project, data_dir)
+        run = Run(
+            project,
+            data_dir,
+            reset=reset,
+            reset_reason=reset_reason,
+            rebuild_everything=rebuild_everything,
+        )
         _runs[project.id] = run
     run.start()
     return run

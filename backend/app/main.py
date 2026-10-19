@@ -17,7 +17,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import countries, fsutil, inputs, model_store, outputs, pipeline, runs, store
+from . import (
+    countries,
+    engine_state,
+    fsutil,
+    inputs,
+    model_store,
+    outputs,
+    pipeline,
+    runs,
+    store,
+)
 from .models import (
     AbortResult,
     ImportPayload,
@@ -32,6 +42,7 @@ from .models import (
     PickFolderPayload,
     PickFolderResult,
     PlanImportPayload,
+    ProcessPayload,
     Removal,
     PipelineReadiness,
     PipelineRun,
@@ -237,6 +248,9 @@ def _to_run(state: runs.RunState) -> PipelineRun:
         hexagonCount=state.hexagonCount,
         skippedFiles=state.skippedFiles,
         erroredFiles=state.erroredFiles,
+        reset=state.reset,
+        resetReason=state.resetReason,
+        rebuildEverything=state.rebuildEverything,
         logTail=state.logTail,
     )
 
@@ -285,13 +299,17 @@ def pipeline_up() -> PipelineReadiness:
 
 
 @app.post("/api/projects/{project_id}/process", status_code=202)
-def start_processing(project_id: str) -> PipelineRun:
+def start_processing(project_id: str, payload: ProcessPayload | None = None) -> PipelineRun:
     """
     Start a full pipeline pass over the project's folder.
 
     Returns immediately with the run's starting state: the pass takes minutes,
     so the UI polls rather than waits. 202 rather than 201 because what comes
     back describes work that has been accepted, not a finished thing.
+
+    `rebuildEverything` forces the H3 master, grid and tiles to be rebuilt
+    too — minutes of work the script otherwise decides on for itself, and an
+    escape hatch rather than the normal path.
     """
     project = _require_project(project_id)
 
@@ -331,8 +349,19 @@ def start_processing(project_id: str) -> PipelineRun:
     # next line, a host-side mkdir, fails.
     pipeline.prepare_host_folders(folder)
 
+    # One database serves every project, and nothing in it is scoped to one —
+    # so a run clears the per-project tables when it must, and reuses the H3
+    # master, which belongs to the boundaries rather than to any project.
+    reset, reason = engine_state.plan_reload(project)
+
     try:
-        run = runs.start(project, folder if pipeline.honours_data_dir() else None)
+        run = runs.start(
+            project,
+            folder if pipeline.honours_data_dir() else None,
+            reset=reset,
+            reset_reason=reason,
+            rebuild_everything=payload.rebuildEverything if payload else False,
+        )
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return _to_run(run.snapshot())
