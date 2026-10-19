@@ -675,7 +675,7 @@ export function DataScreen() {
 
                   {removing === variable.id ? (
                     <span className="muted-55" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
-                      Removing its results…
+                      Removing variable…
                     </span>
                   ) : variable.problem ? (
                     <span className="tag folder-missing-tag" title={variable.problem}>
