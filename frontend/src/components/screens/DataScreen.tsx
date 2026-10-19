@@ -133,6 +133,15 @@ export function DataScreen() {
    * field vanished under the cursor.
    */
   const [dimensionTouched, setDimensionTouched] = useState(false);
+  /**
+   * The variable being removed, if any.
+   *
+   * Removal is not instant any more: results written by the pipeline belong
+   * to root, so deleting them starts a container, which takes a few seconds.
+   * Without this the row just sits there and the obvious thing to do is
+   * click again.
+   */
+  const [removing, setRemoving] = useState<string | null>(null);
 
   /**
    * The dimension the new variable will go under.
@@ -310,6 +319,7 @@ export function DataScreen() {
         `${variable.source ? 'The folder it was copied from is not touched.' : ''}`,
     );
     if (!sure) return;
+    setRemoving(variable.id);
     try {
       const gone = await api.removeInput(projectId, variable.dimension, variable.code);
       reload();
@@ -320,6 +330,8 @@ export function DataScreen() {
       );
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not remove it');
+    } finally {
+      setRemoving(null);
     }
   };
 
@@ -631,7 +643,7 @@ export function DataScreen() {
                   key={variable.id}
                   className={`folder-row${locked ? ' is-locked' : ''}${
                     variable.problem ? ' is-unreadable' : ''
-                  }`}
+                  }${removing === variable.id ? ' is-going' : ''}`}
                 >
                   <Icon
                     name="file"
@@ -661,7 +673,11 @@ export function DataScreen() {
                     </div>
                   </div>
 
-                  {variable.problem ? (
+                  {removing === variable.id ? (
+                    <span className="muted-55" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
+                      Removing its results…
+                    </span>
+                  ) : variable.problem ? (
                     <span className="tag folder-missing-tag" title={variable.problem}>
                       Will be skipped
                     </span>
@@ -671,15 +687,26 @@ export function DataScreen() {
                     </span>
                   )}
 
+                  {/* One at a time: each removal starts its own container, and
+                      two at once would have them racing over the same tree. */}
                   {!locked && (
                     <button
                       type="button"
                       className="btn btn-icon btn-secondary"
-                      aria-label={`Remove ${variable.id}`}
+                      aria-label={
+                        removing === variable.id
+                          ? `Removing ${variable.id}`
+                          : `Remove ${variable.id}`
+                      }
                       onClick={() => removeVariable(variable)}
+                      disabled={removing !== null}
                       style={{ width: 30, height: 30, borderColor: 'transparent' }}
                     >
-                      <Icon name="close" size={15} />
+                      {removing === variable.id ? (
+                        <Icon name="spinner" size={15} className="spin" />
+                      ) : (
+                        <Icon name="close" size={15} />
+                      )}
                     </button>
                   )}
                 </div>

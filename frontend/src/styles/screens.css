@@ -161,6 +161,8 @@
   background: var(--color-surface);
 }
 .folder-row.is-locked { opacity: 0.72; }
+/* On its way out: dimmed, and nothing in it is clickable any more. */
+.folder-row.is-going { opacity: 0.55; }
 .folder-name {
   font-size: 14px;
   font-weight: 600;
