@@ -1,13 +1,72 @@
 # Backend for the Maphex UI.
-fastapi>=0.115
-uvicorn[standard]>=0.32
-pydantic>=2.9
+#
+# Every version is exact, including the ones nothing here asked for directly.
+# That is the point: a range installs whatever is newest on the day someone
+# builds, and two machines built a week apart stop being the same machine.
+# We lost an afternoon to exactly that — the engine's `pyarrow>=15` picked up
+# a release that needs NumPy 2, and every stage died on import.
+#
+# Install with:
+#     python -m venv .venv && .venv/bin/pip install -r requirements.txt
+#
+# To change a version, edit the direct dependency below, then regenerate the
+# resolved block underneath it (see REGENERATING at the bottom). Do not edit
+# the resolved block by hand — it is output, not input.
+
+# ── what this app actually uses ───────────────────────────────────────────
+
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
 
 # Reads the model file to validate it. The file itself is written verbatim —
 # the editor is a text editor, so nothing here reformats what was typed.
-ruamel.yaml>=0.18
+ruamel.yaml==0.19.1
 
 # Country outlines for the study-area picker, and the geometry the H3 mesh
 # step will need. Imported lazily — it is a couple of seconds of startup the
 # server should not pay until a country is actually asked for.
-geopandas>=1.0
+geopandas==1.1.4
+
+# ── resolved dependencies of the above ────────────────────────────────────
+# Generated, not chosen. Pinned so a rebuild resolves to this exact set.
+
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.7.22
+click==8.5.0
+h11==0.16.0
+httptools==0.8.0
+idna==3.20
+numpy==2.5.3
+packaging==26.3
+pandas==3.0.6
+pydantic_core==2.46.5
+pyogrio==0.13.0
+pyproj==3.8.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.3
+PyYAML==6.0.3
+shapely==2.1.2
+six==1.17.0
+starlette==1.7.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvloop==0.22.1
+watchfiles==1.3.0
+websockets==17.1
+
+# ── REGENERATING ──────────────────────────────────────────────────────────
+#
+# After changing a direct dependency, rebuild the resolved block from a clean
+# environment rather than from the one you have been working in — a venv in
+# use collects things nothing depends on. This file was written after finding
+# pypdf, httpx2, httpcore2 and truststore installed here and required by
+# nothing:
+#
+#     python -m venv /tmp/resolve
+#     /tmp/resolve/bin/pip install <the direct dependencies above>
+#     /tmp/resolve/bin/pip freeze
+#
+# Python 3.12 is what this was resolved against.
