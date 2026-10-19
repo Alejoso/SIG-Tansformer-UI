@@ -122,6 +122,17 @@ export function DataScreen() {
   const [newDimension, setNewDimension] = useState('');
   const [code, setCode] = useState('');
   const [addError, setAddError] = useState('');
+  /**
+   * Whether the dimension on screen is the user's choice rather than ours.
+   *
+   * Without this the server's suggestion wins forever: choosing "New
+   * dimension…" leaves the name empty, an empty name is indistinguishable
+   * from "nothing chosen yet", and the next plan — which arrives 350ms
+   * later, about as long as it takes to move the mouse to the field —
+   * suggests the dimension the project already has and puts it back. The
+   * field vanished under the cursor.
+   */
+  const [dimensionTouched, setDimensionTouched] = useState(false);
 
   /**
    * The dimension the new variable will go under.
@@ -190,17 +201,21 @@ export function DataScreen() {
         // The server suggests the next free code for that dimension; keep
         // whatever the user has typed over it.
         setCode((current) => current || result.code);
-        // It suggests a dimension too, from the folder's own name, which is
-        // usually right: these arrive as `10-Socioeconomico/SOE-001.gpkg`.
-        // A suggestion that is not an existing dimension has to select the
-        // "New dimension…" option, or the select and the state disagree.
-        setDimension((current) => {
-          if (current && current !== NEW_DIMENSION) return current;
-          if (!result.dimension) return NEW_DIMENSION;
-          if (dimensions.includes(result.dimension)) return result.dimension;
+
+        // A suggested dimension is only ever offered into an untouched
+        // control. Once the choice is the user's it is theirs, including
+        // the choice to be in the middle of typing a new one.
+        if (dimensionTouched) return;
+        if (!result.dimension) {
+          setDimension(NEW_DIMENSION);
+        } else if (dimensions.includes(result.dimension)) {
+          setDimension(result.dimension);
+        } else {
+          // Not one of the existing ones, so it has to show as "New
+          // dimension…" or the select and the state would disagree.
           setNewDimension((typed) => typed || result.dimension);
-          return NEW_DIMENSION;
-        });
+          setDimension(NEW_DIMENSION);
+        }
       } catch {
         if (live) setPlanned(null);
       }
@@ -211,7 +226,7 @@ export function DataScreen() {
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftPath, projectId, chosenDimension, dimensions]);
+  }, [draftPath, projectId, dimension, dimensions, dimensionTouched]);
 
   /**
    * What the server said about the folder currently in the box.
@@ -254,6 +269,7 @@ export function DataScreen() {
       setCode('');
       setNewDimension('');
       setDimension(added.dimension);
+      setDimensionTouched(false);
       reload();
       showToast(`${added.filename} added as ${added.id}`);
     } catch (error) {
@@ -501,6 +517,7 @@ export function DataScreen() {
                   value={dimensions.includes(dimension) ? dimension : NEW_DIMENSION}
                   onChange={(e) => {
                     setDimension(e.target.value);
+                    setDimensionTouched(true);
                     // The code is the next free one *within* a dimension, so
                     // it has to be re-asked for rather than carried over.
                     setCode('');
@@ -521,7 +538,10 @@ export function DataScreen() {
                     value={newDimension}
                     placeholder="11_ambiental"
                     aria-label="New dimension name"
-                    onChange={(e) => setNewDimension(e.target.value)}
+                    onChange={(e) => {
+                      setNewDimension(e.target.value);
+                      setDimensionTouched(true);
+                    }}
                     style={{ flex: 1, minWidth: 0 }}
                   />
                 )}
