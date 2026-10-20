@@ -225,6 +225,9 @@ class InputVariable(BaseModel):
     sourceMissing: bool = False
     #: Set when the folder is not one readable dataset.
     problem: str = ""
+    #: Results with no input behind them. Still a column in the master table
+    #: and a leaf the model can score, so worth seeing and removing.
+    processedOnly: bool = False
 
 
 class ImportPlan(BaseModel):

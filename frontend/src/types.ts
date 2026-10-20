@@ -88,6 +88,14 @@ export interface InputVariable {
   sourceMissing: boolean;
   /** Set when the folder is not one readable dataset — the engine will skip it. */
   problem: string;
+  /**
+   * Results with no input behind them.
+   *
+   * The pipeline loads every `.h3.parquet` under `out/`, so one of these is
+   * still a column in the master table and a leaf the model can score. They
+   * come from an input deleted outside this app.
+   */
+  processedOnly: boolean;
 }
 
 /** What removing a variable took away. */

@@ -524,8 +524,16 @@ class Run:
 
         # The engine's database now holds this project's variables — or, if
         # the run did not finish, something we cannot vouch for. Either way
-        # the next run needs to know. See `engine_state`.
-        engine_state.record_run(self.project_id, execution, finished_ok)
+        # the next run needs to know. The results it was loaded from are
+        # recorded too, so one disappearing from disk is noticed: an
+        # incremental load adds what it finds and never deletes.
+        project = store.find_project(self.project_id)
+        engine_state.record_run(
+            self.project_id,
+            execution,
+            finished_ok,
+            engine_state.output_set(project) if project else [],
+        )
 
     # ── the full transcript on disk ───────────────────────────────────────
 

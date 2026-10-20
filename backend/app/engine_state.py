@@ -35,7 +35,10 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import pipeline, store
+from . import outputs, pipeline, store
+
+#: The pipeline's own products under `out/`, which are not variables.
+NOT_VARIABLES = {"maestro", "exports", "bck", "verify", "render", "mascaras", "soc_ellos"}
 
 #: Beside the CSVs, for the same reason: you can open it and read it.
 STATE_FILE = store.DATA_DIR / "engine_state.json"
@@ -52,6 +55,12 @@ class EngineState:
     lastExecutionId: str = ""
     #: Projects that have changed in a way an incremental load cannot express.
     stale: list[str] = field(default_factory=list)
+    #: The results the database was loaded from, as `<dimension>/<CODE>`.
+    #: Compared against what is on disk now: an incremental load adds what it
+    #: finds and never deletes, so a result that has gone — removed outside
+    #: this app, in a file manager or a terminal — would otherwise stay in
+    #: the master table with nothing behind it.
+    lastOutputs: list[str] = field(default_factory=list)
 
 
 def read() -> EngineState:
@@ -63,6 +72,7 @@ def read() -> EngineState:
         lastProjectId=str(raw.get("lastProjectId", "")),
         lastExecutionId=str(raw.get("lastExecutionId", "")),
         stale=[str(item) for item in raw.get("stale", [])],
+        lastOutputs=[str(item) for item in raw.get("lastOutputs", [])],
     )
 
 
@@ -84,6 +94,29 @@ def mark_stale(project_id: str) -> None:
     if project_id not in state.stale:
         state.stale.append(project_id)
         _write(state)
+
+
+def output_set(project: store.ProjectRow) -> list[str]:
+    """
+    The results currently on disk, as the engine would find them.
+
+    Mirrors what `load_h3_values` picks up: a folder per variable under
+    `out/<dimension>/<CODE>`, skipping the pipeline's own products.
+    """
+    root = outputs.out_dir(project)
+    if root is None or not root.is_dir():
+        return []
+    found = []
+    try:
+        for dimension_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+            if dimension_dir.name in NOT_VARIABLES:
+                continue
+            for code_dir in sorted(p for p in dimension_dir.iterdir() if p.is_dir()):
+                if any(entry.is_file() for entry in code_dir.iterdir()):
+                    found.append(f"{dimension_dir.name}/{code_dir.name}")
+    except OSError:
+        return []
+    return found
 
 
 def _newest_execution() -> str:
@@ -118,10 +151,19 @@ def plan_reload(project: store.ProjectRow) -> tuple[bool, str]:
     if newest and state.lastExecutionId and newest != state.lastExecutionId:
         return True, "the pipeline was run outside this app since last time"
 
+    gone = sorted(set(state.lastOutputs) - set(output_set(project)))
+    if gone:
+        return True, f"results that were loaded have gone from disk ({', '.join(gone)})"
+
     return False, ""
 
 
-def record_run(project_id: str, execution_id: str, succeeded: bool) -> None:
+def record_run(
+    project_id: str,
+    execution_id: str,
+    succeeded: bool,
+    loaded: list[str] | None = None,
+) -> None:
     """
     Remember what the database now holds.
 
@@ -132,6 +174,7 @@ def record_run(project_id: str, execution_id: str, succeeded: bool) -> None:
     state = read()
     state.lastProjectId = project_id
     state.lastExecutionId = execution_id
+    state.lastOutputs = loaded if loaded is not None else []
     if succeeded:
         state.stale = [item for item in state.stale if item != project_id]
     elif project_id not in state.stale:

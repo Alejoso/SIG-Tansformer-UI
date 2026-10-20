@@ -51,6 +51,11 @@ SHAPEFILE_COMPANIONS = {
 #: it. The engine uppercases the code in folder names, so we store it that way.
 CODE_PATTERN = re.compile(r"^[A-Za-z]{3}_[0-9]{3}$")
 
+#: Folders under `out/` that hold the pipeline's own products rather than
+#: variables — the master export, archived copies, the MCDA's own output and
+#: the verification renders. `load_h3_values` skips the same set.
+NOT_VARIABLES = {"maestro", "exports", "bck", "verify", "render", "mascaras", "soc_ellos"}
+
 #: A dimension is a folder name, so it has to be one — no separators, no
 #: walking upwards, nothing hidden.
 DIMENSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
@@ -79,6 +84,12 @@ class InputVariable:
     sourceMissing: bool = False
     #: Set when the folder does not hold exactly one readable dataset.
     problem: str = ""
+    #: Results with no input left. The pipeline loads whatever `.h3.parquet`
+    #: it finds under `out/`, so one of these is still a variable in the
+    #: master table and in the model — it just has nothing behind it. Listed
+    #: so it can be seen and removed, because the screen otherwise shows
+    #: inputs only and these are invisible.
+    processedOnly: bool = False
 
 
 @dataclass
@@ -239,7 +250,60 @@ def scan(project: store.ProjectRow) -> list[InputVariable]:
                     problem=problem,
                 )
             )
+
+    found += _results_without_input(project, {variable.id for variable in found})
+    found.sort(key=lambda variable: variable.id)
     return found
+
+
+def _results_without_input(
+    project: store.ProjectRow, known: set[str]
+) -> list[InputVariable]:
+    """
+    Variables that exist only as results.
+
+    The pipeline loads every `.h3.parquet` under `out/`, so one of these is a
+    column in the master table and a leaf the model can score — with no input
+    behind it and, until now, no way to see or remove it from here.
+
+    They come from an input removed outside this app, or from the window
+    where removing a variable deleted its input and left its results.
+    """
+    root = outputs.out_dir(project)
+    if root is None or not root.is_dir():
+        return []
+
+    orphans: list[InputVariable] = []
+    for dimension_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        if dimension_dir.name in NOT_VARIABLES:
+            continue
+        for code_dir in sorted(p for p in dimension_dir.iterdir() if p.is_dir()):
+            identifier = f"{dimension_dir.name}/{code_dir.name}"
+            if identifier in known:
+                continue
+            try:
+                files = [entry for entry in code_dir.iterdir() if entry.is_file()]
+            except OSError:
+                continue
+            if not files:
+                continue
+            orphans.append(
+                InputVariable(
+                    id=identifier,
+                    dimension=dimension_dir.name,
+                    code=code_dir.name,
+                    filename=min((f.name for f in files), key=len),
+                    format="",
+                    sizeBytes=sum(f.stat().st_size for f in files),
+                    fileCount=len(files),
+                    processedOnly=True,
+                    problem=(
+                        "Results with no input — still loaded into the master table "
+                        "and the model"
+                    ),
+                )
+            )
+    return orphans
 
 
 def dimensions(project: store.ProjectRow) -> list[str]:
@@ -634,8 +698,7 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
     """
     target = _destination(project, dimension, code)
     identifier = f"{target.parent.name}/{target.name}"
-    if not target.is_dir():
-        raise ValueError(f"No {identifier} in this project.")
+    has_input = target.is_dir()
 
     results_root = outputs.out_dir(project)
     results: Path | None = None
@@ -646,7 +709,13 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
 
     # Decided before anything goes, so a half-removed variable is not a state
     # this can end in.
-    by_hand = {"input": _removable(target), "results": results is None or _removable(results)}
+    if not has_input and results is None:
+        raise ValueError(f"No {identifier} in this project.")
+
+    by_hand = {
+        "input": not has_input or _removable(target),
+        "results": results is None or _removable(results),
+    }
     if not all(by_hand.values()) and not pipeline.can_remove_as_root():
         stuck = results if not by_hand["results"] else target
         raise ValueError(
@@ -656,7 +725,9 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
             f"`sudo rm -rf {stuck}`."
         )
 
-    removal = Removal(id=identifier, inputFiles=_count_files(target), outputFiles=0)
+    removal = Removal(
+        id=identifier, inputFiles=_count_files(target) if has_input else 0, outputFiles=0
+    )
 
     # Results first: it is the part that can fail, and failing before the
     # input is gone leaves the variable intact rather than half-deleted.
@@ -670,7 +741,9 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
             if problem:
                 raise ValueError(f"Could not remove the results for {identifier}: {problem}")
 
-    if by_hand["input"]:
+    if not has_input:
+        pass  # results-only: there was never an input to take out
+    elif by_hand["input"]:
         shutil.rmtree(target)
     else:
         problem = pipeline.remove_as_root(
@@ -683,7 +756,8 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
     # picker, which reads the folders. Drop it rather than leave a choice
     # that means nothing. Best effort: a root-owned empty folder is untidy,
     # not broken.
-    for parent in (target.parent, results.parent if results is not None else None):
+    for parent in (target.parent if has_input else None,
+                   results.parent if results is not None else None):
         if parent is not None and parent.is_dir():
             try:
                 if not any(parent.iterdir()):

@@ -274,7 +274,9 @@ export function DataScreen() {
   const phase = running ? 'processing' : run?.status === 'done' ? 'done' : 'empty';
   const locked = running;
   /** Variables whose folder is not one readable dataset — the engine will skip them. */
-  const unreadable = variables.filter((v) => v.problem);
+  const unreadable = variables.filter((v) => v.problem && !v.processedOnly);
+  /** Results with no input: the engine still loads them, so they are worth seeing. */
+  const orphaned = variables.filter((v) => v.processedOnly);
   const canAdd =
     !locked && plan !== null && !plan.problem && Boolean(chosenDimension) && Boolean(code);
 
@@ -470,6 +472,24 @@ export function DataScreen() {
           can look at on the map.
         </p>
 
+        {orphaned.length > 0 && (
+          <div className="folder-alert">
+            <div className="folder-alert-body">
+              <strong>
+                {orphaned.length === 1
+                  ? 'One variable has results but no input'
+                  : `${orphaned.length} variables have results but no input`}
+              </strong>
+              <span className="muted-55">
+                The engine loads every result it finds, so {orphaned.length === 1 ? 'it is' : 'they are'}{' '}
+                still in the master table and the model. Remove{' '}
+                {orphaned.length === 1 ? 'it' : 'them'} below, or add the data back under the same
+                code.
+              </span>
+            </div>
+          </div>
+        )}
+
         {unreadable.length > 0 && (
           <div className="folder-alert">
             <div className="folder-alert-body">
@@ -661,7 +681,9 @@ export function DataScreen() {
                   key={variable.id}
                   className={`folder-row${locked ? ' is-locked' : ''}${
                     variable.problem ? ' is-unreadable' : ''
-                  }${removing === variable.id ? ' is-going' : ''}`}
+                  }${variable.processedOnly ? ' is-unreadable' : ''}${
+                    removing === variable.id ? ' is-going' : ''
+                  }`}
                 >
                   <Icon
                     name="file"
@@ -677,6 +699,7 @@ export function DataScreen() {
                     </div>
                     <div className="folder-meta muted-50">
                       <span className="mono">{variable.dimension}</span>
+                      {variable.processedOnly && ' · results only'}
                       {variable.source && (
                         <>
                           {' · from '}
@@ -694,6 +717,10 @@ export function DataScreen() {
                   {removing === variable.id ? (
                     <span className="muted-55" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
                       Removing variable…
+                    </span>
+                  ) : variable.processedOnly ? (
+                    <span className="tag folder-missing-tag" title={variable.problem}>
+                      No input
                     </span>
                   ) : variable.problem ? (
                     <span className="tag folder-missing-tag" title={variable.problem}>
