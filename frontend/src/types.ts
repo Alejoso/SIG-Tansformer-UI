@@ -353,20 +353,6 @@ export interface ModelConfig {
   variables: ModelVariable[];
 }
 
-/**
- * One tick while the model is being applied. The engine re-normalises and
- * re-weights one variable at a time, so the UI can name what it is working on
- * instead of showing an opaque spinner.
- */
-export interface ApplyProgress {
-  phase: 'running' | 'done' | 'failed';
-  /** The variable being processed right now, e.g. `wind_speed`. */
-  variable: string;
-  /** 1-based position of `variable` in the run. */
-  index: number;
-  total: number;
-  error?: string;
-}
 
 /** One thing wrong with the model file. */
 export interface ModelIssue {

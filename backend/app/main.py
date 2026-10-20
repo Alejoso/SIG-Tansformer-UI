@@ -41,6 +41,7 @@ from .models import (
     NewProjectPayload,
     PickFolderPayload,
     PickFolderResult,
+    ModelRunPayload,
     PlanImportPayload,
     ProcessPayload,
     Removal,
@@ -192,20 +193,35 @@ def list_layers(project_id: str) -> LayerTree:
         for variable in outputs.scan_variables(project)
     ]
 
-    runs = outputs.scan_model_runs(project)
+    model = outputs.scan_model(project)
+    if model is None:
+        combined = LayerNode(
+            id="model",
+            label="Complete model",
+            description="No model run yet — apply the model to make one",
+            hasDocument=False,
+        )
+        children: list[LayerNode] = []
+    else:
+        combined = _to_layer_node(model)
+        children = combined.children
+        combined.children = []
+
     return LayerTree(
-        model={
-            "combined": LayerNode(
-                id="model",
-                label="Complete model",
-                description=(
-                    f"Run {runs[0]}" if runs else "No model run yet — apply the model to make one"
-                ),
-                hasDocument=bool(runs),
-            ),
-            "variables": [],
-        },
+        model={"combined": combined, "variables": children},
         inputs=variables,
+    )
+
+
+def _to_layer_node(layer: outputs.ModelLayer) -> LayerNode:
+    """One level of the model's own output, as the sidebar draws it."""
+    return LayerNode(
+        id=layer.id,
+        label=layer.label,
+        description=layer.description,
+        filename=layer.filename,
+        hasDocument=bool(layer.relpath),
+        children=[_to_layer_node(child) for child in layer.children],
     )
 
 
@@ -225,7 +241,9 @@ def get_layer_document(project_id: str, node_id: str) -> FileResponse:
     layer looks missing.
     """
     project = _require_project(project_id)
-    path = outputs.document_path(project, node_id)
+    path = outputs.document_path(project, node_id) or outputs.model_document_path(
+        project, node_id
+    )
     if path is None:
         raise HTTPException(status_code=404, detail=f"No rendered layer {node_id}")
     return FileResponse(path, media_type="text/html")
@@ -478,6 +496,105 @@ def remove_input(project_id: str, dimension: str, code: str) -> Removal:
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return Removal(**vars(removal))
+
+
+# ── running the model ─────────────────────────────────────────────────────
+
+
+@app.post("/api/projects/{project_id}/model/run", status_code=202)
+def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> PipelineRun:
+    """
+    Score the model over the project's hexagons.
+
+    A second kind of run, watched exactly like processing: `MCDA/run_mcda.sh`
+    is the same shape as `run_full.sh`, a script that execs Python in the
+    container and prints as it goes.
+
+    Its results go to the *project's* folder rather than the engine's own
+    `MCDA/runs/`, which every project would otherwise share.
+    """
+    project = _require_project(project_id)
+
+    status = pipeline.status()
+    if not status.ready:
+        raise HTTPException(status_code=503, detail=" ".join(status.problems))
+
+    folder = outputs.data_dir(project)
+    if folder is None or not folder.is_dir():
+        raise HTTPException(status_code=400, detail="This project has no folder.")
+    if not outputs.scan_variables(project):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Nothing has been processed yet. The model scores the hexagons the "
+                "pipeline produced, so run Process first."
+            ),
+        )
+
+    options = payload or ModelRunPayload()
+    # The container execs against whatever DATA_DIR was mounted last, so it
+    # has to be pointed at this project before the model reads anything.
+    pipeline.prepare_host_folders(folder)
+    up = pipeline.compose_up(folder if pipeline.honours_data_dir() else None)
+    if up is None or up.returncode != 0:
+        detail = (up.stderr or up.stdout or "").strip()[-400:] if up else ""
+        raise HTTPException(
+            status_code=503, detail=detail or "Could not start the engine's containers."
+        )
+
+    # The MCDA's preprocesses refuse to run with more than one master export,
+    # and the pipeline writes one per run. Keep the newest; the rest go where
+    # the pipeline puts superseded results.
+    archived, problem = pipeline.archive_extra_masters(folder)
+    if problem:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "There is more than one master export in this project and they could "
+                f"not be tidied up: {problem}"
+            ),
+        )
+
+    # The id is ours, not the script's: `--out` has to name the folder, and
+    # the script only announces its own id once it is running. It honours an
+    # EXECUTION_ID from the environment, so both agree.
+    execution_id = pipeline.new_execution_id()
+    config = model_store.container_model_path(project) if options.useProjectModel else None
+    arguments = pipeline.model_arguments(
+        config=config,
+        site=options.site,
+        out=f"/data/{outputs.MCDA_RUNS_DIRNAME}/{execution_id}",
+        render=options.render,
+    )
+    try:
+        run = runs.start_model(
+            project,
+            folder,
+            arguments=arguments,
+            skip_preprocesses=options.skipPreprocesses,
+            execution_id=execution_id,
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return _to_run(run.snapshot())
+
+
+@app.get("/api/projects/{project_id}/model/run")
+def get_model_run(project_id: str) -> PipelineRun | None:
+    """How far the model run has got, or null if one has never been started."""
+    _require_project(project_id)
+    run = runs.current(project_id, "model")
+    return None if run is None else _to_run(run.snapshot())
+
+
+@app.post("/api/projects/{project_id}/model/run/abort")
+def abort_model_run(project_id: str) -> AbortResult:
+    """Stop a model run, the same way processing is stopped."""
+    _require_project(project_id)
+    run = runs.current(project_id, "model")
+    if run is None:
+        raise HTTPException(status_code=404, detail="No model run for this project.")
+    return AbortResult(detail=run.abort())
 
 
 # ── the model file ────────────────────────────────────────────────────────

@@ -135,8 +135,16 @@ class Run:
         reset: bool = True,
         reset_reason: str = "",
         rebuild_everything: bool = False,
+        job: pipeline.Job | None = None,
+        arguments: list[str] | None = None,
+        env: dict[str, str] | None = None,
     ) -> None:
         self.project_id = project.id
+        #: Which script this run drives — the pipeline or the model. They are
+        #: the same shape, so the following is identical.
+        self.job = job or pipeline.PIPELINE_JOB
+        self.arguments = arguments or []
+        self.env_override = env
         #: The folder this run processes. Passed as DATA_DIR when the script
         #: honours one; None means the engine's own default.
         self.data_dir = data_dir
@@ -160,17 +168,19 @@ class Run:
             resetReason=reset_reason,
             rebuildEverything=rebuild_everything,
             status="starting",
-            statusText="Starting the pipeline",
+            statusText=(job or pipeline.PIPELINE_JOB).label,
             startedAt=time.time(),
             stages=[
                 StageState(number=stage.number, key=stage.key, label=stage.label)
-                for stage in pipeline.STAGES
+                for stage in self.job.stages
             ],
         )
         self._by_key = {stage.key: stage for stage in self._state.stages}
-        self._weights = {stage.key: stage.weight for stage in pipeline.STAGES}
+        self._weights = {stage.key: stage.weight for stage in self.job.stages}
 
-        self._thread = threading.Thread(target=self._run, name=f"pipeline-{project.id}", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run, name=f"{self.job.key}-{project.id}", daemon=True
+        )
 
     # ── what the UI reads ─────────────────────────────────────────────────
 
@@ -332,7 +342,7 @@ class Run:
             return
 
         by_script = {stage.script.rsplit("/", 1)[-1].removesuffix(".py"): stage.key
-                     for stage in pipeline.STAGES}
+                     for stage in self.job.stages}
 
         skipped_files = errored_files = 0
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -417,15 +427,18 @@ class Run:
         # version that assigns over it would run against one folder while the
         # UI reads another, silently. `honours_data_dir` is what decides, and
         # the route refuses the mismatch rather than letting it happen.
-        extra = pipeline.reload_env(
-            reset=self.reset, rebuild_everything=self.rebuild_everything
-        )
-        if self.data_dir:
-            extra["DATA_DIR"] = str(self.data_dir)
-        env = pipeline.run_full_env(extra=extra)
+        if self.env_override is not None:
+            env = self.env_override
+        else:
+            extra = pipeline.reload_env(
+                reset=self.reset, rebuild_everything=self.rebuild_everything
+            )
+            if self.data_dir:
+                extra["DATA_DIR"] = str(self.data_dir)
+            env = pipeline.run_full_env(extra=extra)
         try:
             process = subprocess.Popen(
-                pipeline.run_full_command(),
+                self.job.command() + self.arguments,
                 cwd=pipeline.PIPELINE_DIR,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -466,7 +479,7 @@ class Run:
                 self._set(executionId=execution_id)
                 self._open_log(execution_id)
 
-            matched = pipeline.match_stage_line(line)
+            matched = self.job.match(line)
             if matched is not None:
                 key, status = matched
                 self._mark(key, status, detail="" if status == "running" else "Already up to date")
@@ -527,6 +540,9 @@ class Run:
         # the next run needs to know. The results it was loaded from are
         # recorded too, so one disappearing from disk is noticed: an
         # incremental load adds what it finds and never deletes.
+        if self.job.key != "pipeline":
+            return
+
         project = store.find_project(self.project_id)
         engine_state.record_run(
             self.project_id,
@@ -743,13 +759,22 @@ def adopt(project: store.ProjectRow) -> Run | None:
 # One run per project, in memory, because a run normally belongs to the
 # process following it. `adopt` covers the case where that process is gone.
 
-_runs: dict[str, Run] = {}
+#: Keyed by project *and* job: a project can have a pipeline run and a
+#: model run, and they are different things to watch even though only one
+#: may be going at a time.
+_runs: dict[tuple[str, str], Run] = {}
 _registry_lock = threading.Lock()
 
 
-def current(project_id: str) -> Run | None:
+def current(project_id: str, job: str = "pipeline") -> Run | None:
     with _registry_lock:
-        return _runs.get(project_id)
+        return _runs.get((project_id, job))
+
+
+def anything_running() -> Run | None:
+    """Any run at all, for either job. The engine serves one at a time."""
+    with _registry_lock:
+        return next((run for run in _runs.values() if run.active), None)
 
 
 def current_or_adopted(project: store.ProjectRow) -> Run | None:
@@ -762,7 +787,7 @@ def current_or_adopted(project: store.ProjectRow) -> Run | None:
     fresh guess each second.
     """
     with _registry_lock:
-        existing = _runs.get(project.id)
+        existing = _runs.get((project.id, "pipeline"))
         if existing is not None:
             return existing
 
@@ -772,7 +797,7 @@ def current_or_adopted(project: store.ProjectRow) -> Run | None:
 
     with _registry_lock:
         # Another request may have adopted it while we were reading disk.
-        return _runs.setdefault(project.id, adopted)
+        return _runs.setdefault((project.id, "pipeline"), adopted)
 
 
 def start(
@@ -800,14 +825,14 @@ def start(
         )
 
     with _registry_lock:
-        existing = _runs.get(project.id)
+        existing = _runs.get((project.id, "pipeline"))
         if existing is not None and existing.active:
             return existing
-        for other_id, other in _runs.items():
-            if other_id != project.id and other.active:
+        for key, other in _runs.items():
+            if key != (project.id, "pipeline") and other.active:
                 raise RuntimeError(
-                    "Another project is already being processed. The engine has one "
-                    "database, so one run at a time."
+                    "Something is already running. The engine has one database and "
+                    "one container, so one run at a time."
                 )
         run = Run(
             project,
@@ -816,6 +841,54 @@ def start(
             reset_reason=reset_reason,
             rebuild_everything=rebuild_everything,
         )
-        _runs[project.id] = run
+        _runs[(project.id, "pipeline")] = run
+    run.start()
+    return run
+
+
+def start_model(
+    project: store.ProjectRow,
+    data_dir: Path | None,
+    *,
+    arguments: list[str],
+    skip_preprocesses: bool = False,
+    execution_id: str = "",
+) -> Run:
+    """
+    Score the model for a project.
+
+    Refused while anything else is going, for the same reason processing is:
+    `run_mcda.sh` execs into the one container, which is mounted on one
+    project at a time.
+    """
+    if _pipeline_is_running():
+        raise RuntimeError("The pipeline is running. One at a time — it is one engine.")
+
+    with _registry_lock:
+        existing = _runs.get((project.id, "model"))
+        if existing is not None and existing.active:
+            return existing
+        for key, other in _runs.items():
+            if key != (project.id, "model") and other.active:
+                raise RuntimeError(
+                    "Something is already running. The engine has one database and "
+                    "one container, so one run at a time."
+                )
+        run = Run(
+            project,
+            data_dir,
+            job=pipeline.MODEL_JOB,
+            arguments=arguments,
+            env=pipeline.model_env(
+                data_dir,
+                skip_preprocesses=skip_preprocesses,
+                extra={"EXECUTION_ID": execution_id} if execution_id else None,
+            ),
+        )
+        # Known up front for a model run, so progress can be read from the
+        # manifest before the script gets round to announcing it.
+        if execution_id:
+            run._state.executionId = execution_id
+        _runs[(project.id, "model")] = run
     run.start()
     return run

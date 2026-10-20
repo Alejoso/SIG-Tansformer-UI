@@ -255,13 +255,131 @@ def document_path(project: store.ProjectRow, node_id: str) -> Path | None:
 MCDA_RUNS_DIRNAME = os.environ.get("MAPHEX_MCDA_RUNS_DIRNAME", "MCDA/runs")
 
 
+@dataclass
+class ModelLayer:
+    """One rendered document from a model run."""
+
+    id: str
+    label: str
+    description: str
+    relpath: str
+    filename: str
+    sizeBytes: int
+    children: list["ModelLayer"]
+
+
+#: Where the model puts each level of its own result. It renders the whole
+#: model, each criterion and each subcriterion separately, which is the tree
+#: the sidebar draws — so the folders are read rather than a shape invented.
+MODEL_WHOLE = "criterios/global"
+MODEL_CRITERIA = "criterios"
+MODEL_SUBCRITERIA = "subcriterios"
+
+
+def _model_document(folder: Path) -> Path | None:
+    """The rendered map in a folder, if it has one."""
+    for suffix in HTML_SUFFIXES:
+        found = sorted(folder.glob(f"*{suffix}"))
+        if found:
+            return found[0]
+    found = sorted(folder.glob("*.html"))
+    return found[0] if found else None
+
+
+def scan_model(project: store.ProjectRow, run: str | None = None) -> ModelLayer | None:
+    """
+    The newest model run, as the tree it was rendered in.
+
+    `criterios/global` is the whole model, `criterios/<key>` each criterion
+    and `subcriterios/<key>/<sub>` each subcriterion beneath it. The engine
+    names the folders after the keys in the config, so what the sidebar shows
+    is what was written in the model file.
+    """
+    root = data_dir(project)
+    if root is None:
+        return None
+    runs = scan_model_runs(project)
+    chosen = run or (runs[0] if runs else None)
+    if chosen is None:
+        return None
+
+    base = root / MCDA_RUNS_DIRNAME / chosen
+    whole = _model_document(base / MODEL_WHOLE) if (base / MODEL_WHOLE).is_dir() else None
+
+    criteria: list[ModelLayer] = []
+    criteria_dir = base / MODEL_CRITERIA
+    if criteria_dir.is_dir():
+        for folder in sorted(p for p in criteria_dir.iterdir() if p.is_dir()):
+            if folder.name == "global":
+                continue
+            document = _model_document(folder)
+            subs: list[ModelLayer] = []
+            sub_dir = base / MODEL_SUBCRITERIA / folder.name
+            if sub_dir.is_dir():
+                for sub in sorted(p for p in sub_dir.iterdir() if p.is_file()):
+                    if not any(sub.name.endswith(s) for s in (*HTML_SUFFIXES, ".html")):
+                        continue
+                    subs.append(
+                        ModelLayer(
+                            id=_slug(f"{chosen}/sub/{folder.name}/{sub.name}"),
+                            label=_humanise(_strip_suffix(sub.name, (*HTML_SUFFIXES, ".html"))),
+                            description="Subcriterion",
+                            relpath=str(sub.relative_to(root)),
+                            filename=sub.name,
+                            sizeBytes=sub.stat().st_size,
+                            children=[],
+                        )
+                    )
+            if document is None and not subs:
+                continue
+            criteria.append(
+                ModelLayer(
+                    id=_slug(f"{chosen}/crit/{folder.name}"),
+                    label=_humanise(folder.name),
+                    description="Criterion",
+                    relpath=str(document.relative_to(root)) if document else "",
+                    filename=document.name if document else "",
+                    sizeBytes=document.stat().st_size if document else 0,
+                    children=subs,
+                )
+            )
+
+    return ModelLayer(
+        id=_slug(f"{chosen}/global"),
+        label="Complete model",
+        description=f"Run {chosen}",
+        relpath=str(whole.relative_to(root)) if whole else "",
+        filename=whole.name if whole else "",
+        sizeBytes=whole.stat().st_size if whole else 0,
+        children=criteria,
+    )
+
+
+def model_document_path(project: store.ProjectRow, node_id: str) -> Path | None:
+    """Resolve a model node id back to its file, by re-scanning and matching."""
+    root = data_dir(project)
+    tree = scan_model(project)
+    if root is None or tree is None:
+        return None
+
+    def walk(node: ModelLayer):
+        yield node
+        for child in node.children:
+            yield from walk(child)
+
+    for node in walk(tree):
+        if node.id == node_id and node.relpath:
+            candidate = root / node.relpath
+            return candidate if candidate.is_file() else None
+    return None
+
+
 def scan_model_runs(project: store.ProjectRow) -> list[str]:
     """
     Model runs available for this project, newest first.
 
     The model comes out nested by criterion and subcriterion, which is the
-    tree the sidebar draws. Nothing has produced one yet, so this returns an
-    empty list and the UI says so rather than inventing a shape.
+    tree the sidebar draws — see `scan_model`.
     """
     root = data_dir(project)
     if root is None:

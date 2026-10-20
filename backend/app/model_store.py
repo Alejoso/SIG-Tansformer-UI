@@ -260,3 +260,14 @@ def structure_errors(text: str) -> list[dict[str, object]]:
         check(str(name), body, "")
 
     return problems
+
+
+def container_model_path(project: store.ProjectRow) -> str:
+    """
+    Where the project's model file is *inside* the container.
+
+    The project folder is mounted at `/data`, so the engine sees the model
+    beside the data it scores. Built rather than translated from the host
+    path, which would be meaningless in there.
+    """
+    return f"/data/{MODEL_DIRNAME}/{MODEL_FILENAME}"

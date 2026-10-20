@@ -3,7 +3,7 @@ import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import { modelFromParsed, weightSum } from '../../lib/model';
 import { lintYaml, parseYaml } from '../../lib/yaml-lint';
-import type { ApplyProgress, ModelExample, ModelFile, ModelIssue } from '../../types';
+import type { ModelExample, ModelFile, ModelIssue, PipelineRun } from '../../types';
 import { ApplyDoneDialog, ApplyProgressDialog } from '../tune/ApplyDialogs';
 import { ExamplesDialog } from '../tune/ExamplesDialog';
 import { ModelDiagram } from '../tune/ModelDiagram';
@@ -21,8 +21,9 @@ export function TuneScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showExamples, setShowExamples] = useState(false);
-  const [applyProgress, setApplyProgress] = useState<ApplyProgress | null>(null);
-  const [applyDone, setApplyDone] = useState<number | null>(null);
+  /** The model run in flight, polled like a processing run. */
+  const [applyRun, setApplyRun] = useState<PipelineRun | null>(null);
+  const [stopping, setStopping] = useState(false);
   const unwatchApply = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -99,28 +100,58 @@ export function TuneScreen() {
       return;
     }
 
-    if (!diagramModel) {
+    // Not gated on the diagram. The diagram is drawn from the shape this app
+    // invented before we knew what the engine reads; the engine reads
+    // criteria/subgroups/leaves. A file it understands may well draw nothing
+    // here, and refusing to run it because of that would be this app
+    // overruling the thing doing the work. If the engine dislikes the file it
+    // says so, and that message is worth more than ours.
+
+    // The file is written; now run it. The model is a run like processing —
+    // four steps in the engine's container — so it is watched the same way.
+    try {
+      const started = await api.startModelRun(projectId, { useProjectModel: true });
+      setApplyRun(started);
+    } catch (error) {
       setBusy(false);
-      showToast('Saved — fix the file before it can be run');
+      showToast(error instanceof Error ? error.message : 'Could not start the model');
       return;
     }
 
-    setApplyProgress({ phase: 'running', variable: '', index: 0, total: 0 });
-    unwatchApply.current = api.watchModelApply(projectId, diagramModel, (tick) => {
-      if (tick.phase !== 'done') {
-        setApplyProgress(tick);
-        return;
-      }
-      setApplyProgress(null);
-      setApplyDone(tick.total);
-      setBusy(false);
+    unwatchApply.current = api.watchModelRun(
+      projectId,
+      (tick) => {
+        setApplyRun(tick);
+        if (tick.status === 'starting' || tick.status === 'running') return;
+        setBusy(false);
+        unwatchApply.current = null;
+      },
+      (error) => {
+        setBusy(false);
+        showToast(error.message);
+      },
+    );
+  };
+
+  /** Stop a model run. It is a real process, so this really stops it. */
+  const stopApply = async () => {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      const { detail } = await api.abortModelRun(projectId);
       unwatchApply.current?.();
       unwatchApply.current = null;
-    });
+      setApplyRun(null);
+      setBusy(false);
+      showToast(detail ? `Stopped — ${detail}` : 'Stopped');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not stop it');
+    } finally {
+      setStopping(false);
+    }
   };
 
   const viewMap = () => {
-    setApplyDone(null);
     setMapView({ mode: 'model', scale: 'raw', nodeId: 'model' });
     goTo('map');
   };
@@ -282,14 +313,12 @@ export function TuneScreen() {
         <ExamplesDialog onClose={() => setShowExamples(false)} onInsert={insertExample} />
       )}
 
-      {applyProgress && <ApplyProgressDialog progress={applyProgress} />}
+      {applyRun && (applyRun.status === 'starting' || applyRun.status === 'running') && (
+        <ApplyProgressDialog run={applyRun} onStop={stopApply} stopping={stopping} />
+      )}
 
-      {applyDone !== null && (
-        <ApplyDoneDialog
-          variableCount={applyDone}
-          onStay={() => setApplyDone(null)}
-          onViewMap={viewMap}
-        />
+      {applyRun && applyRun.status !== 'starting' && applyRun.status !== 'running' && (
+        <ApplyDoneDialog run={applyRun} onStay={() => setApplyRun(null)} onViewMap={viewMap} />
       )}
     </div>
   );

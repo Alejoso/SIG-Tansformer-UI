@@ -243,6 +243,21 @@ class ImportPlan(BaseModel):
     problem: str = ""
 
 
+class ModelRunPayload(BaseModel):
+    """Options for a model run."""
+
+    #: onshore | offshore | both — the engine scores leaves per site.
+    site: str = "both"
+    #: Use the project's own model file as the config. Off until that file is
+    #: in the shape the engine reads; the engine's own config is used instead.
+    useProjectModel: bool = False
+    #: Skip the three preprocesses when their inputs have not changed.
+    skipPreprocesses: bool = False
+    #: The engine renders its own maps. Worth keeping on — it is what the
+    #: Model side of the map shows.
+    render: bool = True
+
+
 class ProcessPayload(BaseModel):
     """Options for a run. Everything defaults to the cheap, correct choice."""
 

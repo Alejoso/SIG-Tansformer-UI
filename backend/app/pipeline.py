@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import subprocess
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -287,15 +288,19 @@ def unwritable_host_folders() -> list[Path]:
     return blocked
 
 
-def compose_up() -> subprocess.CompletedProcess[str] | None:
+def compose_up(data_dir: Path | None = None) -> subprocess.CompletedProcess[str] | None:
     """
-    Bring up Postgres and the idle app container.
+    Bring up Postgres and the idle app container, mounted on `data_dir`.
 
     The folders are made first: this is the call that would otherwise have
     Docker create them as root. See `prepare_host_folders`.
+
+    The mount matters for anything using `compose exec` — the model runner
+    does — because the container holds whichever project was mounted last.
     """
-    prepare_host_folders()
-    return _run(["docker", "compose", "up", "-d"], cwd=PIPELINE_DIR, timeout=600)
+    prepare_host_folders(data_dir)
+    env = run_full_env(extra={"DATA_DIR": str(data_dir)} if data_dir else None)
+    return _run(["docker", "compose", "up", "-d"], cwd=PIPELINE_DIR, timeout=600, env=env)
 
 
 def read_env_file() -> dict[str, str]:
@@ -394,6 +399,35 @@ def manifest_path(execution_id: str) -> Path:
 # not fail loudly — it would quietly skip the master rebuild, or truncate
 # when it should not have. So the script stays in charge and this module
 # watches it work.
+
+#: The model's own stages. `MCDA/run_mcda.sh` is the same shape as
+#: `run_full.sh` — a shell script that execs four Python scripts in the
+#: container — so it is driven the same way, by watching what it prints.
+#:
+#: The three preprocesses compute what the exclusions need: distances to the
+#: nearest feature, which cells a variable covers at all, and the masks that
+#: rule a cell out. Then the model scores. `SKIP_PREP=1` skips the first
+#: three when their inputs have not changed.
+MODEL_SCRIPT = "MCDA/run_mcda.sh"
+
+MODEL_STAGES: tuple[Stage, ...] = (
+    Stage(1, "distances", "Measure distances to the nearest feature",
+          "/app/MCDA/engine/distance_to_nearest.py", weight=60),
+    Stage(2, "presence", "Work out where each variable has data",
+          "/app/MCDA/engine/presence_mask.py", weight=30),
+    Stage(3, "exclusions", "Build the exclusion masks",
+          "/app/MCDA/engine/generate_exclusion_masks.py", weight=30),
+    Stage(4, "score", "Score every hexagon",
+          "/app/MCDA/engine/mcda_score.py", weight=120),
+)
+
+#: `run_mcda.sh` announces each one as `==> python /app/MCDA/engine/<name>.py`,
+#: so unlike the pipeline there is no prose to match — the script path is the
+#: marker, and it cannot drift the way a log sentence can.
+MODEL_MARKERS: tuple[tuple[str, str, str], ...] = tuple(
+    (stage.script, stage.key, "running") for stage in MODEL_STAGES
+)
+
 
 RUN_SCRIPT = "run_full.sh"
 
@@ -559,6 +593,12 @@ def run_full_env(*, skip_build: bool = True, extra: dict[str, str] | None = None
     # Unbuffered, or the script's children trickle out in 4 KB blocks and the
     # progress label lags minutes behind the work.
     env["PYTHONUNBUFFERED"] = "1"
+    # compose interpolates `DATABASE_URL` into the container at `up` time, and
+    # it is not in `.env` — `run_full.sh` builds it from the Postgres settings
+    # for itself. Anything that does not, like the model runner, gets a
+    # container with an empty one and fails on "Could not parse SQLAlchemy URL
+    # from string ''". Set here so every path has it.
+    env.setdefault("DATABASE_URL", database_url())
     env.update(extra or {})
     return env
 
@@ -583,6 +623,77 @@ for p in /proc/[0-9]*; do
 done
 echo "killed=$killed"
 """
+
+
+def shell_as_root(data_dir: Path, script: str, timeout: int = 120) -> str:
+    """
+    Run a shell snippet against a project's data folder, as root.
+
+    The pipeline writes everything under `out/` as root — the daemon runs as
+    root — so the server cannot move or delete any of it. `compose run`
+    rather than `exec`, with DATA_DIR set, because the long-lived container
+    is mounted on whichever project ran last.
+
+    Returns "" on success, or what went wrong.
+    """
+    result = _run(
+        ["docker", "compose", "run", "--rm", "--no-deps", "--entrypoint", "sh",
+         APP_SERVICE, "-c", script],
+        cwd=PIPELINE_DIR,
+        timeout=timeout,
+        env=run_full_env(extra={"DATA_DIR": str(data_dir)}),
+    )
+    if result is None:
+        return "could not reach Docker"
+    if result.returncode != 0:
+        return (result.stderr or result.stdout or "").strip()[-300:] or "the container refused"
+    return ""
+
+
+#: Where the pipeline writes one master export per run.
+MASTER_GLOB = "tabla_maestra_programa_*.h3.parquet"
+
+
+def extra_master_exports(data_dir: Path) -> list[Path]:
+    """
+    Master exports beyond the newest one.
+
+    Every pipeline run writes `out/maestro/<run_id>/tabla_maestra_programa_*`,
+    and the MCDA's preprocesses refuse to choose: "Se esperaba exactamente 1
+    master ... hay 3". The engine's own two halves disagree here, so the model
+    run keeps the newest — the one describing the data as it stands — and
+    puts the rest where the pipeline puts superseded things.
+    """
+    maestro = data_dir / "out" / "maestro"
+    if not maestro.is_dir():
+        return []
+    runs = [
+        folder for folder in maestro.iterdir()
+        if folder.is_dir() and any(folder.glob(MASTER_GLOB))
+    ]
+    if len(runs) <= 1:
+        return []
+    runs.sort(key=lambda folder: folder.stat().st_mtime)
+    return runs[:-1]
+
+
+def archive_extra_masters(data_dir: Path) -> tuple[int, str]:
+    """
+    Move all but the newest master export aside. Returns (moved, problem).
+
+    Moved rather than deleted: they are results, and `bck/` is where the
+    pipeline's own `prune_stale_outputs` puts results it supersedes.
+    """
+    extras = extra_master_exports(data_dir)
+    if not extras:
+        return 0, ""
+    names = " ".join(f"'{folder.name}'" for folder in extras)
+    script = (
+        'set -e; dest="/data/out/bck/maestro_$(date +%Y-%m-%d_%H-%M)"; mkdir -p "$dest"; '
+        f'for name in {names}; do mv "/data/out/maestro/$name" "$dest/"; done'
+    )
+    problem = shell_as_root(data_dir, script)
+    return (0 if problem else len(extras)), problem
 
 
 def remove_as_root(data_dir: Path, relative: str) -> str:
@@ -622,6 +733,115 @@ def remove_as_root(data_dir: Path, relative: str) -> str:
 def can_remove_as_root() -> bool:
     """Whether the container route is available at all."""
     return status().composeAvailable
+
+
+# ── the two things that can be run ────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Job:
+    """
+    One runnable script and how to follow it.
+
+    The pipeline and the model are the same shape — a shell script that
+    execs Python in the container and prints as it goes — so `runs.Run`
+    drives either, and this is the difference between them.
+    """
+
+    key: str
+    #: Shown while it starts, before any stage has reported.
+    label: str
+    script: str
+    stages: tuple[Stage, ...]
+    markers: tuple[tuple[str, str, str], ...]
+
+    def command(self) -> list[str]:
+        return ["bash", self.script]
+
+    def match(self, line: str) -> tuple[str, str] | None:
+        lowered = line.lower()
+        for marker, key, status in self.markers:
+            if marker.lower() in lowered:
+                return key, status
+        return None
+
+
+PIPELINE_JOB = Job(
+    key="pipeline",
+    label="Starting the pipeline",
+    script=RUN_SCRIPT,
+    stages=STAGES,
+    markers=STAGE_LOG_MARKERS,
+)
+
+MODEL_JOB = Job(
+    key="model",
+    label="Starting the model",
+    script=MODEL_SCRIPT,
+    stages=MODEL_STAGES,
+    markers=MODEL_MARKERS,
+)
+
+
+def new_execution_id(prefix: str = "mcda") -> str:
+    """
+    An id in the engine's own format: `2026-10-19_21-30_mcda_004`.
+
+    Generated here rather than left to the script because `--out` has to name
+    the folder, and the script only announces its id after it has started.
+    `run_mcda.sh` takes `EXECUTION_ID` from the environment when it is set,
+    so the two agree.
+    """
+    log_dir = manifest_path("x").parent.parent
+    existing = 0
+    if log_dir.is_dir():
+        existing = sum(1 for f in log_dir.iterdir() if f.is_dir())
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    return f"{stamp}_{prefix}_{existing + 1:03d}"
+
+
+def model_env(
+    data_dir: Path | None,
+    *,
+    skip_preprocesses: bool = False,
+    extra: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """
+    The environment for a model run.
+
+    No `SKIP_BUILD` here — `run_mcda.sh` does not build anything, it execs
+    into the container that is already up. Which means the container has to
+    be mounted on this project first: it uses `compose exec`, not `run`, so
+    whatever `DATA_DIR` was mounted last is what it would read.
+    """
+    env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
+    env.setdefault("DATABASE_URL", database_url())
+    if data_dir:
+        env["DATA_DIR"] = str(data_dir)
+    if skip_preprocesses:
+        env["SKIP_PREP"] = "1"
+    env.update(extra or {})
+    return env
+
+
+def model_arguments(
+    *, config: str | None, site: str, out: str, render: bool = True
+) -> list[str]:
+    """
+    What to pass the model.
+
+    `--out` matters more than it looks: left off, results go to
+    `MCDA/runs/` inside the engine's own checkout, shared by every project —
+    the same mistake the database made. Pointed at the project's folder they
+    stay with the project, and `outputs.scan_model_runs` already looks there.
+    """
+    arguments = ["--site", site, "--out", out]
+    if config:
+        arguments += ["--config", config]
+    if not render:
+        arguments.append("--no-render")
+    return arguments
 
 
 def kill_in_container() -> str:

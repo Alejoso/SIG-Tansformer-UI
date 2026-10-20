@@ -12,13 +12,11 @@
 import { API_BASE, request } from './client';
 import * as mock from './mock';
 import type {
-  ApplyProgress,
   ImportPlan,
   InputVariable,
   Removal,
   LayerTree,
   Mesh,
-  ModelConfig,
   ModelExample,
   ModelFile,
   NewProjectPayload,
@@ -296,31 +294,74 @@ export const saveModel = (projectId: string, text: string): Promise<ModelFile> =
 /**
  * ENDPOINT: POST /api/projects/{id}/model/apply
  *
- * LIVE for the write; the run is not built yet.
- *
- * Today this saves the file. Re-running the weighting from it is the next
- * step — `watchModelApply` still simulates that part.
+ * Writes the file. Running the model from it is `startModelRun`, which the
+ * Model screen calls straight after this.
  */
 export const applyModel = (projectId: string, text: string): Promise<ModelFile> =>
   request(`/projects/${projectId}/model/apply`, { method: 'POST', body: JSON.stringify({ text }) });
 
-/**
- * ENDPOINT: GET /api/projects/{id}/model/apply/stream (SSE)
- *
- * Per-variable progress while the model is applied, so the UI can name what is
- * being processed instead of showing an opaque spinner. Returns an
- * unsubscribe function.
- *
- * The `model` argument is only there for the mock, which has no server to ask
- * which variables are in flight; the real call takes the project alone.
- */
-export const watchModelApply = (
-  projectId: string,
-  model: ModelConfig,
-  onProgress: (p: ApplyProgress) => void,
-): (() => void) => mock.watchModelApply(projectId, model, onProgress);
+/* ── running the model ─────────────────────────────────────────────────── */
 
-/** ENDPOINT: GET /api/model/examples — the starter structures in the dialog. */
+/* LIVE: drives MCDA/run_mcda.sh, watched exactly like processing. */
+
+/**
+ * ENDPOINT: POST /api/projects/{id}/model/run
+ *
+ * Scores the model over the project's hexagons. Returns the run's starting
+ * state; the work takes minutes, so the UI polls.
+ */
+export const startModelRun = (
+  projectId: string,
+  options: { site?: string; useProjectModel?: boolean; skipPreprocesses?: boolean } = {},
+): Promise<PipelineRun> =>
+  request(`/projects/${projectId}/model/run`, {
+    method: 'POST',
+    body: JSON.stringify({ site: 'both', ...options }),
+  });
+
+/** ENDPOINT: GET /api/projects/{id}/model/run — null when never run. */
+export const getModelRun = (projectId: string): Promise<PipelineRun | null> =>
+  request(`/projects/${projectId}/model/run`);
+
+/** ENDPOINT: POST /api/projects/{id}/model/run/abort — stops it for real. */
+export const abortModelRun = (projectId: string): Promise<{ detail: string }> =>
+  request(`/projects/${projectId}/model/run/abort`, { method: 'POST' });
+
+/**
+ * Follow a model run to its end. Same polling as processing, and the same
+ * shape — applying the model is a run like any other.
+ */
+export const watchModelRun = (
+  projectId: string,
+  onRun: (run: PipelineRun) => void,
+  onError?: (error: Error) => void,
+): (() => void) => {
+  let stopped = false;
+  let timer: number | undefined;
+
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const run = await getModelRun(projectId);
+      if (stopped) return;
+      if (!run) return;
+      onRun(run);
+      if (run.status !== 'starting' && run.status !== 'running') return;
+    } catch (error) {
+      if (stopped) return;
+      onError?.(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    timer = window.setTimeout(tick, POLL_MS);
+  };
+
+  void tick();
+  return () => {
+    stopped = true;
+    if (timer !== undefined) window.clearTimeout(timer);
+  };
+};
+
 export const listExamples = (): Promise<ModelExample[]> => mock.listExamples();
 
 /* ── settings ──────────────────────────────────────────────────────────── */
