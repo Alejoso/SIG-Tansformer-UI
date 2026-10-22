@@ -17,6 +17,10 @@ pnpm-debug.log*
 # Vite's dev-server cache
 .vite/
 
+# What a failing browser check looked like. Regenerated on every failure,
+# and only useful on the machine that produced it.
+frontend/tests/failures/
+
 # ── Python backend ────────────────────────────────────────────────────────
 # Nothing here yet — the FastAPI + uvicorn server comes later. See README.md.
 __pycache__/

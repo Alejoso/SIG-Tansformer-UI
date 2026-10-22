@@ -73,6 +73,42 @@ MAPHEX_PORT=9000 npm run dev       # in frontend/
 `npm run build` emits `frontend/dist`, which the backend serves at `/` when it
 is present.
 
+## Checking it still works
+
+```bash
+cd frontend && npm test            # all of them
+npm test -- map                    # only the suites whose name matches
+```
+
+Both processes have to be up, because nothing in these is stubbed: they drive
+a real browser against the real backend against the engine's real output. That
+is the point. Almost everything that has gone wrong in this app was not logic
+but the seam between the three — a document the engine writes differently than
+expected, a control covered by an overlay, a run whose files are owned by root
+— and only the running thing shows that.
+
+A fresh checkout needs the browser once:
+
+```bash
+npx playwright install chromium
+```
+
+The suites are in `frontend/tests/`, one file per area, with `harness.mjs`
+shared between them. Each prints a line per check and keeps going after a
+failure: when something breaks it is far more useful to see all twelve things
+that changed than the first one. A failing suite leaves a screenshot in
+`frontend/tests/failures/` — half of what goes wrong here is layout, and
+nothing shows that as fast as looking.
+
+They need a project with processed variables, and they find one themselves
+rather than naming an id, since those are per machine. With nothing processed
+anywhere they say so and skip. Anything a suite writes — it breaks the model
+file on purpose, to check the message — it puts back in a `finally`, and says
+whether it managed to.
+
+They run one at a time: each drives a whole browser against one backend, and
+two of them would be writing the same project's model file.
+
 ## What is real and what is still mocked
 
 | Area | State |
