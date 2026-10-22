@@ -12,6 +12,7 @@
 import { API_BASE, request } from './client';
 import * as mock from './mock';
 import type {
+  ImportOutcome,
   ImportPlan,
   InputVariable,
   Removal,
@@ -112,6 +113,22 @@ export const planImport = (
  * Copies the folder's dataset into the project as one variable. The server
  * does the copying; the browser never touches the files.
  */
+/**
+ * LIVE: POST /api/projects/{id}/inputs/batch
+ *
+ * Copy several variables out of one folder. Always 201, even when some
+ * failed — the request was carried out, and what it did is in the body.
+ */
+export const addInputs = (
+  projectId: string,
+  dimension: string,
+  variables: { source: string; code: string; filename?: string }[],
+): Promise<ImportOutcome> =>
+  request(`/projects/${projectId}/inputs/batch`, {
+    method: 'POST',
+    body: JSON.stringify({ dimension, variables }),
+  });
+
 export const addInput = (
   projectId: string,
   path: string,

@@ -123,6 +123,34 @@ two of them would be writing the same project's model file.
 Those last two are all that is left of the mocks. A mesh upload has no server
 route, and the examples are UI copy with nowhere else to live yet.
 
+## A folder of variables, not just a folder that is one
+
+The engine's input tree is `in/<dimension>/<CODE>/<one dataset>`, so adding a
+variable means pointing at a folder with one dataset in it. Pointing at the
+folder *above* — the one holding all of them — now works too, and `plan` works
+out which it is:
+
+* one dataset at the top level → one variable, exactly as before;
+* subfolders with one dataset each → a variable per subfolder;
+* several datasets side by side → a variable per dataset. This one used to
+  be refused outright, with a message saying to add them one folder at a time.
+
+Codes are suggested across the whole batch at once, so each misses both what
+is already on disk and what the rows above it were given — a rule one
+function (`_next_code`) applies for a single variable and a batch alike, so
+they cannot drift apart.
+
+A subfolder with nothing readable is left out silently: a folder of variables
+usually has a `docs` or a `.git` beside them, and those are not failures. A
+subfolder with *several* datasets is listed with its reason, because it was
+clearly meant to be a variable, and dropping it quietly is how one goes
+missing.
+
+The import is one request, and it does not stop at the first failure. The
+others are fine, and re-picking the folder to retry the rest would be worse
+than being told which one to look at — so it always answers 201 with what it
+did, per variable.
+
 ## Model runs pile up, and only the newest is reachable
 
 Every Apply writes a whole set of rendered maps — the model, each criterion,
@@ -533,6 +561,7 @@ No component changes.
 | `applyModel` | `POST /api/projects/{id}/model/apply` | **live for the write**; running the model is next |
 | `watchModelApply` | `GET /api/projects/{id}/model/apply/stream` | **SSE**, one `ApplyProgress` per variable — drives the loading dialog |
 | `listExamples` | `GET /api/model/examples` | mocked; the examples are UI copy |
+| `addInputs` | `POST /api/projects/{id}/inputs/batch` | a folder of variables; reports per variable |
 | `listModelRuns` | `GET /api/projects/{id}/model/runs` | newest first; only the first is ever drawn |
 | `pruneModelRuns` | `POST /api/projects/{id}/model/runs/prune` | keep the newest N, in one container |
 | `removeModelRun` | `DELETE /api/projects/{id}/model/runs/{runId}` | |

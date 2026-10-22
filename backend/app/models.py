@@ -287,6 +287,20 @@ class InputVariable(BaseModel):
     processedOnly: bool = False
 
 
+class ImportCandidate(BaseModel):
+    """One variable a folder of variables would add."""
+
+    source: str
+    label: str
+    filename: str = ""
+    format: str = ""
+    sizeBytes: int = 0
+    files: list[str] = Field(default_factory=list)
+    code: str = ""
+    #: Why this one cannot be added. The others still can.
+    problem: str = ""
+
+
 class ImportPlan(BaseModel):
     """What adding a folder would copy, and where, before anything is written."""
 
@@ -298,6 +312,9 @@ class ImportPlan(BaseModel):
     dimension: str = ""
     code: str = ""
     problem: str = ""
+    #: Set when the folder holds several variables rather than one. The
+    #: single fields above stay empty then, and these are what to show.
+    variables: list[ImportCandidate] = Field(default_factory=list)
 
 
 class ModelRunPayload(BaseModel):
@@ -345,3 +362,33 @@ class ImportPayload(BaseModel):
     path: str
     dimension: str
     code: str
+
+
+class ImportItem(BaseModel):
+    """One row of a batch: where to copy from, and what to file it under."""
+
+    source: str
+    code: str
+    #: Which dataset, when the folder holds more than one. Empty otherwise.
+    filename: str = ""
+
+
+class ImportManyPayload(BaseModel):
+    dimension: str
+    variables: list[ImportItem] = Field(default_factory=list)
+
+
+class ImportFailure(BaseModel):
+    source: str
+    code: str
+    problem: str
+
+
+class ImportOutcome(BaseModel):
+    """What adding a folder of variables actually did."""
+
+    added: list[InputVariable] = Field(default_factory=list)
+    #: A batch does not stop at the first failure: the others are fine, and
+    #: re-picking the folder to retry the rest would be worse than being told
+    #: which one to look at.
+    failed: list[ImportFailure] = Field(default_factory=list)

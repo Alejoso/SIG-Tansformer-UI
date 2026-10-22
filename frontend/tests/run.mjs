@@ -25,8 +25,11 @@ import * as layerOpacity from './layer-opacity.mjs';
 import * as mapScreen from './map-screen.mjs';
 import * as settings from './settings.mjs';
 import * as modelRuns from './model-runs.mjs';
+import * as batchImport from './batch-import.mjs';
 
-const SUITES = [modelScreen, examplesScreen, layerOpacity, mapScreen, settings, modelRuns];
+const SUITES = [
+  modelScreen, examplesScreen, layerOpacity, mapScreen, settings, modelRuns, batchImport,
+];
 
 const only = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));
 const wanted = SUITES.filter(

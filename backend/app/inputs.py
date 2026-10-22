@@ -106,6 +106,34 @@ class ImportPlan:
     dimension: str = ""
     code: str = ""
     problem: str = ""
+    #: Set when the folder holds several variables rather than one — either
+    #: subfolders with a dataset each, or several datasets side by side. The
+    #: single fields above stay empty then, and these are what to show.
+    #:
+    #: Two shapes in one type, deliberately: the single case is the one that
+    #: works and is used constantly, and threading it through a list of one
+    #: to save a branch would be a rewrite of the screen that adds nothing.
+    variables: list[ImportCandidate] = field(default_factory=list)
+
+
+@dataclass
+class ImportCandidate:
+    """One variable a folder of variables would add."""
+
+    #: The folder to import from. For several datasets sitting in one folder
+    #: this is that folder for all of them, and `filename` is what separates
+    #: them.
+    source: str
+    #: What to call it in the list: the folder it came from, or the file.
+    label: str
+    filename: str
+    format: str
+    sizeBytes: int
+    files: list[str] = field(default_factory=list)
+    #: Suggested, and editable before anything is copied.
+    code: str = ""
+    #: Why this one cannot be added. The others still can.
+    problem: str = ""
 
 
 def data_in(project: store.ProjectRow) -> Path | None:
@@ -393,22 +421,22 @@ def suggest_dimension(project: store.ProjectRow, source: Path) -> str:
     return guess if len(guess) > 3 else ""
 
 
-def suggest_code(project: store.ProjectRow, dimension: str, filename: str = "") -> str:
-    """
-    The code to offer for a new variable.
-
-    Three sources, in order of how much they know: the file's own name, the
-    codes already in the dimension, and failing both, the dimension's
-    letters. The prefix cannot be derived from the dimension name in general
-    — `socioeconomico` would give `SOC`, not `SOE` — so the existing codes
-    are what settle it.
-    """
-    existing = [
+def _taken_codes(project: store.ProjectRow, dimension: str) -> list[str]:
+    """Codes already used in a dimension, in the order they were found."""
+    return [
         variable.code for variable in scan(project)
         if variable.dimension == dimension and CODE_PATTERN.match(variable.code)
     ]
-    taken = set(existing)
 
+
+def _next_code(existing: list[str], taken: set[str], dimension: str, filename: str) -> str:
+    """
+    Which code to give a variable, against a set the caller keeps.
+
+    The caller keeps it because a batch allocates several at once: each one
+    has to miss the codes already on disk *and* the ones handed to the rows
+    above it, which a function that re-reads the tree every call cannot do.
+    """
     from_file = _code_from_filename(filename) if filename else ""
     if from_file and from_file not in taken:
         return from_file
@@ -429,7 +457,110 @@ def suggest_code(project: store.ProjectRow, dimension: str, filename: str = "") 
     return f"{prefix}_{number:03d}"
 
 
+def suggest_code(project: store.ProjectRow, dimension: str, filename: str = "") -> str:
+    """
+    The code to offer for a new variable.
+
+    Three sources, in order of how much they know: the file's own name, the
+    codes already in the dimension, and failing both, the dimension's
+    letters. The prefix cannot be derived from the dimension name in general
+    — `socioeconomico` would give `SOC`, not `SOE` — so the existing codes
+    are what settle it.
+
+    One variable's worth. A batch allocates several against one set it keeps
+    itself; both go through `_next_code`, so they cannot drift apart.
+    """
+    existing = _taken_codes(project, dimension)
+    return _next_code(existing, set(existing), dimension, filename)
+
+
 # ── adding to it ──────────────────────────────────────────────────────────
+
+
+def _batch_candidates(source: Path) -> list[ImportCandidate]:
+    """
+    The variables a folder holds, when it holds several rather than being one.
+
+    Two arrangements turn up, and both are what someone means by "a folder of
+    variables":
+
+    * subfolders with one dataset each — `socioeconomico/SOE_001/x.gpkg`;
+    * several datasets side by side — `socioeconomico/SOE-001.gpkg,
+      SOE-002.gpkg`. That one used to be refused outright, with a message
+      saying to add them one folder at a time.
+
+    A folder holding exactly one dataset is one variable, not a batch, which
+    is why this is only consulted when that is not the case.
+
+    A subfolder with nothing readable is left out entirely rather than listed
+    as a problem: a folder of variables usually has a `docs` or a `.git` in
+    it, and those are not failures to report. A subfolder with *several*
+    datasets is listed, because it was clearly meant to be a variable and the
+    reason it cannot be one is worth seeing.
+    """
+    datasets = _datasets_in(source)
+    if len(datasets) > 1:
+        found = []
+        for dataset in datasets:
+            companions = _companions(dataset)
+            found.append(
+                ImportCandidate(
+                    source=str(source),
+                    label=dataset.name,
+                    filename=dataset.name,
+                    format=_format_of(dataset),
+                    sizeBytes=_measure([dataset, *companions]),
+                    files=[dataset.name] + [c.name for c in companions],
+                )
+            )
+        return found
+
+    if datasets:
+        return []
+
+    try:
+        # A `.gdb` is a directory but it is also a dataset, and if we are
+        # here `_datasets_in` has already said there is not one.
+        subfolders = [
+            entry for entry in sorted(source.iterdir())
+            if entry.is_dir() and entry.suffix.lower() != ".gdb" and not entry.name.startswith(".")
+        ]
+    except OSError:
+        return []
+
+    found = []
+    for folder in subfolders:
+        inner = _datasets_in(folder)
+        if not inner:
+            continue
+        if len(inner) > 1:
+            found.append(
+                ImportCandidate(
+                    source=str(folder),
+                    label=folder.name,
+                    filename="",
+                    format="",
+                    sizeBytes=0,
+                    problem=(
+                        f"{len(inner)} datasets in here — the pipeline takes one per "
+                        "variable. Add this folder on its own to choose."
+                    ),
+                )
+            )
+            continue
+        dataset = inner[0]
+        companions = _companions(dataset)
+        found.append(
+            ImportCandidate(
+                source=str(folder),
+                label=folder.name,
+                filename=dataset.name,
+                format=_format_of(dataset),
+                sizeBytes=_measure([dataset, *companions]),
+                files=[dataset.name] + [c.name for c in companions],
+            )
+        )
+    return found
 
 
 def plan(project: store.ProjectRow, raw_source: str, dimension: str = "") -> ImportPlan:
@@ -457,31 +588,41 @@ def plan(project: store.ProjectRow, raw_source: str, dimension: str = "") -> Imp
         return result
 
     datasets = _datasets_in(source)
-    if not datasets:
-        readable = ", ".join(sorted(s.lstrip(".") for s in DATASET_SUFFIXES))
-        result.problem = f"Nothing here the pipeline can read. It takes: {readable}"
-        return result
-    if len(datasets) > 1:
-        names = ", ".join(d.name for d in datasets[:4])
-        result.problem = (
-            f"{len(datasets)} datasets here ({names}…). The pipeline takes one per "
-            "variable and names the variable after it — add them one folder at a time"
-        )
-        return result
-
-    dataset = datasets[0]
-    companions = _companions(dataset)
 
     # With no dimension chosen yet, the folder's own name is the best guess —
     # these arrive as `10-Socioeconomico/SOE-001.gpkg`, which says both.
     chosen = normalise_dimension(dimension) if dimension else suggest_dimension(project, source)
-
-    result.filename = dataset.name
-    result.format = _format_of(dataset)
-    result.files = [dataset.name] + [c.name for c in companions]
-    result.sizeBytes = _measure([dataset, *companions])
     result.dimension = chosen
-    result.code = suggest_code(project, chosen, dataset.name)
+
+    if len(datasets) == 1:
+        dataset = datasets[0]
+        companions = _companions(dataset)
+        result.filename = dataset.name
+        result.format = _format_of(dataset)
+        result.files = [dataset.name] + [c.name for c in companions]
+        result.sizeBytes = _measure([dataset, *companions])
+        result.code = suggest_code(project, chosen, dataset.name)
+        return result
+
+    # Not one variable. Either several datasets side by side, or subfolders
+    # with one each — both are what someone means by a folder of variables.
+    candidates = _batch_candidates(source)
+    if not candidates:
+        readable = ", ".join(sorted(s.lstrip(".") for s in DATASET_SUFFIXES))
+        result.problem = f"Nothing here the pipeline can read. It takes: {readable}"
+        return result
+
+    # Codes are allocated across the whole batch at once: each has to miss
+    # what is on disk *and* what the rows above it were given.
+    existing = _taken_codes(project, chosen)
+    taken = set(existing)
+    for candidate in candidates:
+        if candidate.problem:
+            continue
+        candidate.code = _next_code(existing, taken, chosen, candidate.filename)
+        taken.add(candidate.code)
+
+    result.variables = candidates
     return result
 
 
@@ -578,7 +719,11 @@ def _destination(project: store.ProjectRow, dimension: str, code: str) -> Path:
 
 
 def import_folder(
-    project: store.ProjectRow, raw_source: str, dimension: str, code: str
+    project: store.ProjectRow,
+    raw_source: str,
+    dimension: str,
+    code: str,
+    dataset_name: str = "",
 ) -> InputVariable:
     """
     Copy a folder's dataset into the input tree as one variable.
@@ -586,10 +731,21 @@ def import_folder(
     Copies into a temporary folder beside the destination and renames it into
     place, so an interrupted copy cannot leave the pipeline a half-written
     variable to find on its next run.
+
+    `dataset_name` picks one of several datasets sitting in the same folder,
+    which is how a batch imports `SOE-001.gpkg` and `SOE-002.gpkg` out of one
+    directory as two variables. Left empty, the folder must hold exactly one,
+    which is the single-variable case and what `plan` checks.
     """
-    prepared = plan(project, raw_source, dimension)
-    if prepared.problem:
-        raise ValueError(prepared.problem)
+    if not dataset_name:
+        prepared = plan(project, raw_source, dimension)
+        if prepared.problem:
+            raise ValueError(prepared.problem)
+        if prepared.variables:
+            raise ValueError(
+                "This folder holds several variables. Add them together, or point at one "
+                "of them."
+            )
 
     target = _destination(project, dimension, code)
     identifier = f"{target.parent.name}/{target.name}"
@@ -606,7 +762,15 @@ def import_folder(
         raise ValueError(_explain_permission(writable))
 
     source = fsutil.expand(raw_source)
-    dataset = _datasets_in(source)[0]
+    datasets = _datasets_in(source)
+    if dataset_name:
+        dataset = next((d for d in datasets if d.name == dataset_name), None)
+        if dataset is None:
+            raise ValueError(f"{dataset_name} is not in {source} any more")
+    else:
+        if not datasets:
+            raise ValueError(f"Nothing the pipeline can read is in {source} any more")
+        dataset = datasets[0]
     wanted = [dataset, *_companions(dataset)]
 
     staging = target.with_name(f".{target.name}.incoming")
@@ -642,6 +806,53 @@ def import_folder(
     store.replace_folders(project.id, rows)
 
     return next(v for v in scan(project) if v.id == identifier)
+
+
+@dataclass
+class ImportOutcome:
+    """What adding a folder of variables actually did."""
+
+    added: list[InputVariable] = field(default_factory=list)
+    #: One entry per variable that did not make it, with the server's own
+    #: reason. A batch does not stop at the first failure: the others are
+    #: fine, and re-picking the folder to retry the rest would be worse than
+    #: being told which one to look at.
+    failed: list[dict[str, str]] = field(default_factory=list)
+
+
+def import_many(
+    project: store.ProjectRow,
+    dimension: str,
+    wanted: list[dict[str, str]],
+) -> ImportOutcome:
+    """
+    Add several variables from one folder, in the order they were listed.
+
+    Each entry is `{source, code, filename}` — the folder to copy from, the
+    code to file it under, and which dataset when the folder holds more than
+    one.
+
+    Sequential rather than parallel: these are large copies onto one disk, so
+    doing them at once would not be faster, and a failure halfway through a
+    parallel batch is much harder to describe afterwards.
+    """
+    outcome = ImportOutcome()
+    for item in wanted:
+        code = (item.get("code") or "").strip()
+        source = (item.get("source") or "").strip()
+        try:
+            outcome.added.append(
+                import_folder(project, source, dimension, code, item.get("filename", ""))
+            )
+        except ValueError as error:
+            outcome.failed.append(
+                {"source": source, "code": code, "problem": str(error)}
+            )
+        except OSError as error:  # noqa: PERF203 — one bad copy must not stop the rest
+            outcome.failed.append(
+                {"source": source, "code": code, "problem": str(error)}
+            )
+    return outcome
 
 
 @dataclass

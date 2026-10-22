@@ -111,6 +111,28 @@ export interface Removal {
 }
 
 /** What adding a folder would copy, and where, worked out before it happens. */
+/** One variable a folder of variables would add. */
+export interface ImportCandidate {
+  /** The folder to copy from. Several datasets in one folder share it. */
+  source: string;
+  /** What to call it in the list: the folder it came from, or the file. */
+  label: string;
+  filename: string;
+  format: string;
+  sizeBytes: number;
+  files: string[];
+  /** Suggested, and editable before anything is copied. */
+  code: string;
+  /** Why this one cannot be added. The others still can. */
+  problem: string;
+}
+
+/** What adding a folder of variables did. */
+export interface ImportOutcome {
+  added: InputVariable[];
+  failed: { source: string; code: string; problem: string }[];
+}
+
 export interface ImportPlan {
   source: string;
   filename: string;
@@ -121,6 +143,12 @@ export interface ImportPlan {
   dimension: string;
   code: string;
   problem: string;
+  /**
+   * Set when the folder holds several variables rather than one — subfolders
+   * with a dataset each, or several datasets side by side. The single fields
+   * above stay empty then, and these are what to show.
+   */
+  variables: ImportCandidate[];
 }
 
 export type ProcessingPhase = 'empty' | 'processing' | 'done';

@@ -33,6 +33,9 @@ from . import (
 )
 from .models import (
     AbortResult,
+    ImportCandidate,
+    ImportManyPayload,
+    ImportOutcome,
     ImportPayload,
     ImportPlan,
     InputVariable,
@@ -494,7 +497,13 @@ def plan_import(project_id: str, payload: PlanImportPayload) -> ImportPlan:
     would land. Problems come back here rather than as a failed import.
     """
     project = _require_project(project_id)
-    return ImportPlan(**vars(inputs.plan(project, payload.path, payload.dimension)))
+    found = inputs.plan(project, payload.path, payload.dimension)
+    # `vars` is shallow, so the nested candidates would arrive as dataclasses
+    # and Pydantic would refuse them.
+    return ImportPlan(
+        **{key: value for key, value in vars(found).items() if key != "variables"},
+        variables=[ImportCandidate(**vars(item)) for item in found.variables],
+    )
 
 
 @app.post("/api/projects/{project_id}/inputs", status_code=201)
@@ -512,6 +521,32 @@ def add_input(project_id: str, payload: ImportPayload) -> InputVariable:
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return InputVariable(**vars(variable))
+
+
+@app.post("/api/projects/{project_id}/inputs/batch", status_code=201)
+def add_inputs(project_id: str, payload: ImportManyPayload) -> ImportOutcome:
+    """
+    Copy several variables out of one folder, in the order they were listed.
+
+    A folder of variables rather than a folder that is one: subfolders with
+    a dataset each, or several datasets side by side. `plan` works out which
+    of those it is and what to call each one; this does the copying.
+
+    Always 201, even when some failed. The request was carried out — what it
+    did is in the body — and the alternative, a status that says the whole
+    thing failed because one of eleven folders had two shapefiles in it,
+    would be worse than useless.
+    """
+    project = _require_project(project_id)
+    outcome = inputs.import_many(
+        project,
+        payload.dimension,
+        [vars(item) for item in payload.variables],
+    )
+    return ImportOutcome(
+        added=[InputVariable(**vars(variable)) for variable in outcome.added],
+        failed=outcome.failed,
+    )
 
 
 @app.delete("/api/projects/{project_id}/inputs/{dimension}/{code}")

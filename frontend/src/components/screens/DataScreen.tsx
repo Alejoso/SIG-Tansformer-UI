@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
-import type { ImportPlan, InputVariable, PipelineRun, PipelineStage } from '../../types';
+import type {
+  ImportCandidate,
+  ImportPlan,
+  InputVariable,
+  PipelineRun,
+  PipelineStage,
+} from '../../types';
 import { Dialog } from '../ui/Dialog';
 import { formatSize } from '../../lib/format';
 import { Icon } from '../ui/Icon';
@@ -136,6 +142,17 @@ export function DataScreen() {
   const [code, setCode] = useState('');
   const [addError, setAddError] = useState('');
   /**
+   * Codes for a folder that holds several variables, keyed by where each
+   * comes from.
+   *
+   * Kept apart from `code` rather than replacing it: the single case is the
+   * one used constantly and has its own control, and folding both through
+   * one list to save a branch would rewrite the part that works.
+   */
+  const [batchCodes, setBatchCodes] = useState<Record<string, string>>({});
+  /** Rows the user has unticked. Everything else in the batch is coming. */
+  const [batchSkipped, setBatchSkipped] = useState<Record<string, boolean>>({});
+  /**
    * Whether the dimension on screen is the user's choice rather than ours.
    *
    * Without this the server's suggestion wins forever: choosing "New
@@ -164,6 +181,9 @@ export function DataScreen() {
    * the dimension has to re-ask.
    */
   const chosenDimension = dimension === NEW_DIMENSION ? newDimension.trim() : dimension;
+
+  /** A row's identity: several datasets can share one source folder. */
+  const rowKey = (candidate: ImportCandidate) => `${candidate.source}::${candidate.filename}`;
 
   const unwatch = useRef<(() => void) | null>(null);
 
@@ -272,8 +292,31 @@ export function DataScreen() {
   const unreadable = variables.filter((v) => v.problem && !v.processedOnly);
   /** Results with no input: the engine still loads them, so they are worth seeing. */
   const orphaned = variables.filter((v) => v.processedOnly);
+  /** The rows of a folder that holds several variables, if it does. */
+  const batch = plan?.variables ?? [];
+  /** The ones that are actually coming: readable, and not unticked. */
+  const batchWanted = batch.filter(
+    (candidate) => !candidate.problem && !batchSkipped[rowKey(candidate)],
+  );
+  const batchDuplicates = (() => {
+    const seen = new Map<string, number>();
+    for (const candidate of batchWanted) {
+      const key = canonicalCode(batchCodes[rowKey(candidate)] ?? candidate.code);
+      seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
+    return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
+  })();
+
   const canAdd =
-    !locked && plan !== null && !plan.problem && Boolean(chosenDimension) && Boolean(code);
+    !locked &&
+    plan !== null &&
+    !plan.problem &&
+    Boolean(chosenDimension) &&
+    (batch.length > 0
+      ? batchWanted.length > 0 &&
+        batchDuplicates.size === 0 &&
+        batchWanted.every((candidate) => (batchCodes[rowKey(candidate)] ?? candidate.code).trim())
+      : Boolean(code));
 
   /**
    * Copy the chosen folder into the project as a variable.
@@ -282,6 +325,53 @@ export function DataScreen() {
    * refuses anything it cannot place, so its message is shown as-is rather
    * than reduced to "could not add".
    */
+  /**
+   * Copy a whole folder of variables in, and say what happened to each.
+   *
+   * One request: the server does them in order and reports per variable, so
+   * a folder with one bad member still adds the rest and names the one to
+   * look at. Doing it here, one call per row, would show the same thing
+   * half-done if the page were closed in the middle.
+   */
+  const addBatch = async () => {
+    if (!canAdd) return;
+    setAdding(true);
+    setAddError('');
+    try {
+      const outcome = await api.addInputs(
+        projectId,
+        chosenDimension,
+        batchWanted.map((candidate) => ({
+          source: candidate.source,
+          code: batchCodes[rowKey(candidate)] ?? candidate.code,
+          filename: candidate.filename,
+        })),
+      );
+      reload();
+      if (outcome.added.length) {
+        setDraftPath('');
+        setPlanned(null);
+        setBatchCodes({});
+        setBatchSkipped({});
+        setDimensionTouched(false);
+      }
+      if (outcome.failed.length) {
+        setAddError(
+          `Added ${outcome.added.length} of ${outcome.added.length + outcome.failed.length}. ` +
+            outcome.failed.map((f) => `${f.code}: ${f.problem}`).join(' · '),
+        );
+      } else {
+        showToast(
+          `${outcome.added.length} variable${outcome.added.length === 1 ? '' : 's'} added`,
+        );
+      }
+    } catch (error) {
+      setAddError(error instanceof Error ? error.message : 'Could not add that folder');
+    } finally {
+      setAdding(false);
+    }
+  };
+
   const addVariable = async () => {
     if (!canAdd) return;
     setAdding(true);
@@ -475,8 +565,8 @@ export function DataScreen() {
       <div className="screen-body">
         <h1 className="data-title">Add your data</h1>
         <p className="data-lede muted">
-          One folder per variable. Each one is copied into the project and becomes a layer you
-          can look at on the map.
+          One folder per variable, or a folder of them to add several at once. Each is copied
+          into the project and becomes a layer you can look at on the map.
         </p>
 
         {/* Where "the project" actually is. Everything the engine reads and
@@ -542,7 +632,7 @@ export function DataScreen() {
             that has to find the folder in order to copy it. */}
         <div className={`path-add${locked ? ' is-locked' : ''}`}>
           <label className="path-add-label" htmlFor="folder-path">
-            Folder holding one variable
+            Folder holding a variable — or several
           </label>
           <div className="field-row">
             <input
@@ -556,7 +646,8 @@ export function DataScreen() {
                 setAddError('');
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && canAdd) void addVariable();
+                // Whichever of the two the folder turned out to be.
+                if (e.key === 'Enter' && canAdd) void (batch.length ? addBatch() : addVariable());
               }}
               style={{ flex: 1 }}
             />
@@ -579,20 +670,44 @@ export function DataScreen() {
           {/* What the copy would do, before it does it. */}
           {plan && !plan.problem && (
             <div className="import-plan">
-              <div className="import-plan-file">
-                <Icon name="file" size={15} color="var(--color-accent-600)" />
-                <span className="mono">{plan.filename}</span>
-                <span className="tag tag-accent-2">{plan.format}</span>
-                <span className="muted-55">{formatSize(plan.sizeBytes)}</span>
-                {plan.files.length > 1 && (
-                  <span
-                    className="muted-55"
-                    title={plan.files.join(', ')}
-                  >
-                    + {plan.files.length - 1} companion{plan.files.length === 2 ? '' : 's'}
+              {batch.length === 0 ? (
+                <div className="import-plan-file">
+                  <Icon name="file" size={15} color="var(--color-accent-600)" />
+                  <span className="mono">{plan.filename}</span>
+                  <span className="tag tag-accent-2">{plan.format}</span>
+                  <span className="muted-55">{formatSize(plan.sizeBytes)}</span>
+                  {plan.files.length > 1 && (
+                    <span
+                      className="muted-55"
+                      title={plan.files.join(', ')}
+                    >
+                      + {plan.files.length - 1} companion{plan.files.length === 2 ? '' : 's'}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="import-plan-file">
+                  <Icon name="folder" size={15} color="var(--color-accent-600)" />
+                  {/* Counts what can be added, not what is listed: a folder
+                      the pipeline cannot read is shown with its reason, and
+                      counting it here would promise a variable that is not
+                      coming. */}
+                  <strong>
+                    {batch.filter((c) => !c.problem).length} variables in this folder
+                  </strong>
+                  <span className="muted-55">
+                    {formatSize(
+                      batch.filter((c) => !c.problem).reduce((n, c) => n + c.sizeBytes, 0),
+                    )}{' '}
+                    · all into one dimension
                   </span>
-                )}
-              </div>
+                  {batch.some((c) => c.problem) && (
+                    <span className="muted-55">
+                      · {batch.filter((c) => c.problem).length} cannot be
+                    </span>
+                  )}
+                </div>
+              )}
 
               <div className="import-plan-where">
                 <label htmlFor="variable-dimension">Dimension</label>
@@ -634,33 +749,121 @@ export function DataScreen() {
                   />
                 )}
 
-                <label htmlFor="variable-code">Code</label>
-                <input
-                  id="variable-code"
-                  className="input mono"
-                  value={code}
-                  placeholder="REG_007"
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  // Not normalised while typing: deleting the hyphen out
-                  // of "SOE-" as it is typed fights the user. The line
-                  // below shows where it will land.
-                  style={{ width: 110, flex: 'none' }}
-                />
+                {batch.length === 0 && (
+                  <>
+                    <label htmlFor="variable-code">Code</label>
+                    <input
+                      id="variable-code"
+                      className="input mono"
+                      value={code}
+                      placeholder="REG_007"
+                      onChange={(e) => setCode(e.target.value.toUpperCase())}
+                      // Not normalised while typing: deleting the hyphen out
+                      // of "SOE-" as it is typed fights the user. The line
+                      // below shows where it will land.
+                      style={{ width: 110, flex: 'none' }}
+                    />
+                  </>
+                )}
 
                 <button
                   type="button"
                   className="btn btn-primary"
-                  onClick={addVariable}
+                  onClick={batch.length ? addBatch : addVariable}
                   disabled={!canAdd || adding}
                   style={{ flex: 'none' }}
                 >
-                  {adding ? 'Copying…' : 'Add'}
+                  {adding
+                    ? 'Copying…'
+                    : batch.length
+                      ? `Add ${batchWanted.length}`
+                      : 'Add'}
                 </button>
               </div>
 
+              {/* One row per variable: what it came from, what it will be
+                  called, and a tick to leave it out. The codes are suggested
+                  across the whole batch at once, so they miss both what is
+                  on disk and each other. */}
+              {batch.length > 0 && (
+                <div className="batch-list">
+                  {batch.map((candidate) => {
+                    const key = rowKey(candidate);
+                    const value = batchCodes[key] ?? candidate.code;
+                    const skipped = Boolean(batchSkipped[key]);
+                    const clashes =
+                      !candidate.problem &&
+                      !skipped &&
+                      batchDuplicates.has(canonicalCode(value));
+                    return (
+                      <div
+                        key={key}
+                        className={`batch-row${candidate.problem ? ' is-blocked' : ''}${
+                          skipped ? ' is-skipped' : ''
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!skipped && !candidate.problem}
+                          disabled={Boolean(candidate.problem)}
+                          aria-label={`Include ${candidate.label}`}
+                          onChange={(e) =>
+                            setBatchSkipped((current) => ({
+                              ...current,
+                              [key]: !e.target.checked,
+                            }))
+                          }
+                        />
+                        <span className="batch-label mono" title={candidate.source}>
+                          {candidate.label}
+                        </span>
+                        {candidate.problem ? (
+                          <span className="batch-problem">{candidate.problem}</span>
+                        ) : (
+                          <>
+                            <span className="tag tag-accent-2">{candidate.format}</span>
+                            <span className="muted-55 batch-size">
+                              {formatSize(candidate.sizeBytes)}
+                            </span>
+                            {candidate.files.length > 1 && (
+                              <span className="muted-55" title={candidate.files.join(', ')}>
+                                +{candidate.files.length - 1}
+                              </span>
+                            )}
+                            <input
+                              className={`input mono batch-code${clashes ? ' is-invalid' : ''}`}
+                              value={value}
+                              aria-label={`Code for ${candidate.label}`}
+                              aria-invalid={clashes}
+                              disabled={skipped}
+                              onChange={(e) =>
+                                setBatchCodes((current) => ({
+                                  ...current,
+                                  [key]: e.target.value.toUpperCase(),
+                                }))
+                              }
+                            />
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* A disabled button with no reason is the worst case here:
                   everything looks filled in and nothing happens. */}
-              {!chosenDimension || !code ? (
+              {batch.length > 0 ? (
+                <div className="muted-55" style={{ fontSize: 11.5 }}>
+                  {!chosenDimension
+                    ? 'Name the dimension these belong to — the engine reads it from the folder path.'
+                    : batchDuplicates.size > 0
+                      ? 'Two of them have the same code. Each variable needs its own.'
+                      : batchWanted.length === 0
+                        ? 'Nothing ticked, so there is nothing to add.'
+                        : `Copied to in/${canonicalDimension(chosenDimension)}/ — one folder per code.`}
+                </div>
+              ) : !chosenDimension || !code ? (
                 <div className="muted-55" style={{ fontSize: 11.5 }}>
                   {!chosenDimension
                     ? 'Name the dimension this variable belongs to — the engine reads it from the folder path.'
