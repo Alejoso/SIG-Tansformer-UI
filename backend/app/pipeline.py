@@ -794,6 +794,41 @@ def remove_as_root(data_dir: Path, relative: str) -> str:
     return ""
 
 
+def remove_many_as_root(data_dir: Path, relatives: list[str]) -> str:
+    """
+    Delete several things in one container, rather than one container each.
+
+    `compose run` takes a few seconds to start, so removing a handful of
+    model runs one call at a time would spend most of its time starting
+    containers. Returns "" on success, or why not.
+
+    Every path is checked by the caller against what is on disk before it
+    gets here — `outputs.model_run_path` only returns folders it just
+    listed — which is a stronger guarantee than quoting.
+    """
+    if not relatives:
+        return ""
+    for relative in relatives:
+        if '"' in relative or "'" in relative or relative.startswith("/") or ".." in relative:
+            return f"refusing to remove {relative!r}"
+    targets = " ".join(f'"/data/{relative}"' for relative in relatives)
+    result = _run(
+        [
+            "docker", "compose", "run", "--rm", "--no-deps",
+            "--entrypoint", "sh", APP_SERVICE,
+            "-c", f"rm -rf {targets}",
+        ],
+        cwd=PIPELINE_DIR,
+        timeout=300,
+        env=run_full_env(extra={"DATA_DIR": str(data_dir)}),
+    )
+    if result is None:
+        return "could not reach Docker"
+    if result.returncode != 0:
+        return (result.stderr or result.stdout or "").strip()[-200:] or "the container refused"
+    return ""
+
+
 def can_remove_as_root() -> bool:
     """Whether the container route is available at all."""
     return status().composeAvailable

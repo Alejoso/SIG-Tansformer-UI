@@ -4,8 +4,10 @@ import { useApp } from '../../state/app-context';
 import { modelFromParsed, weightSum } from '../../lib/model';
 import { forgetDraft, recallDraft, rememberDraft, takeExample } from '../../lib/model-draft';
 import { lintYaml, parseYaml } from '../../lib/yaml-lint';
-import type { ModelExample, ModelFile, ModelIssue, PipelineRun } from '../../types';
+import type { ModelExample, ModelFile, ModelIssue, ModelRun, PipelineRun } from '../../types';
+import { formatSize } from '../../lib/format';
 import { ApplyDoneDialog, ApplyProgressDialog } from '../tune/ApplyDialogs';
+import { ModelRunsDialog } from '../tune/ModelRunsDialog';
 import { ModelDiagram } from '../tune/ModelDiagram';
 import { YamlCodeEditor } from '../tune/YamlCodeEditor';
 import { Icon } from '../ui/Icon';
@@ -60,6 +62,9 @@ export function TuneScreen() {
   const [applyRun, setApplyRun] = useState<PipelineRun | null>(null);
   const [stopping, setStopping] = useState(false);
   const unwatchApply = useRef<(() => void) | null>(null);
+  /** What past runs are costing. Nothing removes them on its own. */
+  const [runs, setRuns] = useState<ModelRun[]>([]);
+  const [showRuns, setShowRuns] = useState(false);
 
   useEffect(() => {
     if (!projectId) return;
@@ -92,6 +97,14 @@ export function TuneScreen() {
   useEffect(() => {
     if (file) rememberDraft(projectId, text);
   }, [projectId, text, file]);
+
+  /** Counted on arrival and after each Apply — a run is how they appear. */
+  const refreshRuns = useCallback(() => {
+    if (!projectId) return;
+    api.listModelRuns(projectId).then(setRuns).catch(() => setRuns([]));
+  }, [projectId]);
+
+  useEffect(refreshRuns, [refreshRuns]);
 
   useEffect(() => () => unwatchApply.current?.(), []);
 
@@ -174,6 +187,7 @@ export function TuneScreen() {
         if (tick.status === 'starting' || tick.status === 'running') return;
         setBusy(false);
         unwatchApply.current = null;
+        refreshRuns();
       },
       (error) => {
         setBusy(false);
@@ -276,6 +290,17 @@ export function TuneScreen() {
               checked as you type, the structure when you save.
             </p>
           )}
+          {/* Said here because this is the screen that makes them. Only once
+              there is more than one: a single run is just the result. */}
+          {runs.length > 1 && (
+            <button type="button" className="runs-line" onClick={() => setShowRuns(true)}>
+              <Icon name="folder" size={13} color="var(--color-accent-600)" />
+              <span>
+                {runs.length} model runs · {formatSize(runs.reduce((n, r) => n + r.sizeBytes, 0))}
+              </span>
+              <span className="muted-55">— only the newest is on the map</span>
+            </button>
+          )}
         </div>
 
         <div className="tune-actions">
@@ -377,6 +402,15 @@ export function TuneScreen() {
 
       {applyRun && applyRun.status !== 'starting' && applyRun.status !== 'running' && (
         <ApplyDoneDialog run={applyRun} onStay={() => setApplyRun(null)} onViewMap={viewMap} />
+      )}
+
+      {showRuns && (
+        <ModelRunsDialog
+          projectId={projectId}
+          runs={runs}
+          onChanged={setRuns}
+          onClose={() => setShowRuns(false)}
+        />
       )}
     </div>
   );

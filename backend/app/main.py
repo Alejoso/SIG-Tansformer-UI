@@ -23,6 +23,7 @@ from . import (
     engine_state,
     fsutil,
     inputs,
+    model_runs as model_run_store,
     model_store,
     outputs,
     pipeline,
@@ -39,12 +40,15 @@ from .models import (
     LayerNode,
     LayerTree,
     ModelFile,
+    ModelRun,
+    ModelRunsRemoval,
     ModelIssue,
     ProjectSettings,
     NewProjectPayload,
     PickFolderPayload,
     PickFolderResult,
     ModelRunPayload,
+    PruneRunsPayload,
     PlanImportPayload,
     ProcessPayload,
     Removal,
@@ -631,6 +635,57 @@ def abort_model_run(project_id: str) -> AbortResult:
     if run is None:
         raise HTTPException(status_code=404, detail="No model run for this project.")
     return AbortResult(detail=run.abort())
+
+
+# ── past model runs ───────────────────────────────────────────────────────
+
+
+@app.get("/api/projects/{project_id}/model/runs")
+def list_model_runs(project_id: str) -> list[ModelRun]:
+    """
+    Every model run on disk, newest first, with what it costs.
+
+    Worth being able to see: each Apply writes another whole set of rendered
+    maps and nothing removes them, while only the newest is ever drawn.
+    """
+    project = _require_project(project_id)
+    return [ModelRun(**vars(run)) for run in outputs.model_runs(project)]
+
+
+@app.post("/api/projects/{project_id}/model/runs/prune")
+def prune_model_runs(project_id: str, payload: PruneRunsPayload | None = None) -> ModelRunsRemoval:
+    """
+    Remove all but the newest `keep` runs.
+
+    One call rather than one per run: the container route costs seconds to
+    start. `keep` is clamped at 1 — a clean-up that left nothing to look at
+    would be a strange thing to call a clean-up.
+    """
+    project = _require_project(project_id)
+    keep = max(1, payload.keep if payload else 1)
+    doomed = model_run_store.prunable(project, keep)
+    if not doomed:
+        return ModelRunsRemoval()
+    try:
+        return ModelRunsRemoval(**vars(model_run_store.remove(project, doomed)))
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.delete("/api/projects/{project_id}/model/runs/{run_id}")
+def remove_model_run(project_id: str, run_id: str) -> ModelRunsRemoval:
+    """
+    Remove one run, whichever it is.
+
+    Including the one the map is showing: the next newest takes over, which
+    is what the map would have shown before this one existed. Nothing is
+    lost that Apply would not write again.
+    """
+    project = _require_project(project_id)
+    try:
+        return ModelRunsRemoval(**vars(model_run_store.remove(project, [run_id])))
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 # ── the model file ────────────────────────────────────────────────────────

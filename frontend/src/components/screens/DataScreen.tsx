@@ -3,6 +3,7 @@ import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import type { ImportPlan, InputVariable, PipelineRun, PipelineStage } from '../../types';
 import { Dialog } from '../ui/Dialog';
+import { formatSize } from '../../lib/format';
 import { Icon } from '../ui/Icon';
 import { SettingsDialog } from './SettingsDialog';
 
@@ -13,14 +14,6 @@ import { SettingsDialog } from './SettingsDialog';
 
 /** Chosen in the dimension list to type a new one instead of picking. */
 const NEW_DIMENSION = '\u0000new';
-
-/** `412 MB`, `1.2 GB` — matched to how the design writes sizes. */
-function formatSize(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
-  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
-  if (bytes >= 1e3) return `${Math.round(bytes / 1e3)} kB`;
-  return `${bytes} B`;
-}
 
 /*
  * What the server will make of a typed dimension and code.

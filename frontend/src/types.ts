@@ -374,6 +374,31 @@ export interface ModelConfig {
 }
 
 
+/**
+ * One past run of the model.
+ *
+ * Every Apply writes another whole set of rendered maps — the model, each
+ * criterion, each subcriterion — and nothing removes them, while only the
+ * newest is ever drawn.
+ */
+export interface ModelRun {
+  id: string;
+  sizeBytes: number;
+  /** Seconds since the epoch, from the folder itself. */
+  modifiedAt: number;
+  /** The one the map draws. Every other run is unreachable from the app. */
+  current: boolean;
+  documentCount: number;
+}
+
+/** What a clean-up took away. */
+export interface ModelRunsRemoval {
+  removed: string[];
+  freedBytes: number;
+  /** Asked for but not there. Not an error — the outcome is the one wanted. */
+  missing: string[];
+}
+
 /** One thing wrong with the model file. */
 export interface ModelIssue {
   message: string;

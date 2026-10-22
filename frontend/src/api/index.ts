@@ -19,6 +19,8 @@ import type {
   Mesh,
   ModelExample,
   ModelFile,
+  ModelRun,
+  ModelRunsRemoval,
   NewProjectPayload,
   PipelineReadiness,
   PipelineRun,
@@ -364,6 +366,38 @@ export const watchModelRun = (
 };
 
 export const listExamples = (): Promise<ModelExample[]> => mock.listExamples();
+
+/* ── past model runs ───────────────────────────────────────────────────── */
+
+/**
+ * LIVE: GET /api/projects/{id}/model/runs
+ *
+ * Newest first. Only the first is ever drawn, which is the reason this list
+ * is worth showing at all.
+ */
+export const listModelRuns = (projectId: string): Promise<ModelRun[]> =>
+  request(`/projects/${projectId}/model/runs`);
+
+/**
+ * LIVE: POST /api/projects/{id}/model/runs/prune
+ *
+ * Remove all but the newest `keep`. One call rather than one per run: each
+ * removal goes through a container, which takes seconds to start.
+ */
+export const pruneModelRuns = (projectId: string, keep: number): Promise<ModelRunsRemoval> =>
+  request(`/projects/${projectId}/model/runs/prune`, {
+    method: 'POST',
+    body: JSON.stringify({ keep }),
+  });
+
+/** LIVE: DELETE /api/projects/{id}/model/runs/{runId} */
+export const removeModelRun = (
+  projectId: string,
+  runId: string,
+): Promise<ModelRunsRemoval> =>
+  request(`/projects/${projectId}/model/runs/${encodeURIComponent(runId)}`, {
+    method: 'DELETE',
+  });
 
 /* ── settings ──────────────────────────────────────────────────────────── */
 

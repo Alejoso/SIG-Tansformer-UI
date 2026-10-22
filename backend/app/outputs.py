@@ -388,3 +388,84 @@ def scan_model_runs(project: store.ProjectRow) -> list[str]:
     if not runs.is_dir():
         return []
     return sorted((d.name for d in runs.iterdir() if d.is_dir()), reverse=True)
+
+
+@dataclass
+class ModelRun:
+    """One past run of the model, and what it is costing."""
+
+    id: str
+    sizeBytes: int
+    #: Seconds since the epoch, from the folder itself.
+    modifiedAt: float
+    #: The one the map draws. `scan_model` takes the newest, and nothing in
+    #: the app asks for another — so every other run is already invisible.
+    current: bool
+    #: How many documents it holds, which is what the size is.
+    documentCount: int
+
+
+def folder_size(folder: Path) -> tuple[int, int]:
+    """Bytes and file count under a folder. Cheap: a run is a dozen files."""
+    total = 0
+    count = 0
+    try:
+        for item in folder.rglob("*"):
+            if item.is_file():
+                total += item.stat().st_size
+                count += 1
+    except OSError:
+        pass
+    return total, count
+
+
+def model_runs(project: store.ProjectRow) -> list[ModelRun]:
+    """
+    Every model run on disk, newest first, with what it costs.
+
+    Worth listing because nothing removes them: each Apply writes another
+    whole set of rendered maps — the model, every criterion and every
+    subcriterion — and only the newest is ever drawn. A few rounds of tuning
+    leaves most of a project's disk in folders the app cannot reach.
+    """
+    root = data_dir(project)
+    if root is None:
+        return []
+    base = root / MCDA_RUNS_DIRNAME
+    names = scan_model_runs(project)
+
+    found: list[ModelRun] = []
+    for index, name in enumerate(names):
+        folder = base / name
+        size, count = folder_size(folder)
+        try:
+            modified = folder.stat().st_mtime
+        except OSError:
+            modified = 0.0
+        found.append(
+            ModelRun(
+                id=name,
+                sizeBytes=size,
+                modifiedAt=modified,
+                current=index == 0,
+                documentCount=count,
+            )
+        )
+    return found
+
+
+def model_run_path(project: store.ProjectRow, run_id: str) -> Path | None:
+    """
+    Where one run is, or None when there is no such run.
+
+    Checked against what is actually on disk rather than by pattern: the id
+    goes into a shell command inside the container, and "it is one of the
+    folders we just listed" is a stronger guarantee than any amount of
+    escaping.
+    """
+    root = data_dir(project)
+    if root is None:
+        return None
+    if run_id not in scan_model_runs(project):
+        return None
+    return root / MCDA_RUNS_DIRNAME / run_id

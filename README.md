@@ -123,6 +123,35 @@ two of them would be writing the same project's model file.
 Those last two are all that is left of the mocks. A mesh upload has no server
 route, and the examples are UI copy with nowhere else to live yet.
 
+## Model runs pile up, and only the newest is reachable
+
+Every Apply writes a whole set of rendered maps — the model, each criterion,
+each subcriterion — into `MCDA/runs/<id>/`, and nothing removes them. Only
+the newest is ever drawn: `outputs.scan_model` takes `runs[0]` and nothing in
+the app asks for another, so every older run is already invisible.
+
+Measured on the project this was written against: three runs at 191 MB each,
+against 31 MB of input and 145 MB of pipeline output. Two thirds of the
+project was in folders that could not be opened from anywhere.
+
+The Model screen says so once there is more than one — a single run is just
+the result — and the dialog behind it lists them with what each costs, marks
+the one the map draws, and removes them one at a time or all but the newest.
+
+Removing is offered, not done. These are results, and which of them is worth
+keeping is not a judgement to make quietly on someone's behalf — the same
+reason removing a variable asks first. A sweep is clamped to keep at least
+one: a clean-up that left nothing to look at would be a strange thing to call
+a clean-up.
+
+They belong to root, like everything the engine writes, so removal goes
+through a container — and all of them go in *one* container, because
+`compose run` takes a few seconds to start and removing six runs one call at
+a time would spend most of its time starting containers. The ids are resolved
+against what is on disk first (`outputs.model_run_path` only returns folders
+it has just listed), which is a stronger guarantee than quoting them into a
+shell.
+
 ## Settings reach the engine through its `.env`
 
 Two settings do anything: the resolution the data is computed at, and the one
@@ -504,6 +533,9 @@ No component changes.
 | `applyModel` | `POST /api/projects/{id}/model/apply` | **live for the write**; running the model is next |
 | `watchModelApply` | `GET /api/projects/{id}/model/apply/stream` | **SSE**, one `ApplyProgress` per variable — drives the loading dialog |
 | `listExamples` | `GET /api/model/examples` | mocked; the examples are UI copy |
+| `listModelRuns` | `GET /api/projects/{id}/model/runs` | newest first; only the first is ever drawn |
+| `pruneModelRuns` | `POST /api/projects/{id}/model/runs/prune` | keep the newest N, in one container |
+| `removeModelRun` | `DELETE /api/projects/{id}/model/runs/{runId}` | |
 | `getEngineSettings` | `GET /api/settings` | the engine's own numbers, with no project to ask about |
 | `getSettings` | `GET /api/projects/{id}/settings` | resolves blanks against the engine's `.env` |
 | `saveSettings` | `PUT /api/projects/{id}/settings` | stores them; a run applies them |

@@ -105,6 +105,31 @@ class LayerTree(BaseModel):
     inputs: list[LayerNode]
 
 
+class ModelRun(BaseModel):
+    """One past run of the model, and what it is costing."""
+
+    id: str
+    sizeBytes: int
+    modifiedAt: float
+    #: The one the map draws. Every other run is already unreachable from
+    #: the app, which is the reason this list exists.
+    current: bool
+    documentCount: int
+
+
+class ModelRunsRemoval(BaseModel):
+    removed: list[str] = Field(default_factory=list)
+    freedBytes: int = 0
+    #: Asked for but not there. Not an error — the outcome is the one wanted.
+    missing: list[str] = Field(default_factory=list)
+
+
+class PruneRunsPayload(BaseModel):
+    """How many of the newest runs to keep. Clamped at 1 by the server."""
+
+    keep: int = 1
+
+
 class ProjectSettings(BaseModel):
     """
     The engine knobs a project carries.
