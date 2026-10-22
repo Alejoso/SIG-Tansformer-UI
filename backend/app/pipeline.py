@@ -338,11 +338,14 @@ def write_env_values(values: dict[str, str]) -> bool:
     Set these keys in the pipeline's `.env`. Returns whether anything changed.
 
     Needed because some of the engine's knobs are only readable inside the
-    container, and the container gets its environment from this file. The
-    clearest case is `H3_RES`: `run_full.sh` compares the *host* value against
-    what the last master build recorded, but never forwards it to the
+    container, and every route into it leads back to this file: compose
+    interpolates `${H3_RES}` into the app service's `environment:` from here,
+    and `env_file: .env` supplies the rest, `RENDER_H3_RES` among them.
+
+    `H3_RES` is the one that bites. `run_full.sh` compares the *host* value
+    against what the last master build recorded, but never forwards it to the
     container — it is not in that script's `FORWARD_VARS` — so the build
-    itself uses whatever is in here. Exporting a different value without
+    itself uses whatever came from here. Exporting a different value without
     writing it would make the script rebuild the master on every single run,
     comparing a number the build never sees against the one it keeps writing.
 

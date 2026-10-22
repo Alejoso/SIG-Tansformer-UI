@@ -134,18 +134,21 @@ reports, read from the engine's own `.env`.
 They are *applied* when a run starts, by writing that `.env` and recreating
 the app container. Both parts are necessary:
 
-- **Writing the file.** `H3_RES` is read inside the container, and
-  `run_full.sh` does not forward it — it is not in that script's
-  `FORWARD_VARS`. What the script *does* do with its own copy is compare it
-  against what the last master build recorded, and rebuild when they differ.
-  So exporting a different value without writing it to `.env` would have the
-  script rebuild the master on every run forever: comparing a number the
-  build never sees against the one the build keeps writing.
-- **Recreating the container.** Compose loads `.env` with `env_file:` at
-  creation time, so a container that is already up keeps the environment it
-  started with however many times `up -d` runs. The container is recreated
-  only when the file actually changed, which is why `write_env_values`
-  returns whether it did.
+- **Writing the file.** Every route into the container leads back to it:
+  compose interpolates `${H3_RES}` into the app service's `environment:`
+  from `.env`, and `env_file: .env` supplies the rest, `RENDER_H3_RES` among
+  them. `H3_RES` is the one that bites — `run_full.sh` compares the *host*
+  value against what the last master build recorded and rebuilds when they
+  differ, but never forwards it to the container; it is not in that script's
+  `FORWARD_VARS`. So exporting a different value without writing it to
+  `.env` would have the script rebuild the master on every run forever,
+  comparing a number the build never sees against the one the build keeps
+  writing.
+- **Recreating the container.** Both of those are resolved when the
+  container is created, so one that is already up keeps the environment it
+  started with however many times `up -d` runs. It is recreated only when the
+  file actually changed, which is why `write_env_values` returns whether it
+  did.
 
 `RENDER_H3_RES` is forwarded by `run_full.sh`, but `MCDA/run_mcda.sh`
 forwards nothing but the execution id — so the model run's maps read it from
