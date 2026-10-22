@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import { modelFromParsed, weightSum } from '../../lib/model';
+import { forgetDraft, recallDraft, rememberDraft, takeExample } from '../../lib/model-draft';
 import { lintYaml, parseYaml } from '../../lib/yaml-lint';
 import type { ModelExample, ModelFile, ModelIssue, PipelineRun } from '../../types';
 import { ApplyDoneDialog, ApplyProgressDialog } from '../tune/ApplyDialogs';
-import { ExamplesDialog } from '../tune/ExamplesDialog';
 import { ModelDiagram } from '../tune/ModelDiagram';
 import { YamlCodeEditor } from '../tune/YamlCodeEditor';
 import { Icon } from '../ui/Icon';
@@ -56,7 +56,6 @@ export function TuneScreen() {
   const [savedText, setSavedText] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showExamples, setShowExamples] = useState(false);
   /** The model run in flight, polled like a processing run. */
   const [applyRun, setApplyRun] = useState<PipelineRun | null>(null);
   const [stopping, setStopping] = useState(false);
@@ -70,8 +69,16 @@ export function TuneScreen() {
       .then((loaded) => {
         if (!live) return;
         setFile(loaded);
-        setText(loaded.text);
         setSavedText(loaded.text);
+
+        // What is on screen is the draft if there is one — the file is still
+        // what the server holds, which is what `dirty` compares against.
+        // Going off to read the examples should not throw away an edit.
+        const draft = recallDraft(projectId);
+        const current = draft ?? loaded.text;
+        const chosen = takeExample();
+        setText(chosen ? insertSnippet(current, chosen) : current);
+        if (chosen) showToast(`${chosen.title} added to the editor`);
       })
       .catch((error: unknown) => {
         if (live) setLoadError(error instanceof Error ? error.message : 'Could not open the model file');
@@ -79,7 +86,12 @@ export function TuneScreen() {
     return () => {
       live = false;
     };
-  }, [projectId]);
+  }, [projectId, showToast]);
+
+  /** Keep the draft current, so leaving the screen does not lose it. */
+  useEffect(() => {
+    if (file) rememberDraft(projectId, text);
+  }, [projectId, text, file]);
 
   useEffect(() => () => unwatchApply.current?.(), []);
 
@@ -103,6 +115,7 @@ export function TuneScreen() {
   const record = useCallback((saved: ModelFile) => {
     setFile(saved);
     setSavedText(saved.text);
+    forgetDraft();
   }, []);
 
   const save = async () => {
@@ -192,13 +205,6 @@ export function TuneScreen() {
     goTo('map');
   };
 
-  /** Paste an example in, rather than replacing the file. */
-  const insertExample = (example: ModelExample) => {
-    setText((current) => insertSnippet(current, example));
-    setShowExamples(false);
-    showToast(`${example.title} added to the editor`);
-  };
-
   if (loadError) {
     return (
       <div className="screen-loading" style={{ flexDirection: 'column', gap: 10 }}>
@@ -284,7 +290,7 @@ export function TuneScreen() {
           <button
             type="button"
             className="btn btn-ghost"
-            onClick={() => setShowExamples(true)}
+            onClick={() => goTo('examples')}
             style={{ height: 42, paddingInline: 16, fontSize: 14, gap: 8, whiteSpace: 'nowrap' }}
           >
             <Icon name="book" />
@@ -364,10 +370,6 @@ export function TuneScreen() {
           </div>
         )}
       </div>
-
-      {showExamples && (
-        <ExamplesDialog onClose={() => setShowExamples(false)} onInsert={insertExample} />
-      )}
 
       {applyRun && (applyRun.status === 'starting' || applyRun.status === 'running') && (
         <ApplyProgressDialog run={applyRun} onStop={stopApply} stopping={stopping} />

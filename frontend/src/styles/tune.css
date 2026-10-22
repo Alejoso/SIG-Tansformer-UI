@@ -257,38 +257,165 @@
 }
 .node-root-value { font-family: var(--font-heading); font-size: 15px; }
 
-/* ── examples dialog ────────────────────────────────────────────────────── */
+/* ── examples screen ────────────────────────────────────────────────────── */
 
-.examples-dialog { width: min(1000px, 100%); max-height: 86vh; align-items: stretch; gap: 16px; }
-.examples-head { display: flex; align-items: flex-start; gap: 16px; }
-.examples-list { display: flex; min-width: 0; gap: 14px; overflow: auto; padding-bottom: 6px; }
-/* The cards scroll sideways rather than sharing the width: squeezed to a
-   quarter each, the YAML inside them is too narrow to read, which is the
-   whole point of showing it. */
-.example-card {
-  flex: 0 0 296px;
-  min-width: 0;
+/* Its own screen, so unlike the rest of the app it scrolls: it is a reference
+   to read, not a workspace to act in. */
+.examples-screen {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 26px 40px;
+}
+
+.examples-screen-head { max-width: 760px; margin-bottom: 20px; }
+.examples-screen-head h1 { font-size: 30px; margin: 12px 0 6px; }
+.examples-screen-head p { margin: 0; font-size: 13.5px; line-height: 1.55; }
+.icon-flip { transform: rotate(180deg); }
+
+/* The three levels, left to right, the way the diagram draws them. */
+.examples-shape {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+.examples-shape > svg { align-self: center; flex: none; }
+.shape-step { flex: 1; min-width: 0; }
+.shape-step p { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: color-mix(in srgb, var(--color-text) 72%, transparent); }
+.shape-level {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--color-accent-200);
+  color: var(--color-accent-900);
+}
+
+.examples-columns { display: flex; align-items: flex-start; gap: 24px; }
+.examples-reference { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+/* The blocks stay put while the reference beside them is read. */
+.examples-blocks {
+  flex: 0 0 360px;
+  position: sticky;
+  top: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
+}
+
+.reference-block h2 {
+  font-size: 17px;
+  margin: 0 0 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--color-divider);
+}
+.reference-block h2 code { font-size: 15px; }
+.reference-lede {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  max-width: 640px;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.field-list { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.field-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 7px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-divider) 55%, transparent);
+}
+.field-row:last-child { border-bottom: 0; }
+/* A fixed column for the names, so the eye can run down them. */
+.field-row dt { flex: 0 0 148px; display: flex; align-items: baseline; gap: 7px; }
+.field-row dt code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12.5px;
+  color: var(--color-accent-800);
+}
+.field-required {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--color-accent-200);
+  color: var(--color-accent-900);
+}
+.field-row dd {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+
+.type-list { display: flex; flex-direction: column; gap: 2px; }
+.type-row {
+  display: grid;
+  grid-template-columns: 110px 110px 1fr;
+  align-items: baseline;
+  gap: 14px;
+  padding: 7px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-divider) 55%, transparent);
+}
+.type-row:last-child { border-bottom: 0; }
+.type-row p { margin: 0; font-size: 12.5px; line-height: 1.55; color: color-mix(in srgb, var(--color-text) 78%, transparent); }
+.type-name { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--color-accent-800); }
+.type-needs { font-size: 11px; color: color-mix(in srgb, var(--color-text) 52%, transparent); }
+
+.example-block {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
   padding: 16px;
   border-radius: var(--radius-lg);
   background: var(--color-neutral-100);
 }
-.example-title { font-family: var(--font-heading); font-size: 16px; line-height: 1.25; }
-.example-blurb { margin: 0; font-size: 12.5px; line-height: 1.45; }
+.example-block header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.example-block h3 { font-family: var(--font-heading); font-size: 15.5px; margin: 0; line-height: 1.25; }
+.example-block p { margin: 0; font-size: 12px; line-height: 1.5; }
+/* Where the block belongs — pasting a criterion at the top level would not
+   parse, so it is said on the card rather than found out afterwards. */
+.example-scope {
+  flex: none;
+  padding: 1.5px 7px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: var(--color-neutral-300);
+  color: var(--color-neutral-800);
+}
+.example-scope.is-top { background: var(--color-accent-200); color: var(--color-accent-900); }
+
 .example-yaml {
   margin: 0;
-  flex: 1;
   overflow: auto;
-  max-height: 300px;
+  max-height: 260px;
   padding: 12px 14px;
   border-radius: var(--radius-md);
   background: var(--color-bg);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: 11.5px;
   line-height: 1.6;
   color: var(--color-accent-800);
+}
+
+@media (max-width: 1100px) {
+  .examples-columns { flex-direction: column; }
+  .examples-blocks { flex: 1; position: static; width: 100%; }
+  .examples-shape { flex-direction: column; }
+  .examples-shape > svg { transform: rotate(90deg); }
 }
 
 /* ── apply dialogs ──────────────────────────────────────────────────────── */

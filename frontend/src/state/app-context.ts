@@ -6,12 +6,18 @@
 import { createContext, useContext } from 'react';
 import type { MapMode, Project, ValueScale } from '../types';
 
-export type Screen = 'projects' | 'setup' | 'data' | 'map' | 'tune';
+export type Screen = 'projects' | 'setup' | 'data' | 'map' | 'tune' | 'examples';
 
-/** Order of the header stepper. */
+/**
+ * Order of the header stepper.
+ *
+ * Not every screen is in it. `setup` is reached from the Projects screen,
+ * which is where you are when you want a new one, and `examples` from the
+ * Model screen it explains — neither is a step in the work, and a stepper
+ * that lists places you do not pass through stops reading as an order.
+ */
 export const SCREEN_ORDER: { screen: Screen; label: string }[] = [
   { screen: 'projects', label: 'Projects' },
-  { screen: 'setup', label: 'New project' },
   { screen: 'data', label: 'Data' },
   { screen: 'map', label: 'Map' },
   { screen: 'tune', label: 'Model' },

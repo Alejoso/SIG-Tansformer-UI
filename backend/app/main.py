@@ -12,13 +12,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import (
     countries,
+    document,
     engine_state,
     fsutil,
     inputs,
@@ -226,19 +227,22 @@ def _to_layer_node(layer: outputs.ModelLayer) -> LayerNode:
 
 
 @app.api_route("/api/projects/{project_id}/layers/{node_id}/document", methods=["GET", "HEAD"])
-def get_layer_document(project_id: str, node_id: str) -> FileResponse:
+def get_layer_document(project_id: str, node_id: str, request: Request) -> Response:
     """
-    The rendered HTML for one layer.
+    The rendered HTML for one layer, with the opacity control added.
 
-    Streamed straight from disk: these are megabytes of pydeck document and
-    the browser displays them in an iframe, so there is nothing to be gained
-    by reading them into memory first.
+    Streamed from disk: these are megabytes of pydeck document and the
+    browser displays them in an iframe, so there is nothing to be gained by
+    reading one into memory first. `document` holds back only the last few
+    kilobytes, which is where the control goes.
 
     HEAD is declared alongside GET because the UI asks that way before
     pointing an iframe at it — an iframe loads an error page as readily as a
     document, so existence has to be checked separately. FastAPI does not add
     HEAD to a GET route on its own, and without it the check 405s and every
-    layer looks missing.
+    layer looks missing. It is answered with headers alone: Starlette would
+    otherwise send the whole body for it, so every layer opened would cost
+    its megabytes twice.
     """
     project = _require_project(project_id)
     path = outputs.document_path(project, node_id) or outputs.model_document_path(
@@ -246,7 +250,15 @@ def get_layer_document(project_id: str, node_id: str) -> FileResponse:
     )
     if path is None:
         raise HTTPException(status_code=404, detail=f"No rendered layer {node_id}")
-    return FileResponse(path, media_type="text/html")
+    if request.method == "HEAD":
+        return Response(media_type="text/html")
+    return StreamingResponse(
+        document.with_opacity_control(path),
+        media_type="text/html",
+        # No content-length: the body is longer than the file by the control
+        # added to it, and announcing the file's size would truncate it.
+        headers={"cache-control": "no-cache"},
+    )
 
 
 # ── processing ────────────────────────────────────────────────────────────

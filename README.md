@@ -128,7 +128,30 @@ Two things fall out of that shape:
 
 Layers are served by `GET …/layers/{nodeId}/document`, which also answers
 `HEAD` — the UI checks a document exists before pointing an iframe at it,
-because an iframe loads an error page as readily as a map.
+because an iframe loads an error page as readily as a map. `HEAD` is answered
+with headers alone: Starlette would otherwise send the whole body for it, and
+every layer opened would cost its megabytes twice.
+
+### The opacity slider is added on the way out
+
+The engine's documents end with `const deckInstance = createDeck({...})`, and
+`backend/app/document.py` appends a slider to them as they are streamed. The
+file on disk is untouched, so layers rendered months ago get the control too
+and nobody has to re-run a pipeline for a slider.
+
+It works the deck.gl way: `layer.clone({opacity})` + `deckInstance.setProps`,
+which multiplies the alpha already baked into each hexagon's colour without
+touching geometry or recomputing anything. Not the canvas's CSS opacity —
+there are two canvases in that document, and the other one is the basemap.
+Dimming it as well would wash out the whole picture rather than the hexagons
+sitting on it. (If a future bundle stops exposing `deckInstance`, the fallback
+fades deck's own canvas and leaves the `mapboxgl-` one alone.)
+
+Injected rather than drawn over the frame from our side: the document is
+sandboxed in an iframe, so a slider outside it would have nothing to talk to.
+Only the last few kilobytes of the file are ever held in memory — the control
+goes in before `</html>`, which is the only anchor reliably after pydeck's own
+script, since it closes `</body>` before it.
 
 ## The model file
 
@@ -327,10 +350,21 @@ still works.
 | Screen | File | What it does |
 |---|---|---|
 | Projects | `screens/ProjectsScreen.tsx` | Project list, empty state, "new project" tile |
-| New project | `screens/NewProjectScreen.tsx` | Name, mesh, results folder, description, advanced settings |
+| New project | `screens/NewProjectScreen.tsx` | Name, mesh, results folder, description, advanced settings. Reached from the Projects screen, not the stepper |
 | Add your data | `screens/DataScreen.tsx` | Folder dropzone (max 10), folder list, processing progress, "all done" dialog |
 | Map | `screens/MapScreen.tsx` + `map/LayerTree.tsx` + `map/LayerFrame.tsx` | A file-explorer tree of what the engine rendered, and the selected document in an iframe. Raw/normalized applies to input variables only |
 | Tune the model | `screens/TuneScreen.tsx` + `tune/*` | A YAML text editor over the real file, with a read-only diagram of what it currently says |
+| Writing the model | `screens/ExamplesScreen.tsx` | What every key in the config means, and blocks to start from. Reached from the Model screen, not the stepper |
+
+Two screens are not in the stepper. `setup` is reached from the Projects
+screen, which is where you are when you want a new project, and `examples`
+from the Model screen it explains — neither is a step in the work, and a
+stepper listing places you never pass through stops reading as an order.
+
+Leaving the Model screen does not lose unsaved text: `lib/model-draft.ts`
+keeps it, and the editor picks it up again on the way back. A module variable
+rather than context, because the draft changes on every keystroke and context
+would re-render every screen each time. Nothing renders from it.
 
 ## Where the backend plugs in
 

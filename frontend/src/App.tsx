@@ -1,6 +1,7 @@
 import { useApp } from './state/app-context';
 import { Header } from './components/Header';
 import { DataScreen } from './components/screens/DataScreen';
+import { ExamplesScreen } from './components/screens/ExamplesScreen';
 import { MapScreen } from './components/screens/MapScreen';
 import { NewProjectScreen } from './components/screens/NewProjectScreen';
 import { ProjectsScreen } from './components/screens/ProjectsScreen';
@@ -19,6 +20,7 @@ export default function App() {
       {screen === 'data' && <DataScreen />}
       {screen === 'map' && <MapScreen />}
       {screen === 'tune' && <TuneScreen />}
+      {screen === 'examples' && <ExamplesScreen />}
 
       {toast && <Toast message={toast} />}
     </div>
