@@ -406,9 +406,9 @@ export const saveSettings = (
 /**
  * LIVE: DELETE /api/projects/{id}/settings
  *
- * Follow the engine's own configuration again. Not the same as saving the
- * numbers it currently reports: one tracks the engine, the other pins a
- * value that would stay put when the engine moves.
+ * Back to the engine's own configuration — "Default values" in the dialog.
+ * Not the same as saving the numbers it currently reports: one tracks the
+ * engine, the other pins a value that would stay put when the engine moves.
  */
 export const clearSettings = (projectId: string): Promise<ProjectSettings> =>
   request(`/projects/${projectId}/settings`, { method: 'DELETE' });

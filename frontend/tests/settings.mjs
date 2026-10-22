@@ -34,7 +34,7 @@ export async function run({ project }) {
     await page.locator('#processing-res').waitFor({ timeout: 10000 });
     check('the Data screen can open it, beside Process', true);
     const state = await page.locator('.settings-source').innerText();
-    check('it says which of the two states it is in', /following the engine|set for this project/i.test(state),
+    check('it says which of the two states it is in', /default values|set for this project/i.test(state),
       JSON.stringify(state));
     await page.getByRole('button', { name: /^cancel$/i }).click();
     await page.waitForTimeout(400);
@@ -111,8 +111,8 @@ export async function run({ project }) {
     check('a project with settings of its own says so',
       /set for this project/i.test(pinned), JSON.stringify(pinned));
     check('and offers the way back',
-      (await page.getByRole('button', { name: /follow the engine/i }).count()) === 1);
-    await page.getByRole('button', { name: /follow the engine/i }).click();
+      (await page.getByRole('button', { name: /default values/i }).count()) === 1);
+    await page.getByRole('button', { name: /default values/i }).click();
     await page.waitForTimeout(900);
     const followed = await api(`/projects/${project.id}/settings`);
     check('which clears them', followed.followingEngine === true, JSON.stringify(followed));
@@ -125,8 +125,8 @@ export async function run({ project }) {
     await browser.close();
     // Put the project back. Leaving a different processing resolution behind
     // would have the next run rebuild the master at it — and a project that
-    // was following the engine has to go back to following it, not to the
-    // same numbers pinned.
+    // was on the defaults has to go back to them, not to the same numbers
+    // typed in and pinned.
     if (before.followingEngine) {
       await api(`/projects/${project.id}/settings`, { method: 'DELETE' });
     } else {

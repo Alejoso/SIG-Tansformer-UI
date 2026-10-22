@@ -773,7 +773,11 @@ def save_settings(project_id: str, payload: SaveSettingsPayload) -> ProjectSetti
 
 @app.delete("/api/projects/{project_id}/settings")
 def clear_settings(project_id: str) -> ProjectSettings:
-    """Follow the engine's own configuration again, rather than a pinned number."""
+    """
+    Back to the engine's own configuration, rather than a pinned number.
+
+    "Default values" in the settings dialog.
+    """
     return _describe_settings(project_settings.clear(_require_project(project_id)))
 
 

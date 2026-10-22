@@ -112,7 +112,7 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
     }
   };
 
-  /** Drop this project's own numbers and track the engine's again. */
+  /** "Default values": drop this project's own numbers and track the engine's. */
   const follow = async () => {
     setSaving(true);
     setError(null);
@@ -143,11 +143,11 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
           Resolution &amp; config
         </div>
         {/* Which of the two states this is in, always — otherwise the
-            "Follow the engine" button is simply absent with no way to tell
-            why, which is exactly how it reads when nobody has set anything. */}
+            "Default values" button is simply absent with no way to tell why,
+            which is exactly how it reads when nobody has set anything. */}
         {settings && (
           <span className={`settings-source${settings.followingEngine ? ' is-engine' : ''}`}>
-            {settings.followingEngine ? "Following the engine" : 'Set for this project'}
+            {settings.followingEngine ? 'Default values' : 'Set for this project'}
           </span>
         )}
       </div>
@@ -166,9 +166,11 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
         <>
           <p className="dialog-body" style={{ margin: 0 }}>
             {settings.followingEngine
-              ? 'Most projects never need these, and leaving them alone means following ' +
-                'whatever the engine is configured with — the numbers below.'
-              : 'These are applied to the engine when a run starts.'}
+              ? 'Most projects never need these. The numbers below are the defaults the ' +
+                'engine is configured with, and leaving them alone keeps this project on ' +
+                'them — including if the engine is set up differently later.'
+              : 'These are applied to the engine when a run starts. Default values puts this ' +
+                'project back on the engine\u2019s own numbers.'}
           </p>
 
           <div className="settings-grid">
@@ -247,7 +249,7 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
 
       <div className="dialog-actions">
         {/* The way back, offered only when there is something to go back
-            from. Saving the numbers the engine currently reports is not the
+            from. Typing the numbers the engine currently reports is not the
             same thing: that pins them, and they would stay put when the
             engine moves. */}
         {settings && !settings.followingEngine && (
@@ -258,7 +260,7 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
             disabled={saving}
             style={{ marginRight: 'auto' }}
           >
-            Follow the engine
+            Default values
           </button>
         )}
         <button type="button" className="btn btn-secondary" onClick={onClose}>

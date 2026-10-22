@@ -174,10 +174,13 @@ the project once it is created, since there is nothing to attach it to
 before), beside Process on the Data screen, and on the Map. The Map alone
 would be too late: you only get there by processing first.
 
-The dialog always says which of its two states it is in — *Following the
-engine* or *Set for this project* — because "Follow the engine" only exists
+The dialog always says which of its two states it is in — *Default values*
+or *Set for this project* — because the "Default values" button only exists
 when there is something to go back from, and a button that is simply absent
-explains nothing.
+explains nothing. The field is still `followingEngine` in the API: the label
+is what reads best on screen, the field says what it actually means, which is
+that the project tracks the engine rather than holding a copy of today's
+numbers.
 
 ## The project store
 
@@ -504,7 +507,7 @@ No component changes.
 | `getEngineSettings` | `GET /api/settings` | the engine's own numbers, with no project to ask about |
 | `getSettings` | `GET /api/projects/{id}/settings` | resolves blanks against the engine's `.env` |
 | `saveSettings` | `PUT /api/projects/{id}/settings` | stores them; a run applies them |
-| `clearSettings` | `DELETE /api/projects/{id}/settings` | follow the engine again, rather than pinning its current numbers |
+| `clearSettings` | `DELETE /api/projects/{id}/settings` | "Default values": track the engine again, rather than pinning its current numbers |
 
 The wire shapes are in **`src/types.ts`** — the Pydantic models should mirror
 them one-for-one.

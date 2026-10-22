@@ -105,7 +105,9 @@ def save(project: store.ProjectRow, resolutions: Resolutions) -> store.ProjectRo
 
 def clear(project: store.ProjectRow) -> store.ProjectRow:
     """
-    Forget this project's choices and follow the engine again.
+    Forget this project's choices and take the engine's again.
+
+    "Default values" in the settings dialog.
 
     Worth having beyond undo: once a number is written here there is
     otherwise no way back to "whatever the engine is set to", and the two are
