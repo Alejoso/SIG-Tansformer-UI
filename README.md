@@ -166,6 +166,19 @@ The coordinate system is shown and not offered: the engine works in WGS 84
 throughout. There was also a *pipeline version* offering a choice between
 three invented version strings; the engine has no versioning, so it is gone.
 
+**Where the dialog is reachable from matters.** The processing resolution
+decides the size of every hexagon the first run computes, and changing it
+afterwards rebuilds the master and reprocesses everything — so it has to be
+settable *before* that run. It is on New project (chosen there, written to
+the project once it is created, since there is nothing to attach it to
+before), beside Process on the Data screen, and on the Map. The Map alone
+would be too late: you only get there by processing first.
+
+The dialog always says which of its two states it is in — *Following the
+engine* or *Set for this project* — because "Follow the engine" only exists
+when there is something to go back from, and a button that is simply absent
+explains nothing.
+
 ## The project store
 
 Two CSV files, because the point is that you can open them, read them, and fix
@@ -434,7 +447,7 @@ still works.
 | Screen | File | What it does |
 |---|---|---|
 | Projects | `screens/ProjectsScreen.tsx` | Project list, empty state, "new project" tile |
-| New project | `screens/NewProjectScreen.tsx` | Name, mesh, results folder, description, advanced settings. Reached from the Projects screen, not the stepper |
+| New project | `screens/NewProjectScreen.tsx` | Name, mesh, results folder, description, and the resolutions the first run will use. Reached from the Projects screen, not the stepper |
 | Add your data | `screens/DataScreen.tsx` | The project's folder path, folder dropzone, folder list, processing progress, "all done" dialog |
 | Map | `screens/MapScreen.tsx` + `map/LayerTree.tsx` + `map/LayerFrame.tsx` | A file-explorer tree of what the engine rendered, and the selected document in an iframe. Raw/normalized applies to input variables only |
 | Tune the model | `screens/TuneScreen.tsx` + `tune/*` | A YAML text editor over the real file, with a read-only diagram of what it currently says |
@@ -488,6 +501,7 @@ No component changes.
 | `applyModel` | `POST /api/projects/{id}/model/apply` | **live for the write**; running the model is next |
 | `watchModelApply` | `GET /api/projects/{id}/model/apply/stream` | **SSE**, one `ApplyProgress` per variable — drives the loading dialog |
 | `listExamples` | `GET /api/model/examples` | mocked; the examples are UI copy |
+| `getEngineSettings` | `GET /api/settings` | the engine's own numbers, with no project to ask about |
 | `getSettings` | `GET /api/projects/{id}/settings` | resolves blanks against the engine's `.env` |
 | `saveSettings` | `PUT /api/projects/{id}/settings` | stores them; a run applies them |
 | `clearSettings` | `DELETE /api/projects/{id}/settings` | follow the engine again, rather than pinning its current numbers |

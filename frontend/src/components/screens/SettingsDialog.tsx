@@ -1,11 +1,25 @@
 import { useEffect, useState } from 'react';
 import * as api from '../../api';
-import { MAX_H3_RESOLUTION, MIN_H3_RESOLUTION, type ProjectSettings } from '../../types';
+import {
+  MAX_H3_RESOLUTION,
+  MIN_H3_RESOLUTION,
+  type ProjectSettings,
+  type Resolutions,
+} from '../../types';
 import { Dialog } from '../ui/Dialog';
 import { Icon } from '../ui/Icon';
 
 interface SettingsDialogProps {
-  projectId: string;
+  /** The project these belong to, or null before it has been created. */
+  projectId: string | null;
+  /**
+   * Without a project: what has been chosen so far, or null for the engine's
+   * own. The project does not exist yet, so the choice is handed back to the
+   * screen and written once it does — the resolution has to be settled
+   * before the first run, and after it is the only other place to put this.
+   */
+  chosen?: Resolutions | null;
+  onChoose?: (chosen: Resolutions | null) => void;
   onClose: () => void;
 }
 
@@ -28,21 +42,25 @@ const inRange = (value: number) =>
  * itself. Said out loud below, because otherwise it reads as the app being
  * slow at random.
  */
-export function SettingsDialog({ projectId, onClose }: SettingsDialogProps) {
+export function SettingsDialog({ projectId, chosen, onChoose, onClose }: SettingsDialogProps) {
   const [settings, setSettings] = useState<ProjectSettings | null>(null);
-  /** What the engine is set to now, so a change can say what it will cost. */
+  /** What is stored now, so a change can say what it will cost. */
   const [saved, setSaved] = useState<ProjectSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    api
-      .getSettings(projectId)
+    const load = projectId ? api.getSettings(projectId) : api.getEngineSettings();
+    load
       .then((loaded) => {
         if (!live) return;
-        setSettings(loaded);
-        setSaved(loaded);
+        // Before the project exists, a choice already made outranks the
+        // engine's numbers — reopening the dialog should show what you set.
+        const start =
+          !projectId && chosen ? { ...loaded, ...chosen, followingEngine: false } : loaded;
+        setSettings(start);
+        setSaved(start);
       })
       .catch((loadError: unknown) => {
         if (live) {
@@ -52,6 +70,9 @@ export function SettingsDialog({ projectId, onClose }: SettingsDialogProps) {
     return () => {
       live = false;
     };
+    // `chosen` is the starting value, not something to follow: re-reading it
+    // mid-edit would overwrite what is being typed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const processingValid = settings ? inRange(settings.processingResolution) : false;
@@ -68,10 +89,21 @@ export function SettingsDialog({ projectId, onClose }: SettingsDialogProps) {
 
   const save = async () => {
     if (!canSave || !settings) return;
+    const pair: Resolutions = {
+      processingResolution: settings.processingResolution,
+      mapResolution: settings.mapResolution,
+    };
+
+    if (!projectId) {
+      onChoose?.(pair);
+      onClose();
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
-      await api.saveSettings(projectId, settings);
+      await api.saveSettings(projectId, pair);
       onClose();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save the settings');
@@ -85,7 +117,8 @@ export function SettingsDialog({ projectId, onClose }: SettingsDialogProps) {
     setSaving(true);
     setError(null);
     try {
-      const cleared = await api.clearSettings(projectId);
+      const cleared = projectId ? await api.clearSettings(projectId) : await api.getEngineSettings();
+      if (!projectId) onChoose?.(null);
       setSettings(cleared);
       setSaved(cleared);
     } catch (clearError) {
@@ -104,9 +137,19 @@ export function SettingsDialog({ projectId, onClose }: SettingsDialogProps) {
   const show = (value: number) => (Number.isNaN(value) ? '' : String(value));
 
   return (
-    <Dialog onClose={onClose} width="min(480px, 100%)" labelledBy="settings-title">
-      <div className="dialog-title" id="settings-title">
-        Advanced settings
+    <Dialog onClose={onClose} width="min(500px, 100%)" labelledBy="settings-title">
+      <div className="settings-head">
+        <div className="dialog-title" id="settings-title">
+          Resolution &amp; config
+        </div>
+        {/* Which of the two states this is in, always — otherwise the
+            "Follow the engine" button is simply absent with no way to tell
+            why, which is exactly how it reads when nobody has set anything. */}
+        {settings && (
+          <span className={`settings-source${settings.followingEngine ? ' is-engine' : ''}`}>
+            {settings.followingEngine ? "Following the engine" : 'Set for this project'}
+          </span>
+        )}
       </div>
 
       {!settings ? (
@@ -123,10 +166,9 @@ export function SettingsDialog({ projectId, onClose }: SettingsDialogProps) {
         <>
           <p className="dialog-body" style={{ margin: 0 }}>
             {settings.followingEngine
-              ? 'Most projects never need these. Nothing has been set here, so this project ' +
-                'runs at whatever the engine is configured with — shown below.'
-              : 'Most projects never need these. They are applied to the engine when a run ' +
-                'starts.'}
+              ? 'Most projects never need these, and leaving them alone means following ' +
+                'whatever the engine is configured with — the numbers below.'
+              : 'These are applied to the engine when a run starts.'}
           </p>
 
           <div className="settings-grid">
@@ -177,8 +219,11 @@ export function SettingsDialog({ projectId, onClose }: SettingsDialogProps) {
                 the old size, so none of them survive the change. */}
             {reprocesses && (
               <p className="settings-note">
-                Changing the processing resolution rebuilds the hexagon master table and
-                reprocesses every variable on the next run — minutes, not seconds.
+                {projectId
+                  ? 'Changing the processing resolution rebuilds the hexagon master table and ' +
+                    'reprocesses every variable on the next run — minutes, not seconds.'
+                  : 'Worth settling now: changing it after the first run rebuilds the hexagon ' +
+                    'master table and reprocesses every variable.'}
               </p>
             )}
             {mapTooFine && (
@@ -201,9 +246,10 @@ export function SettingsDialog({ projectId, onClose }: SettingsDialogProps) {
       )}
 
       <div className="dialog-actions">
-        {/* The way back. Saving the numbers the engine currently reports is
-            not the same thing: that pins them, and they would stay put when
-            the engine moves. */}
+        {/* The way back, offered only when there is something to go back
+            from. Saving the numbers the engine currently reports is not the
+            same thing: that pins them, and they would stay put when the
+            engine moves. */}
         {settings && !settings.followingEngine && (
           <button
             type="button"
@@ -219,7 +265,7 @@ export function SettingsDialog({ projectId, onClose }: SettingsDialogProps) {
           Cancel
         </button>
         <button type="button" className="btn btn-primary" onClick={save} disabled={!canSave}>
-          {saving ? 'Saving…' : 'Save settings'}
+          {saving ? 'Saving…' : projectId ? 'Save settings' : 'Use these'}
         </button>
       </div>
     </Dialog>

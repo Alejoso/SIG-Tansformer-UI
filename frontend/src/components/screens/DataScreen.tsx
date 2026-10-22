@@ -4,6 +4,7 @@ import { useApp } from '../../state/app-context';
 import type { ImportPlan, InputVariable, PipelineRun, PipelineStage } from '../../types';
 import { Dialog } from '../ui/Dialog';
 import { Icon } from '../ui/Icon';
+import { SettingsDialog } from './SettingsDialog';
 
 /* The mockup said "up to ten", and that was right when the list was a record
    of folders someone had pointed at. It is now the engine's input tree, which
@@ -113,6 +114,7 @@ function StageRow({ stage }: { stage: PipelineStage }) {
 
 export function DataScreen() {
   const { project, goTo, showHints, showToast } = useApp();
+  const [showSettings, setShowSettings] = useState(false);
   const projectId = project?.id ?? '';
 
   /** What the engine will actually read, straight from its input tree. */
@@ -928,6 +930,19 @@ export function DataScreen() {
           >
             {starting ? 'Starting…' : phase === 'done' ? 'Process again' : running ? 'Processing…' : 'Process'}
           </button>
+          {/* Beside the button that starts the run, because the resolution
+              is a property of the run and this is the last moment it can be
+              chosen without reprocessing everything. */}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowSettings(true)}
+            disabled={locked}
+            style={{ height: 44, paddingInline: 18, gap: 8, flex: 'none' }}
+          >
+            <Icon name="sliders" />
+            Resolution
+          </button>
           {showHints && (
             <span className="muted-55" style={{ fontSize: 12.5 }}>
               {processHint}
@@ -978,6 +993,10 @@ export function DataScreen() {
             </button>
           </div>
         </Dialog>
+      )}
+
+      {showSettings && project && (
+        <SettingsDialog projectId={project.id} onClose={() => setShowSettings(false)} />
       )}
     </div>
   );

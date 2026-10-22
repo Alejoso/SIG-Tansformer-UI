@@ -708,6 +708,24 @@ def _describe_settings(project: store.ProjectRow) -> ProjectSettings:
     )
 
 
+@app.get("/api/settings")
+def get_engine_settings() -> ProjectSettings:
+    """
+    What the engine is configured with, for a project that does not exist yet.
+
+    The New project screen needs these before there is anything to attach
+    them to: the resolution has to be chosen before the first run, not after
+    it, and after it is where the only other way in would put you.
+    """
+    resolutions = project_settings.engine_defaults()
+    return ProjectSettings(
+        processingResolution=resolutions.processing,
+        mapResolution=resolutions.render,
+        coordinateSystem=project_settings.COORDINATE_SYSTEM,
+        followingEngine=True,
+    )
+
+
 @app.get("/api/projects/{project_id}/settings")
 def get_settings(project_id: str) -> ProjectSettings:
     """

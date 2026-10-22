@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
-import type { Mesh } from '../../types';
+import type { Mesh, Resolutions } from '../../types';
 import { Icon } from '../ui/Icon';
 import { SearchableSelect } from '../ui/SearchableSelect';
+import { SettingsDialog } from './SettingsDialog';
 
 export function NewProjectScreen() {
   const { openProject, showHints, showToast } = useApp();
@@ -16,6 +17,16 @@ export function NewProjectScreen() {
   const [creating, setCreating] = useState(false);
   /** The folder dialog blocks this request for as long as it is open. */
   const [choosing, setChoosing] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  /**
+   * Resolutions chosen before the project exists, written to it once it
+   * does. Null means the engine's own, which is what most projects want.
+   *
+   * They belong here rather than after: the processing resolution decides
+   * the size of every hexagon the first run computes, and changing it
+   * afterwards rebuilds the master table and reprocesses everything.
+   */
+  const [resolutions, setResolutions] = useState<Resolutions | null>(null);
   const meshUpload = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -64,6 +75,16 @@ export function NewProjectScreen() {
     setCreating(true);
     try {
       const project = await api.createProject({ name, meshId, outFolder, description });
+      if (resolutions) {
+        // Not fatal if it fails: the project exists and would run at the
+        // engine's resolution, which is what it would have done anyway. Say
+        // so rather than throw away a project that was created.
+        try {
+          await api.saveSettings(project.id, resolutions);
+        } catch {
+          showToast('Project created, but its resolution could not be saved');
+        }
+      }
       openProject(project, 'data');
     } finally {
       setCreating(false);
@@ -80,6 +101,19 @@ export function NewProjectScreen() {
               Name it, pick the map area you are working in, and we will take care of the hexagons.
             </p>
           </div>
+          {/* Here because the processing resolution has to be settled before
+              the first run, not after it. */}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowSettings(true)}
+            style={{ flex: 'none', gap: 8 }}
+          >
+            <Icon name="sliders" />
+            {resolutions
+              ? `Res ${resolutions.processingResolution} · map ${resolutions.mapResolution}`
+              : 'Resolution'}
+          </button>
         </div>
 
         <div className="card elev-sm setup-card">
@@ -199,6 +233,14 @@ export function NewProjectScreen() {
         </div>
       </div>
 
+      {showSettings && (
+        <SettingsDialog
+          projectId={null}
+          chosen={resolutions}
+          onChoose={setResolutions}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </div>
   );
 }

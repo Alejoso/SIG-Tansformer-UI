@@ -432,6 +432,9 @@ export interface ModelExample {
  * choice between three invented version strings for a thing the engine does
  * not have.
  */
+/** The pair a person actually chooses. The rest of the settings are readouts. */
+export type Resolutions = Pick<ProjectSettings, 'processingResolution' | 'mapResolution'>;
+
 export interface ProjectSettings {
   /**
    * H3 resolution the engine converts the source data at. This is the

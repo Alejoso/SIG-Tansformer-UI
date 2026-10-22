@@ -25,7 +25,37 @@ export async function run({ project }) {
     check('the Data screen names the project folder',
       title === project.outFolder && shown.length > 0, JSON.stringify(title));
 
+    /* ── it can be reached before the first run, not only after ─────── */
+    // This is the whole point of where the buttons are: the processing
+    // resolution decides the size of every hexagon the first run computes,
+    // so reaching it only from the Map — which you see after processing —
+    // means the first run is always at whatever the engine happened to say.
+    await page.getByRole('button', { name: /^resolution$/i }).first().click();
+    await page.locator('#processing-res').waitFor({ timeout: 10000 });
+    check('the Data screen can open it, beside Process', true);
+    const state = await page.locator('.settings-source').innerText();
+    check('it says which of the two states it is in', /following the engine|set for this project/i.test(state),
+      JSON.stringify(state));
+    await page.getByRole('button', { name: /^cancel$/i }).click();
+    await page.waitForTimeout(400);
+
+    await page.goto(process.env.MAPHEX_APP ?? 'http://127.0.0.1:5173', { waitUntil: 'networkidle' });
+    await page.locator('.project-new').first().click();
+    await page.waitForTimeout(600);
+    await page.getByRole('button', { name: /^resolution$/i }).first().click();
+    await page.locator('#processing-res').waitFor({ timeout: 10000 });
+    const engineDefault = await page.locator('#processing-res').inputValue();
+    check('New project offers it too, showing the engine\'s numbers',
+      Number(engineDefault) > 0, engineDefault);
+    await page.locator('#processing-res').fill('9');
+    await page.waitForTimeout(200);
+    await page.getByRole('button', { name: /use these/i }).click();
+    await page.waitForTimeout(500);
+    const label = await page.getByRole('button', { name: /^res 9/i }).count();
+    check('and the choice is carried on the button', label === 1);
+
     /* ── the dialog reads the backend ───────────────────────────────── */
+    await openProject(page, project.name);
     await goToScreen(page, 'Map');
     await page.waitForTimeout(1200);
     await page.getByRole('button', { name: /resolution & config|config/i }).first().click();
@@ -70,6 +100,24 @@ export async function run({ project }) {
       after.processingResolution === before.processingResolution && after.mapResolution === wanted,
       JSON.stringify(after));
     check('and it no longer claims to follow the engine', after.followingEngine === false);
+
+    /* ── which is when the way back appears ─────────────────────────── */
+    // It only exists once there is something to go back from, so with a
+    // fresh workspace it is never on screen. The chip beside the title is
+    // what says why.
+    await page.getByRole('button', { name: /resolution & config|config/i }).first().click();
+    await page.locator('#processing-res').waitFor({ timeout: 10000 });
+    const pinned = await page.locator('.settings-source').innerText();
+    check('a project with settings of its own says so',
+      /set for this project/i.test(pinned), JSON.stringify(pinned));
+    check('and offers the way back',
+      (await page.getByRole('button', { name: /follow the engine/i }).count()) === 1);
+    await page.getByRole('button', { name: /follow the engine/i }).click();
+    await page.waitForTimeout(900);
+    const followed = await api(`/projects/${project.id}/settings`);
+    check('which clears them', followed.followingEngine === true, JSON.stringify(followed));
+    await page.getByRole('button', { name: /^cancel$/i }).click();
+    await page.waitForTimeout(300);
 
     check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));
   } finally {

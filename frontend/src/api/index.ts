@@ -25,6 +25,7 @@ import type {
   PickedFolder,
   Project,
   ProjectSettings,
+  Resolutions,
   ValueScale,
 } from '../types';
 
@@ -367,6 +368,14 @@ export const listExamples = (): Promise<ModelExample[]> => mock.listExamples();
 /* ── settings ──────────────────────────────────────────────────────────── */
 
 /**
+ * LIVE: GET /api/settings
+ *
+ * What the engine is configured with, with no project to ask about — the
+ * New project screen needs them before there is anything to attach them to.
+ */
+export const getEngineSettings = (): Promise<ProjectSettings> => request('/settings');
+
+/**
  * LIVE: GET /api/projects/{id}/settings
  *
  * What this project will run at. A project that has never set them follows
@@ -384,7 +393,7 @@ export const getSettings = (projectId: string): Promise<ProjectSettings> =>
  */
 export const saveSettings = (
   projectId: string,
-  settings: Pick<ProjectSettings, 'processingResolution' | 'mapResolution'>,
+  settings: Resolutions,
 ): Promise<ProjectSettings> =>
   request(`/projects/${projectId}/settings`, {
     method: 'PUT',
