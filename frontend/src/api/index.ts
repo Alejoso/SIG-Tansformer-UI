@@ -366,10 +366,40 @@ export const listExamples = (): Promise<ModelExample[]> => mock.listExamples();
 
 /* ── settings ──────────────────────────────────────────────────────────── */
 
-/** ENDPOINT: GET /api/projects/{id}/settings */
+/**
+ * LIVE: GET /api/projects/{id}/settings
+ *
+ * What this project will run at. A project that has never set them follows
+ * the engine's own `.env`, and says so with `followingEngine`.
+ */
 export const getSettings = (projectId: string): Promise<ProjectSettings> =>
-  mock.getSettings(projectId);
+  request(`/projects/${projectId}/settings`);
 
-/** ENDPOINT: PUT /api/projects/{id}/settings */
-export const saveSettings = (projectId: string, settings: ProjectSettings): Promise<void> =>
-  mock.saveSettings(projectId, settings);
+/**
+ * LIVE: PUT /api/projects/{id}/settings
+ *
+ * Stores them. They reach the engine when a run starts — applying them means
+ * writing the engine's `.env` and recreating its container, which is not
+ * something closing a dialog should do to a run someone has going.
+ */
+export const saveSettings = (
+  projectId: string,
+  settings: Pick<ProjectSettings, 'processingResolution' | 'mapResolution'>,
+): Promise<ProjectSettings> =>
+  request(`/projects/${projectId}/settings`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      processingResolution: settings.processingResolution,
+      mapResolution: settings.mapResolution,
+    }),
+  });
+
+/**
+ * LIVE: DELETE /api/projects/{id}/settings
+ *
+ * Follow the engine's own configuration again. Not the same as saving the
+ * numbers it currently reports: one tracks the engine, the other pins a
+ * value that would stay put when the engine moves.
+ */
+export const clearSettings = (projectId: string): Promise<ProjectSettings> =>
+  request(`/projects/${projectId}/settings`, { method: 'DELETE' });

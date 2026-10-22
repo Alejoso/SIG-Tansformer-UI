@@ -145,7 +145,53 @@
 .data-screen .screen-body { max-width: 760px; }
 
 .data-title { font-size: 34px; margin: 0 0 8px; }
-.data-lede { margin: 0 0 24px; font-size: 15px; max-width: 520px; text-wrap: pretty; }
+.data-lede { margin: 0 0 14px; font-size: 15px; max-width: 520px; text-wrap: pretty; }
+
+/* Where this project's files are. Inline rather than in a dialog: it is the
+   answer to "where did my data go", which is asked while looking at the data
+   screen, not while looking for a settings menu. */
+.project-folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
+  margin-bottom: 24px;
+  padding: 6px 8px 6px 12px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 1px var(--color-divider);
+}
+.project-folder-label {
+  flex: none;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* The path gives way, not the label or the button: a clipped path still
+   reads from the left, which is the part that locates it. */
+.project-folder-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--color-accent-900);
+}
+.project-folder-copy {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+}
+.project-folder-copy:hover { background: var(--color-accent-200); color: var(--color-accent-900); }
 
 .folders { margin-top: 24px; }
 .folders-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }

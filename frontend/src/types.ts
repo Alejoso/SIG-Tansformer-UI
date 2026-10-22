@@ -425,24 +425,37 @@ export interface ModelExample {
 
 /* ── advanced settings ─────────────────────────────────────────────────── */
 
+/**
+ * The engine knobs a project carries.
+ *
+ * Two of them. There used to be a `pipelineVersion` as well, offering a
+ * choice between three invented version strings for a thing the engine does
+ * not have.
+ */
 export interface ProjectSettings {
-  pipelineVersion: string;
   /**
    * H3 resolution the engine converts the source data at. This is the
    * resolution the values are actually computed and stored at, so changing it
-   * means reprocessing.
+   * rebuilds the whole master table and reprocesses everything.
    */
   processingResolution: number;
   /**
-   * H3 resolution the map draws at. Kept separate from the processing
-   * resolution so a heavy mesh can be explored at a coarser, faster grid
-   * without touching the stored data.
+   * H3 resolution the engine draws its maps at. Kept separate from the
+   * processing resolution so a heavy mesh can be drawn at a coarser, faster
+   * grid without recomputing anything — changing it only redraws.
    *
-   * When this is coarser than `processingResolution` the backend has to
-   * aggregate cells up; when it is finer there is no more detail to show.
+   * Finer than `processingResolution` shows no more detail, because none was
+   * computed.
    */
   mapResolution: number;
+  /** Shown, not offered: the engine works in WGS 84 throughout. */
   coordinateSystem: string;
+  /**
+   * True while this project has never set them, and is following whatever
+   * the engine's own `.env` is configured with. Worth saying on screen: the
+   * numbers are real either way, but nobody here chose them.
+   */
+  followingEngine: boolean;
 }
 
 /** H3 defines resolutions 0 (coarsest) through 15 (finest). */

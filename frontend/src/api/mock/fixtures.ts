@@ -6,7 +6,7 @@
  * so components written against the mocks work unchanged against the server.
  */
 
-import type { ModelExample, ProjectSettings } from '../../types';
+import type { ModelExample } from '../../types';
 
 /**
  * The starter structures, in the engine's own schema.
@@ -106,14 +106,3 @@ export const EXAMPLES: ModelExample[] = [
   },
 ];
 
-export const DEFAULT_SETTINGS: ProjectSettings = {
-  pipelineVersion: 'v2.4 (current)',
-  processingResolution: 8,
-  // Defaults to the processing resolution: showing every cell that was
-  // computed is the honest starting point, and coarsening is a deliberate
-  // choice the user makes for speed.
-  mapResolution: 8,
-  coordinateSystem: 'EPSG:4326',
-};
-
-export const PIPELINE_VERSIONS = ['v2.4 (current)', 'v2.3', 'v1.9 (legacy)'];

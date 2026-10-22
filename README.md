@@ -114,9 +114,54 @@ two of them would be writing the same project's model file.
 | Area | State |
 |---|---|
 | Projects, data folders, meshes, path checking | **Live** — FastAPI, stored in `data/*.csv` |
-| The model file | **Live** — a YAML file under the project's results folder |
-| The map layers | **Live** — discovered from the project's `out/` folder |
-| Layer tree, rendered maps, the model, processing, apply | Mocked in `frontend/src/api/mock/` |
+| The model file, and running the model | **Live** — a YAML file under the project's folder, run with `MCDA/run_mcda.sh` |
+| Processing | **Live** — `run_full.sh`, watched stage by stage |
+| The layer tree and the rendered maps | **Live** — discovered from the project's `out/` folder |
+| Project settings | **Live** — two resolutions, written into the engine's `.env` before a run |
+| Uploading a mesh, and the model examples | Mocked in `frontend/src/api/mock/` |
+
+Those last two are all that is left of the mocks. A mesh upload has no server
+route, and the examples are UI copy with nowhere else to live yet.
+
+## Settings reach the engine through its `.env`
+
+Two settings do anything: the resolution the data is computed at, and the one
+the maps are drawn at. They are stored per project, as `h3_res` and
+`render_h3_res` in `projects.csv`, and blank means "whatever the engine is
+configured with" — which is what a project that has never been touched
+reports, read from the engine's own `.env`.
+
+They are *applied* when a run starts, by writing that `.env` and recreating
+the app container. Both parts are necessary:
+
+- **Writing the file.** `H3_RES` is read inside the container, and
+  `run_full.sh` does not forward it — it is not in that script's
+  `FORWARD_VARS`. What the script *does* do with its own copy is compare it
+  against what the last master build recorded, and rebuild when they differ.
+  So exporting a different value without writing it to `.env` would have the
+  script rebuild the master on every run forever: comparing a number the
+  build never sees against the one the build keeps writing.
+- **Recreating the container.** Compose loads `.env` with `env_file:` at
+  creation time, so a container that is already up keeps the environment it
+  started with however many times `up -d` runs. The container is recreated
+  only when the file actually changed, which is why `write_env_values`
+  returns whether it did.
+
+`RENDER_H3_RES` is forwarded by `run_full.sh`, but `MCDA/run_mcda.sh`
+forwards nothing but the execution id — so the model run's maps read it from
+the container too, and the file is the one mechanism that covers every path.
+
+Because the engine has one database and one `.env`, these are really
+properties of the engine as it is configured right now; keeping them per
+project means "set the engine to this before running this project". Two
+projects that disagree about the processing resolution cost a master rebuild
+each time you switch. The engine notices and does it; `settings.save` marks
+the project stale so our own record of what the database holds is cleared
+with it.
+
+The coordinate system is shown and not offered: the engine works in WGS 84
+throughout. There was also a *pipeline version* offering a choice between
+three invented version strings; the engine has no versioning, so it is gone.
 
 ## The project store
 
@@ -387,7 +432,7 @@ still works.
 |---|---|---|
 | Projects | `screens/ProjectsScreen.tsx` | Project list, empty state, "new project" tile |
 | New project | `screens/NewProjectScreen.tsx` | Name, mesh, results folder, description, advanced settings. Reached from the Projects screen, not the stepper |
-| Add your data | `screens/DataScreen.tsx` | Folder dropzone (max 10), folder list, processing progress, "all done" dialog |
+| Add your data | `screens/DataScreen.tsx` | The project's folder path, folder dropzone, folder list, processing progress, "all done" dialog |
 | Map | `screens/MapScreen.tsx` + `map/LayerTree.tsx` + `map/LayerFrame.tsx` | A file-explorer tree of what the engine rendered, and the selected document in an iframe. Raw/normalized applies to input variables only |
 | Tune the model | `screens/TuneScreen.tsx` + `tune/*` | A YAML text editor over the real file, with a read-only diagram of what it currently says |
 | Writing the model | `screens/ExamplesScreen.tsx` | What every key in the config means, and blocks to start from. Reached from the Model screen, not the stepper |
@@ -439,9 +484,10 @@ No component changes.
 | `saveModel` | `PUT /api/projects/{id}/model` | **live** — writes the text as-is; valid or not |
 | `applyModel` | `POST /api/projects/{id}/model/apply` | **live for the write**; running the model is next |
 | `watchModelApply` | `GET /api/projects/{id}/model/apply/stream` | **SSE**, one `ApplyProgress` per variable — drives the loading dialog |
-| `listExamples` | `GET /api/model/examples` | |
-| `getSettings` | `GET /api/projects/{id}/settings` | |
-| `saveSettings` | `PUT /api/projects/{id}/settings` | |
+| `listExamples` | `GET /api/model/examples` | mocked; the examples are UI copy |
+| `getSettings` | `GET /api/projects/{id}/settings` | resolves blanks against the engine's `.env` |
+| `saveSettings` | `PUT /api/projects/{id}/settings` | stores them; a run applies them |
+| `clearSettings` | `DELETE /api/projects/{id}/settings` | follow the engine again, rather than pinning its current numbers |
 
 The wire shapes are in **`src/types.ts`** — the Pydantic models should mirror
 them one-for-one.

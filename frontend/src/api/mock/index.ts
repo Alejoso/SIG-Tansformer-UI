@@ -10,9 +10,8 @@
 import type {
   Mesh,
   ModelExample,
-  ProjectSettings,
 } from '../../types';
-import { DEFAULT_SETTINGS, EXAMPLES } from './fixtures';
+import { EXAMPLES } from './fixtures';
 
 const delay = <T>(value: T, ms = 180): Promise<T> =>
   new Promise((resolve) => setTimeout(() => resolve(value), ms));
@@ -35,22 +34,4 @@ export async function uploadMesh(file: File): Promise<Mesh> {
 
 /* ── model ─────────────────────────────────────────────────────────────── */
 
-const settingsByProject = new Map<string, ProjectSettings>();
-
 export const listExamples = (): Promise<ModelExample[]> => delay(clone(EXAMPLES));
-
-/* ── settings ──────────────────────────────────────────────────────────── */
-
-export async function getSettings(projectId: string): Promise<ProjectSettings> {
-  if (!settingsByProject.has(projectId)) {
-    settingsByProject.set(projectId, clone(DEFAULT_SETTINGS));
-  }
-  return delay(clone(settingsByProject.get(projectId)!));
-}
-
-export async function saveSettings(projectId: string, settings: ProjectSettings): Promise<void> {
-  settingsByProject.set(projectId, clone(settings));
-  // The resolutions now tell the engine what to render, rather than changing
-  // anything the UI draws itself, so there is no client-side cache to clear.
-  await delay(null, 120);
-}

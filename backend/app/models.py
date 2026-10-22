@@ -105,6 +105,33 @@ class LayerTree(BaseModel):
     inputs: list[LayerNode]
 
 
+class ProjectSettings(BaseModel):
+    """
+    The engine knobs a project carries.
+
+    Only two are settings — the rest of what the dialog used to show was
+    either decoration or, in the case of a pipeline version, a list of names
+    for a thing the engine does not have.
+    """
+
+    #: H3 resolution the values are computed and stored at. Changing it means
+    #: the whole master table is rebuilt and everything reprocessed.
+    processingResolution: int
+    #: H3 resolution the engine draws its maps at. Changing it means the maps
+    #: are drawn again; the data is untouched.
+    mapResolution: int
+    #: Shown, not offered: the engine works in WGS 84 throughout.
+    coordinateSystem: str = "EPSG:4326"
+    #: True while this project has never set them and is following whatever
+    #: the engine's own `.env` says.
+    followingEngine: bool = False
+
+
+class SaveSettingsPayload(BaseModel):
+    processingResolution: int
+    mapResolution: int
+
+
 class ModelIssue(BaseModel):
     message: str
     #: 1-based, when the parser gives a position.

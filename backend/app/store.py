@@ -39,6 +39,13 @@ PROJECT_FIELDS = [
     "mesh_label",
     "description",
     "out_folder",
+    # The engine's two resolution knobs, kept beside the folder they apply
+    # to. Blank means "whatever the engine is set to" — see `settings.py`,
+    # which resolves them and writes them into the engine's `.env` before a
+    # run. A store written before these existed reads them as blank, which is
+    # exactly the right answer for a project nobody has set them on.
+    "h3_res",
+    "render_h3_res",
     "created_at",
     "updated_at",
 ]
@@ -53,6 +60,10 @@ class ProjectRow:
     mesh_label: str
     description: str = ""
     out_folder: str = ""
+    #: H3 resolution the values are computed and stored at.
+    h3_res: str = ""
+    #: H3 resolution the engine draws its maps at.
+    render_h3_res: str = ""
     created_at: str = ""
     updated_at: str = ""
 

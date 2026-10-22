@@ -463,6 +463,18 @@ export function DataScreen() {
           ? 'This converts every location into a hexagon. You can keep working after it starts.'
           : 'Your data is being converted.';
 
+  /** Put the path on the clipboard, for a terminal or a file manager. */
+  const copyFolder = async (path: string) => {
+    try {
+      await navigator.clipboard.writeText(path);
+      showToast('Path copied');
+    } catch {
+      // Clipboard access can be refused outright; saying so beats a button
+      // that looks like it worked.
+      showToast('Could not copy — select the path and copy it by hand');
+    }
+  };
+
   return (
     <div className="screen data-screen">
       <div className="screen-body">
@@ -471,6 +483,30 @@ export function DataScreen() {
           One folder per variable. Each one is copied into the project and becomes a layer you
           can look at on the map.
         </p>
+
+        {/* Where "the project" actually is. Everything the engine reads and
+            writes for this project lives under here — `in/` for what you add,
+            `out/` for what it makes, `model/model.yaml`, `MCDA/runs/` — and
+            until it is on screen the only way to find it is the projects
+            list. The full path is in the title too, since a long one is
+            clipped. */}
+        {project?.outFolder && (
+          <div className="project-folder">
+            <Icon name="folder" size={14} color="var(--color-accent-600)" />
+            <span className="project-folder-label muted-55">Project folder</span>
+            <span className="project-folder-path mono" title={project.outFolder}>
+              {project.outFolder}
+            </span>
+            <button
+              type="button"
+              className="project-folder-copy"
+              onClick={() => copyFolder(project.outFolder)}
+            >
+              <Icon name="copy" size={13} />
+              Copy
+            </button>
+          </div>
+        )}
 
         {orphaned.length > 0 && (
           <div className="folder-alert">

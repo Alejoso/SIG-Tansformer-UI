@@ -288,7 +288,9 @@ def unwritable_host_folders() -> list[Path]:
     return blocked
 
 
-def compose_up(data_dir: Path | None = None) -> subprocess.CompletedProcess[str] | None:
+def compose_up(
+    data_dir: Path | None = None, *, recreate: bool = False
+) -> subprocess.CompletedProcess[str] | None:
     """
     Bring up Postgres and the idle app container, mounted on `data_dir`.
 
@@ -297,10 +299,18 @@ def compose_up(data_dir: Path | None = None) -> subprocess.CompletedProcess[str]
 
     The mount matters for anything using `compose exec` — the model runner
     does — because the container holds whichever project was mounted last.
+
+    `recreate` is for when `.env` has changed. Compose loads it with
+    `env_file:` at container-creation time, so a running container keeps the
+    environment it was started with however many times `up -d` is run. Rather
+    than depend on compose noticing, the caller that changed the file says so.
     """
     prepare_host_folders(data_dir)
     env = run_full_env(extra={"DATA_DIR": str(data_dir)} if data_dir else None)
-    return _run(["docker", "compose", "up", "-d"], cwd=PIPELINE_DIR, timeout=600, env=env)
+    command = ["docker", "compose", "up", "-d"]
+    if recreate:
+        command.append("--force-recreate")
+    return _run(command, cwd=PIPELINE_DIR, timeout=600, env=env)
 
 
 def read_env_file() -> dict[str, str]:
@@ -321,6 +331,57 @@ def read_env_file() -> dict[str, str]:
         name, _, value = line.partition("=")
         values[name.strip()] = value.strip()
     return values
+
+
+def write_env_values(values: dict[str, str]) -> bool:
+    """
+    Set these keys in the pipeline's `.env`. Returns whether anything changed.
+
+    Needed because some of the engine's knobs are only readable inside the
+    container, and the container gets its environment from this file. The
+    clearest case is `H3_RES`: `run_full.sh` compares the *host* value against
+    what the last master build recorded, but never forwards it to the
+    container — it is not in that script's `FORWARD_VARS` — so the build
+    itself uses whatever is in here. Exporting a different value without
+    writing it would make the script rebuild the master on every single run,
+    comparing a number the build never sees against the one it keeps writing.
+
+    Existing lines are edited in place, keeping their position and the
+    comments around them: this is a file the engine's own README explains, and
+    rewriting it in our own order would make it unrecognisable to whoever
+    wrote it.
+    """
+    env_path = PIPELINE_DIR / ".env"
+    if not env_path.exists():
+        return False
+
+    lines = env_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    remaining = dict(values)
+    changed = False
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        name = stripped.partition("=")[0].strip()
+        if name not in remaining:
+            continue
+        wanted = remaining.pop(name)
+        if stripped != f"{name}={wanted}":
+            lines[index] = f"{name}={wanted}"
+            changed = True
+
+    # A key the file never had goes at the end, said plainly — someone
+    # reading this file should be able to tell which lines are not theirs.
+    if remaining:
+        changed = True
+        lines.append("")
+        lines.append("# Set by Maphex from the project's settings.")
+        lines += [f"{name}={value}" for name, value in remaining.items()]
+
+    if changed:
+        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return changed
 
 
 def database_url() -> str:

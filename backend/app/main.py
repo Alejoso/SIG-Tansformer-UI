@@ -27,6 +27,7 @@ from . import (
     outputs,
     pipeline,
     runs,
+    settings as project_settings,
     store,
 )
 from .models import (
@@ -39,6 +40,7 @@ from .models import (
     LayerTree,
     ModelFile,
     ModelIssue,
+    ProjectSettings,
     NewProjectPayload,
     PickFolderPayload,
     PickFolderResult,
@@ -51,6 +53,7 @@ from .models import (
     PipelineStageState,
     Project,
     SaveModelPayload,
+    SaveSettingsPayload,
 )
 
 app = FastAPI(title="Maphex", version="0.1.0")
@@ -379,6 +382,22 @@ def start_processing(project_id: str, payload: ProcessPayload | None = None) -> 
     # next line, a host-side mkdir, fails.
     pipeline.prepare_host_folders(folder)
 
+    # Set the engine to this project's resolutions. They live in its `.env`
+    # because that is the only place the container reads them from, and a
+    # container already running keeps the environment it started with — so a
+    # change means recreating it before the run can see it.
+    if project_settings.apply_to_engine(project):
+        up = pipeline.compose_up(folder if pipeline.honours_data_dir() else None, recreate=True)
+        if up is not None and up.returncode != 0:
+            detail = (up.stderr or up.stdout or "").strip()[-400:]
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    detail
+                    or "The resolution changed, but the engine's container could not be restarted."
+                ),
+            )
+
     # One database serves every project, and nothing in it is scoped to one —
     # so a run clears the per-project tables when it must, and reuses the H3
     # master, which belongs to the boundaries rather than to any project.
@@ -547,7 +566,12 @@ def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> 
     # The container execs against whatever DATA_DIR was mounted last, so it
     # has to be pointed at this project before the model reads anything.
     pipeline.prepare_host_folders(folder)
-    up = pipeline.compose_up(folder if pipeline.honours_data_dir() else None)
+    # Same as processing: the render resolution is only readable inside the
+    # container, and `run_mcda.sh` forwards nothing but the execution id.
+    recreate = project_settings.apply_to_engine(project)
+    up = pipeline.compose_up(
+        folder if pipeline.honours_data_dir() else None, recreate=recreate
+    )
     if up is None or up.returncode != 0:
         detail = (up.stderr or up.stdout or "").strip()[-400:] if up else ""
         raise HTTPException(
@@ -667,6 +691,72 @@ def apply_model(project_id: str, payload: SaveModelPayload) -> ModelFile:
     model_store.write_model(project, payload.text)
     store.touch_project(project_id)
     return _describe_model(project, payload.text)
+
+
+# ── settings ──────────────────────────────────────────────────────────────
+
+
+def _describe_settings(project: store.ProjectRow) -> ProjectSettings:
+    resolutions = project_settings.of(project)
+    return ProjectSettings(
+        processingResolution=resolutions.processing,
+        mapResolution=resolutions.render,
+        coordinateSystem=project_settings.COORDINATE_SYSTEM,
+        # Nothing has been chosen here, so these are the engine's own numbers
+        # and the screen can say so rather than implying someone picked them.
+        followingEngine=not (project.h3_res or project.render_h3_res),
+    )
+
+
+@app.get("/api/projects/{project_id}/settings")
+def get_settings(project_id: str) -> ProjectSettings:
+    """
+    What this project will run at.
+
+    Blank in the store means "whatever the engine is configured with", so
+    this reads the engine's `.env` for those — the honest answer to "what
+    resolution is this?" before anyone has chosen one.
+    """
+    return _describe_settings(_require_project(project_id))
+
+
+@app.put("/api/projects/{project_id}/settings")
+def save_settings(project_id: str, payload: SaveSettingsPayload) -> ProjectSettings:
+    """
+    Store them. They reach the engine when a run starts, not here.
+
+    Deliberately: applying them means writing the engine's `.env` and
+    recreating its container, which is not something saving a dialog should
+    do to a run someone else has going.
+    """
+    project = _require_project(project_id)
+
+    for value, what in (
+        (payload.processingResolution, "Processing resolution"),
+        (payload.mapResolution, "Map resolution"),
+    ):
+        if not project_settings.MIN_RESOLUTION <= value <= project_settings.MAX_RESOLUTION:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{what} must be between {project_settings.MIN_RESOLUTION} and "
+                    f"{project_settings.MAX_RESOLUTION}. H3 does not define any others."
+                ),
+            )
+
+    saved = project_settings.save(
+        project,
+        project_settings.Resolutions(
+            processing=payload.processingResolution, render=payload.mapResolution
+        ),
+    )
+    return _describe_settings(saved)
+
+
+@app.delete("/api/projects/{project_id}/settings")
+def clear_settings(project_id: str) -> ProjectSettings:
+    """Follow the engine's own configuration again, rather than a pinned number."""
+    return _describe_settings(project_settings.clear(_require_project(project_id)))
 
 
 # ── filesystem ────────────────────────────────────────────────────────────

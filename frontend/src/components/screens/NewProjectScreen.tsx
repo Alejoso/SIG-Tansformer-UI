@@ -4,7 +4,6 @@ import { useApp } from '../../state/app-context';
 import type { Mesh } from '../../types';
 import { Icon } from '../ui/Icon';
 import { SearchableSelect } from '../ui/SearchableSelect';
-import { SettingsDialog } from './SettingsDialog';
 
 export function NewProjectScreen() {
   const { openProject, showHints, showToast } = useApp();
@@ -17,7 +16,6 @@ export function NewProjectScreen() {
   const [creating, setCreating] = useState(false);
   /** The folder dialog blocks this request for as long as it is open. */
   const [choosing, setChoosing] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const meshUpload = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -82,15 +80,6 @@ export function NewProjectScreen() {
               Name it, pick the map area you are working in, and we will take care of the hexagons.
             </p>
           </div>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setShowSettings(true)}
-            style={{ flex: 'none', gap: 8 }}
-          >
-            <Icon name="sliders" />
-            Config
-          </button>
         </div>
 
         <div className="card elev-sm setup-card">
@@ -210,7 +199,6 @@ export function NewProjectScreen() {
         </div>
       </div>
 
-      {showSettings && <SettingsDialog projectId={null} onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

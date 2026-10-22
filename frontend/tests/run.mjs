@@ -23,8 +23,9 @@ import * as modelScreen from './model-screen.mjs';
 import * as examplesScreen from './examples-screen.mjs';
 import * as layerOpacity from './layer-opacity.mjs';
 import * as mapScreen from './map-screen.mjs';
+import * as settings from './settings.mjs';
 
-const SUITES = [modelScreen, examplesScreen, layerOpacity, mapScreen];
+const SUITES = [modelScreen, examplesScreen, layerOpacity, mapScreen, settings];
 
 const only = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));
 const wanted = SUITES.filter(
