@@ -107,9 +107,14 @@ class LayerTree(BaseModel):
 
 class ModelIssue(BaseModel):
     message: str
-    #: 1-based, when the parser gives a position. Structural problems have none.
+    #: 1-based, when the parser gives a position.
     line: int | None = None
     column: int | None = None
+    #: `error` when the engine would crash on this or silently drop the leaf;
+    #: `warning` when it runs anyway but probably not as intended — weights
+    #: that do not add to 1, a key it does not read. The engine itself only
+    #: warns about its config, so neither kind blocks a run.
+    severity: str = "error"
 
 
 class ModelFile(BaseModel):

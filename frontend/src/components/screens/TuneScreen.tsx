@@ -10,6 +10,42 @@ import { ModelDiagram } from '../tune/ModelDiagram';
 import { YamlCodeEditor } from '../tune/YamlCodeEditor';
 import { Icon } from '../ui/Icon';
 
+/**
+ * Paste a snippet where it would actually parse.
+ *
+ * A criterion is a list item, so it goes at the end of `criteria:` — appending
+ * it to the file would leave a stray `- key:` after the last top-level key and
+ * nothing would load. A top-level block goes at the end, where it belongs.
+ *
+ * The end of the `criteria:` list is the last line below it that is indented
+ * or blank: a key in column one is the next thing in the document, and the
+ * generated file has exactly that — a comment and the zoning keys underneath.
+ */
+function insertSnippet(text: string, example: ModelExample): string {
+  const block = example.yaml.replace(/\s+$/, '');
+  if (example.scope === 'top') return `${text.trimEnd()}\n\n${block}\n`;
+
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => /^criteria\s*:/.test(line));
+  if (start === -1) return `${text.trimEnd()}\n\ncriteria:\n${block}\n`;
+
+  let last = start;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === '') continue;
+    if (!/^\s/.test(line)) break;
+    last = index;
+  }
+
+  // An empty `criteria: []` has nothing to append to — the list has to stop
+  // being inline before an item can go under it.
+  if (last === start && /^criteria\s*:\s*\[\s*\]\s*$/.test(lines[start])) {
+    lines[start] = 'criteria:';
+  }
+
+  return [...lines.slice(0, last + 1), block, ...lines.slice(last + 1)].join('\n');
+}
+
 export function TuneScreen() {
   const { project, goTo, showHints, showToast, setMapView } = useApp();
   const projectId = project?.id ?? '';
@@ -156,9 +192,9 @@ export function TuneScreen() {
     goTo('map');
   };
 
-  /** Paste an example in at the end, rather than replacing the file. */
+  /** Paste an example in, rather than replacing the file. */
   const insertExample = (example: ModelExample) => {
-    setText((current) => `${current.trimEnd()}\n\n${example.yaml.trim()}\n`);
+    setText((current) => insertSnippet(current, example));
     setShowExamples(false);
     showToast(`${example.title} added to the editor`);
   };
@@ -190,22 +226,37 @@ export function TuneScreen() {
       line: p.line,
       kind: 'syntax' as const,
     })),
-    ...structureProblems.map((p) => ({
-      message: p.message,
-      line: p.line,
-      kind: 'structure' as const,
-    })),
+    // Errors first: one of them means the engine would not score this, where
+    // a warning only means it would score it differently than it reads.
+    ...[...structureProblems]
+      .sort((a, b) => Number(a.severity === 'warning') - Number(b.severity === 'warning'))
+      .map((p) => ({
+        message: p.message,
+        line: p.line,
+        kind: p.severity === 'warning' ? ('warning' as const) : ('model' as const),
+      })),
   ];
+
+  const blocking = syntaxProblems.length + structureProblems.filter(
+    (problem) => problem.severity !== 'warning',
+  ).length;
+  const warnings = structureProblems.filter(
+    (problem) => problem.severity === 'warning',
+  ).length;
 
   const statusLabel = syntaxProblems.length
     ? `${syntaxProblems.length} syntax ${syntaxProblems.length === 1 ? 'error' : 'errors'}`
-    : structureProblems.length
-      ? `${structureProblems.length} ${structureProblems.length === 1 ? 'problem' : 'problems'}`
-      : dirty
-        ? 'Valid · unsaved'
-        : 'Saved';
+    : blocking
+      ? `${blocking} ${blocking === 1 ? 'problem' : 'problems'}`
+      : warnings
+        ? `${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`
+        : dirty
+          ? 'Valid · unsaved'
+          : 'Saved';
 
-  const statusClass = problems.length ? 'is-invalid' : dirty ? '' : 'is-clean';
+  // A warning is not invalid: the engine runs the file and so will we. It is
+  // worth seeing, not worth going red over.
+  const statusClass = blocking ? 'is-invalid' : warnings ? 'is-warning' : dirty ? '' : 'is-clean';
 
   return (
     <div className="tune-screen">
@@ -214,15 +265,20 @@ export function TuneScreen() {
           <h1>Tune the model</h1>
           {showHints && (
             <p className="muted">
-              This is the model file itself — edit it however you like, comments and all. Syntax is
-              checked as you type; the structure is checked when you save.
+              This is the model file the engine reads: criteria, their subgroups, and a leaf per
+              column of the master table. Edit it however you like, comments and all — syntax is
+              checked as you type, the structure when you save.
             </p>
           )}
         </div>
 
         <div className="tune-actions">
           <span className={`status-chip ${statusClass}`}>
-            <Icon name={problems.length ? 'close' : 'check'} size={13} strokeWidth={3} />
+            {blocking ? (
+              <Icon name="close" size={13} strokeWidth={3} />
+            ) : warnings ? null : (
+              <Icon name="check" size={13} strokeWidth={3} />
+            )}
             {statusLabel}
           </span>
           <button
@@ -275,7 +331,7 @@ export function TuneScreen() {
               {problems.slice(0, 8).map((problem, index) => (
                 <div key={`${problem.kind}-${index}`} className="yaml-problem">
                   <span className={`yaml-problem-kind is-${problem.kind}`}>
-                    {problem.kind === 'syntax' ? 'syntax' : 'model'}
+                    {problem.kind}
                   </span>
                   {problem.line !== null && (
                     <span className="yaml-problem-line mono">line {problem.line}</span>
@@ -303,7 +359,7 @@ export function TuneScreen() {
             <p className="muted-55">
               {syntaxProblems.length
                 ? 'The diagram follows the text, so it comes back as soon as the YAML is valid.'
-                : 'Add a `variables:` mapping and the structure will appear here.'}
+                : 'Add a criterion under `criteria:` and the structure will appear here. The Examples button has one ready to paste.'}
             </p>
           </div>
         )}

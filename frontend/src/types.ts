@@ -292,74 +292,101 @@ export interface LayerTree {
 
 /* ── model (the tunable YAML) ──────────────────────────────────────────── */
 
-/**
- * How a variable's raw values are turned into a comparable score.
- *
- * - `minmax` — rescale onto 0-1 using the observed range. No configuration.
- * - `standard` — subtract the mean, divide by the standard deviation. No
- *   configuration.
- * - `intervals` — hand-written ranges, each mapping to a number. This is also
- *   how a categorical result is expressed, since a category is just a number
- *   with a meaning attached.
- */
-export type Normalization = 'minmax' | 'standard' | 'intervals';
+/* ── the model file's own shape ─────────────────────────────────────────── */
 
 /**
- * One row of an interval transform: every value in the range becomes `value`.
+ * How a leaf's values become a score from 1 to 5.
  *
- * Bounds are `(from, to]` — exclusive lower, inclusive upper — matching the
- * engine's `range` bins, so the UI does not teach a different convention from
- * the one that actually runs.
+ * These are the engine's, from the `leaf_score` dispatch in
+ * `MCDA/engine/mcda_score.py` — not a set this app invented:
  *
- * All three are strings so a half-typed `-` or `0.` survives editing, the same
- * reason `weight` is a string.
+ * - `range` — your own cuts, `bins` of `[from, to, score]`, read as
+ *   `(from, to]`. `null` is unbounded.
+ * - `map` — an exact value to a score, for categories.
+ * - `direct` — the value already is a 1-5 score.
+ * - `minmax` — the range present in the data, stretched onto 1-5.
+ * - `zscore` — the same, around the mean: z of -2..2 becomes 1..5.
  */
-export interface Interval {
-  /** Lower bound, exclusive. Empty means unbounded below. */
-  from: string;
-  /** Upper bound, inclusive. Empty means unbounded above. */
-  to: string;
-  /** What values in this range become. Always a number. */
-  value: string;
+export type LeafType = 'range' | 'map' | 'direct' | 'minmax' | 'zscore';
+
+/** Which half of the country a leaf covers. The sea and the land score apart. */
+export type Site = 'both' | 'onshore' | 'offshore';
+
+/**
+ * One variable being scored.
+ *
+ * Read out of the file for the diagram to draw, so every field is what the
+ * text says rather than what it should say — a missing weight stays null
+ * instead of becoming a default, because the diagram's job is to show what
+ * is written.
+ */
+export interface ModelLeaf {
+  /** The engine's label for it, hyphenated: `SOE-001`. */
+  code: string;
+  /** The master-table column holding the values. This is what gets scored. */
+  column: string;
+  site: Site;
+  type: LeafType;
+  /** Its share of the subgroup, or null when the file does not say. */
+  weight: number | null;
+  /** Cuts on a `range` leaf, entries on a `map` one. Zero for the rest. */
+  steps: number;
+  /** `direction: cost` — a high value scores low. */
+  inverted: boolean;
 }
 
-/**
- * A node in the weighting tree. The engine's real config is richer and is
- * expected to change a lot, so this stays deliberately small: a name, a
- * weight, an exclusion flag, a normalization, and children.
- */
-export interface ModelVariable {
+/** A group of leaves that answer the same question. */
+export interface ModelSubgroup {
   key: string;
-  /** Weight, kept as a string so a half-typed `0.` survives editing. */
-  weight: string;
-  /** When true the variable rules a cell out instead of weighting it. */
-  exclusion_variable: boolean;
-  normalization: Normalization;
-  /**
-   * The ranges, in order. Only meaningful when `normalization` is
-   * `intervals`; kept on the variable rather than in a side table so one node
-   * carries everything about itself.
-   */
-  intervals?: Interval[];
-  sub?: ModelVariable[];
+  /** The readable name, when the file gives one. */
+  nombre: string;
+  weight: number | null;
+  /** `combine: min` — the worst leaf decides, rather than the average. */
+  worstWins: boolean;
+  /** What a hexagon the variable does not cover scores, when it sets that. */
+  absent: number | null;
+  /** It normalizes its own spread instead of averaging weighted leaves. */
+  normalized: boolean;
+  leaves: ModelLeaf[];
 }
 
+export interface ModelCriterion {
+  key: string;
+  nombre: string;
+  weight: number | null;
+  subgroups: ModelSubgroup[];
+}
+
+/**
+ * The whole model, as the diagram reads it.
+ *
+ * Zoning is counted rather than detailed: it does not score anything, it
+ * rules hexagons out, so it belongs in the caption and not in the tree.
+ */
 export interface ModelConfig {
-  project: string;
-  model: string;
-  objective: string;
-  /** H3 resolution, as a string for the same reason as `weight`. */
-  resolution: string;
-  variables: ModelVariable[];
+  criteria: ModelCriterion[];
+  /** Columns whose mere presence excludes a hexagon. */
+  excludedColumns: number;
+  /** Rules excluding by a threshold on a continuous variable. */
+  excludedThresholds: number;
+  /** Codes kept whatever else is dropped. */
+  prioritized: number;
 }
 
 
 /** One thing wrong with the model file. */
 export interface ModelIssue {
   message: string;
-  /** 1-based, when the parser gives a position. Structural problems have none. */
+  /** 1-based, when the parser gives a position. */
   line: number | null;
   column: number | null;
+  /**
+   * `error` when the engine would crash on this or quietly drop the leaf;
+   * `warning` when it runs anyway but probably not as meant. The engine only
+   * warns about its own config, so neither kind blocks Apply — only YAML that
+   * does not parse does.
+   */
+  severity: 'error' | 'warning';
 }
 
 /**
@@ -385,6 +412,13 @@ export interface ModelExample {
   id: string;
   title: string;
   blurb: string;
+  /**
+   * Where the snippet belongs. A `criterion` block is a list item and goes at
+   * the end of `criteria:`; a `top` block is its own key and goes at the end
+   * of the file. Pasting either in the other's place would not parse, which
+   * is why this is carried rather than guessed from the text.
+   */
+  scope: 'criterion' | 'top';
   /** Shown in the dialog, and inserted into the editor verbatim. */
   yaml: string;
 }

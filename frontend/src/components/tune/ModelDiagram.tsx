@@ -1,14 +1,16 @@
 /**
  * The right half of the tune screen: the model as a node graph.
  *
- * Read-only, and deliberately so. The editor beside it is a text editor now,
- * and writing a change back into someone's YAML means rewriting their file —
+ * Read-only, and deliberately so. The editor beside it is a text editor, and
+ * writing a change back into someone's YAML means rewriting their file —
  * their comments, their ordering, their formatting. A picture of what the
  * text currently says is worth more than a second way to edit it that would
  * damage the first.
  *
  * It is drawn from whatever the text parses to, so it follows along as the
- * file is typed, and disappears when the file stops making sense.
+ * file is typed, and goes quiet when the file stops making sense. Three
+ * columns, because the engine's model is three levels: the criteria, their
+ * subgroups, and the leaves that each score one column of the master table.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -17,7 +19,6 @@ import {
   DIAGRAM_CANVAS_WIDTH,
   DIAGRAM_ROOT_WIDTH,
 } from '../../lib/diagram';
-import { NORMALIZATION_LABELS } from '../../lib/model';
 import type { ModelConfig } from '../../types';
 import { Icon } from '../ui/Icon';
 
@@ -37,7 +38,8 @@ export function ModelDiagram({ model, weightSum }: ModelDiagramProps) {
   const pane = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(0.86);
 
-  const diagram = buildDiagram(model.variables);
+  const diagram = buildDiagram(model.criteria);
+  const excluded = model.excludedColumns + model.excludedThresholds;
 
   const fit = useCallback(() => {
     const element = pane.current;
@@ -85,43 +87,44 @@ export function ModelDiagram({ model, weightSum }: ModelDiagramProps) {
         </svg>
 
         <div className="node-root" style={{ top: diagram.rootTop, width: DIAGRAM_ROOT_WIDTH }}>
-          <div className="node-root-label">variables</div>
-          <div className="node-root-value">{model.model}</div>
+          <div className="node-root-label">criteria</div>
+          <div className="node-root-value">{model.criteria.length}</div>
         </div>
 
         {diagram.nodes.map((node) => (
           <div
             key={node.id}
-            className={`node${node.depth > 0 ? ' depth-deep' : ''}${
-              node.informative ? ' is-informative' : ''
-            }${node.exclusion_variable ? ' is-exclusive' : ''}`}
+            className={`node is-${node.kind}`}
             style={{ left: node.left, top: node.top, width: node.width }}
           >
             <div className="node-label">
-              <span className="node-label-name">{node.label}</span>
-              {node.informative && <span className="node-badge">informative</span>}
+              <span className="node-label-name" title={node.detail || node.label}>
+                {node.label}
+              </span>
             </div>
 
-            {node.exclusion_variable ? (
-              <div className="node-meta node-meta-exclusive">
-                <span className="node-excl is-on">excludes</span>
+            {node.detail && (
+              <div className={`node-detail${node.kind === 'leaf' ? ' mono' : ''}`}>
+                {node.detail}
               </div>
-            ) : (
-              <>
-                <div className="node-readout">
+            )}
+
+            <div className="node-meta">
+              {node.weight ? (
+                <span className="node-readout">
                   <span className="node-readout-label">weight</span>
                   <span className="node-readout-value">{node.weight}</span>
-                </div>
-                <div className="node-meta">
-                  <span className="node-norm-readout">
-                    {NORMALIZATION_LABELS[node.normalization]}
-                  </span>
-                  {node.intervalCount > 0 && (
-                    <span className="node-intervals">{node.intervalCount}</span>
-                  )}
-                </div>
-              </>
-            )}
+                </span>
+              ) : (
+                node.kind !== 'leaf' && <span className="node-no-weight">no weight</span>
+              )}
+              {node.type && <span className="node-type">{node.type}</span>}
+              {node.badges.map((badge) => (
+                <span key={badge} className="node-badge-flat">
+                  {badge}
+                </span>
+              ))}
+            </div>
           </div>
         ))}
       </div>
@@ -129,9 +132,17 @@ export function ModelDiagram({ model, weightSum }: ModelDiagramProps) {
       <div className="diagram-caption">
         <span className="diagram-caption-label muted-55">The file, as a diagram</span>
         <span className="tag tag-accent-2" style={{ gap: 5 }}>
-          <span>weights add to</span>
+          <span>criteria add to</span>
           <span>{weightSum.toFixed(2)}</span>
         </span>
+        {/* Zoning scores nothing — it rules hexagons out — so it is counted
+            here rather than drawn as part of the tree. */}
+        {excluded > 0 && (
+          <span className="tag" style={{ gap: 5 }}>
+            <span>{excluded}</span>
+            <span>excluding</span>
+          </span>
+        )}
       </div>
 
       <div className="map-controls is-horizontal">

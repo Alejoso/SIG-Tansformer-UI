@@ -33,6 +33,9 @@
 }
 .status-chip.is-invalid { background: var(--color-accent-200); color: var(--color-accent-900); }
 .status-chip.is-clean { background: var(--color-accent-2-200); color: var(--color-accent-2-900); }
+/* Warnings are the engine's own word for "this runs, but read it again" —
+   neutral, because going red over something that works would be crying wolf. */
+.status-chip.is-warning { background: var(--color-neutral-200); color: var(--color-neutral-800); }
 
 .tune-panes { flex: 1; min-height: 0; display: flex; gap: 16px; }
 
@@ -104,7 +107,8 @@
   text-transform: uppercase;
 }
 .yaml-problem-kind.is-syntax { background: var(--color-accent-300); color: var(--color-accent-900); }
-.yaml-problem-kind.is-structure { background: var(--color-neutral-300); color: var(--color-neutral-800); }
+.yaml-problem-kind.is-model { background: var(--color-accent-200); color: var(--color-accent-900); }
+.yaml-problem-kind.is-warning { background: var(--color-neutral-300); color: var(--color-neutral-800); }
 
 .yaml-problem-line { flex: none; font-size: 11px; color: var(--color-accent-700); }
 .yaml-problem-text { flex: 1; min-width: 0; }
@@ -152,12 +156,6 @@
   gap: 6px;
   padding: 9px 12px;
   border-radius: var(--radius-md);
-  background: var(--color-accent-100);
-  box-shadow: inset 0 0 0 1.5px var(--color-accent-300), var(--shadow-sm);
-}
-.node.depth-deep {
-  background: var(--color-accent-2-200);
-  box-shadow: inset 0 0 0 1.5px var(--color-accent-2-400), var(--shadow-sm);
 }
 
 .node-label {
@@ -168,66 +166,76 @@
   font-size: 11.5px;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: var(--color-accent-800);
 }
-/* Only the name gives way; the badge beside it keeps its full width. */
+/* Only the name gives way; the chips beside it keep their full width. */
 .node-label-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.node-badge { flex: none; }
-.node.depth-deep .node-label { color: var(--color-accent-2-900); }
 
-.node-weight { display: flex; align-items: center; gap: 6px; }
-.node-step {
-  width: 24px;
-  height: 24px;
-  background: var(--color-bg);
-  border-color: var(--color-divider);
+/* Three kinds of box, one per level of the engine's model: a criterion, one
+   of its subgroups, and a leaf scoring one column of the master table. The
+   tint deepens with the level, so the eye can follow a branch outwards. */
+.node.is-criterion {
+  background: var(--color-accent-100);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent-300), var(--shadow-sm);
 }
-.node-input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 14px;
-  text-align: center;
-  padding: 2px 6px;
-  color: var(--color-accent-900);
-  background: var(--color-bg);
-  border: 1px solid var(--color-divider);
-  border-radius: 999px;
-  outline: none;
+.node.is-subgroup {
+  background: var(--color-accent-2-200);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent-2-400), var(--shadow-sm);
 }
-.node-input.is-invalid { border-color: var(--color-accent); }
+.node.is-criterion .node-label { color: var(--color-accent-800); }
+.node.is-subgroup .node-label { color: var(--color-accent-2-900); }
+/* A leaf is the only box naming something outside the file — a real column —
+   so it is the plainest of the three, and its name is set in the mono face
+   the editor uses. */
+.node.is-leaf {
+  background: var(--color-bg);
+  box-shadow: inset 0 0 0 1.5px var(--color-neutral-300), var(--shadow-sm);
+}
+.node.is-leaf .node-label { color: var(--color-text); }
 
-.node-meta { display: flex; align-items: center; gap: 6px; }
-.node-norm {
-  width: 100%;
+.node-detail {
   min-width: 0;
-  font: inherit;
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-divider);
-  color: var(--color-text);
-  outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent);
 }
-.node-excl {
-  font: inherit;
-  font-size: 11px;
-  padding: 2px 9px;
+.node-detail.mono { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+
+.node-meta { flex-wrap: wrap; row-gap: 4px; }
+
+/* The scoring type, and the short facts beside it. Flat chips rather than
+   tinted ones: a node already carries its level in its background, and three
+   colours of pill inside it would say nothing more. */
+.node-type,
+.node-badge-flat {
+  flex: none;
+  padding: 1.5px 7px;
   border-radius: 999px;
-  cursor: pointer;
-  border: 0;
+  font-size: 10px;
+  letter-spacing: 0.03em;
   white-space: nowrap;
   background: var(--color-neutral-200);
-  color: var(--color-neutral-700);
+  color: var(--color-neutral-800);
 }
-.node-excl.is-on { background: var(--color-accent-300); color: var(--color-accent-900); }
+.node-type { background: var(--color-accent-200); color: var(--color-accent-900); }
+
+/* A criterion or subgroup with no weight contributes nothing: the engine
+   reads the missing key as zero. Said plainly, because the box would
+   otherwise just look unfinished. */
+.node-no-weight {
+  flex: none;
+  padding: 1.5px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: var(--color-accent-200);
+  color: var(--color-accent-900);
+}
 
 .node-root {
   position: absolute;
@@ -251,11 +259,14 @@
 
 /* ── examples dialog ────────────────────────────────────────────────────── */
 
-.examples-dialog { width: min(820px, 100%); max-height: 86vh; align-items: stretch; gap: 16px; }
+.examples-dialog { width: min(1000px, 100%); max-height: 86vh; align-items: stretch; gap: 16px; }
 .examples-head { display: flex; align-items: flex-start; gap: 16px; }
-.examples-list { display: flex; gap: 14px; overflow: auto; padding-bottom: 2px; }
+.examples-list { display: flex; min-width: 0; gap: 14px; overflow: auto; padding-bottom: 6px; }
+/* The cards scroll sideways rather than sharing the width: squeezed to a
+   quarter each, the YAML inside them is too narrow to read, which is the
+   whole point of showing it. */
 .example-card {
-  flex: 1;
+  flex: 0 0 296px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -278,40 +289,6 @@
   font-size: 12px;
   line-height: 1.6;
   color: var(--color-accent-800);
-}
-
-/* ── informative variables (weight 0) ───────────────────────────────────── */
-
-/* A zero weight means the variable is carried for reference, not counted in
-   the score. Neutral rather than tinted, so it reads as "not in the maths". */
-.node.is-informative,
-.node.depth-deep.is-informative {
-  background: var(--color-neutral-200);
-  box-shadow: inset 0 0 0 1.5px var(--color-neutral-400), var(--shadow-sm);
-}
-.node.is-informative .node-label,
-.node.depth-deep.is-informative .node-label { color: var(--color-neutral-800); }
-
-.node-badge,
-.yaml-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-family: var(--font-body);
-  font-size: 9.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  background: var(--color-neutral-300);
-  color: var(--color-neutral-800);
-}
-
-.yaml-line.is-informative .yaml-key { color: var(--color-neutral-700); }
-.yaml-line.is-informative .yaml-input {
-  background: var(--color-neutral-200);
-  color: var(--color-neutral-800);
 }
 
 /* ── apply dialogs ──────────────────────────────────────────────────────── */
@@ -337,110 +314,13 @@
   min-height: 22px;
 }
 
-/* ── interval transform rows ────────────────────────────────────────────── */
-
-.interval-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  flex-wrap: wrap;
-}
-
-.interval-bracket,
-.interval-sep {
-  color: var(--color-neutral-500);
-  font-size: 12px;
-}
-
-.interval-input {
-  width: 52px;
-  font: inherit;
-  font-size: 12.5px;
-  text-align: center;
-  padding: 1px 6px;
-  color: var(--color-accent-2-800);
-  background: var(--color-bg);
-  border: 1px solid var(--color-divider);
-  border-radius: 999px;
-  outline: none;
-}
-/* The result is what the range becomes, so it carries the accent. */
-.interval-input.is-result {
-  width: 46px;
-  color: var(--color-accent-900);
-  background: var(--color-accent-100);
-  border-color: var(--color-accent-300);
-  font-weight: 600;
-}
-.interval-row.is-invalid .interval-input { border-color: var(--color-accent); }
-
-.interval-arrow {
-  margin: 0 3px;
-  color: var(--color-neutral-500);
-  font-size: 12px;
-}
-
-.interval-btn {
-  width: 19px;
-  height: 19px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  margin-left: 3px;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  cursor: pointer;
-  background: transparent;
-  color: color-mix(in srgb, var(--color-text) 50%, transparent);
-}
-.interval-btn:hover:not(:disabled) { background: var(--color-accent-200); color: var(--color-accent-900); }
-.interval-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-
-.interval-error {
-  margin-left: 6px;
-  font-family: var(--font-body);
-  font-size: 11px;
-  color: var(--color-accent-700);
-}
-
-.interval-add {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 11px;
-  border: 1px dashed var(--color-accent-400);
-  border-radius: 999px;
-  cursor: pointer;
-  background: transparent;
-  font-family: var(--font-body);
-  font-size: 11.5px;
-  color: var(--color-accent-700);
-}
-.interval-add:hover { background: var(--color-accent-100); }
-
-/* Range count on a diagram node. */
-.node-intervals {
-  flex: none;
-  min-width: 18px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-size: 10.5px;
-  text-align: center;
-  background: var(--color-accent-200);
-  color: var(--color-accent-900);
-}
-
-/* An exclusive node has only its flag, so it needs no extra breathing room. */
-.node-meta-exclusive { justify-content: flex-start; }
-
-
 /* ── the diagram is a readout now, not a control surface ────────────────── */
 
 .node-readout {
-  display: flex;
+  display: inline-flex;
+  flex: none;
   align-items: baseline;
-  gap: 7px;
+  gap: 5px;
 }
 .node-readout-label {
   font-size: 10px;
@@ -450,26 +330,10 @@
 }
 .node-readout-value {
   font-family: ui-monospace, Menlo, monospace;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-accent-900);
 }
-
-.node-norm-readout {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  background: var(--color-bg);
-  color: var(--color-text);
-}
-
-/* `excludes` is a label here, not a button. */
-.node-excl.is-on { cursor: default; }
 
 /* Shown in place of the diagram when the file does not describe a model. */
 .diagram-empty {

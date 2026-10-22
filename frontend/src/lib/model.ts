@@ -1,249 +1,195 @@
 /**
- * Operations on the weighting tree.
+ * Reading the model file into something the diagram can draw.
  *
- * The YAML editor and the node diagram are two views of this one structure,
- * so every edit from either side goes through `setField` / `bumpWeight` here
- * and both views re-render from the result.
+ * The file's schema is the engine's: `MCDA/engine/mcda_score.py` reads
+ *
+ *     criteria -> subgroups -> leaves
+ *
+ * and a leaf names a column of the master table with a `type` saying how its
+ * values become a score from 1 to 5. Nothing here is a second opinion on that
+ * shape — the file is the engine's input, and this only reads it.
+ *
+ * One rule throughout: what the text says is what comes back. A leaf with no
+ * weight keeps a null one rather than the 1 the engine would assume, because
+ * a diagram showing a number nobody wrote is worse than one showing a gap.
  */
 
-import type { Interval, ModelConfig, ModelPath, ModelVariable, Normalization } from '../types';
+import type {
+  LeafType,
+  ModelConfig,
+  ModelCriterion,
+  ModelLeaf,
+  ModelSubgroup,
+  Site,
+} from '../types';
 
-export const NORMALIZATIONS: Normalization[] = ['minmax', 'standard', 'intervals'];
+const LEAF_TYPES: LeafType[] = ['range', 'map', 'direct', 'minmax', 'zscore'];
+const SITES: Site[] = ['both', 'onshore', 'offshore'];
 
-/** What each transform is called in the interface. */
-export const NORMALIZATION_LABELS: Record<Normalization, string> = {
+/** What each scoring type is called in the interface. */
+export const LEAF_TYPE_LABELS: Record<LeafType, string> = {
+  range: 'Cuts',
+  map: 'Categories',
+  direct: 'Already 1-5',
   minmax: 'Min-max',
-  standard: 'Standard scaler',
-  intervals: 'Intervals',
+  zscore: 'Z-score',
 };
 
-/**
- * How many rows a new interval transform starts with.
- *
- * Five, with numbers already in them, because the engine's own bins score 1-5
- * and an empty table would read as broken rather than as waiting for input.
- * The bounds are placeholders to edit, not a recommendation.
- */
-export const DEFAULT_INTERVAL_COUNT = 5;
-
-/**
- * A starting set of intervals: unbounded at both ends so every value is
- * covered, and ascending so the shape of the transform is obvious at a glance.
- */
-export function defaultIntervals(): Interval[] {
-  return [
-    { from: '', to: '20', value: '1' },
-    { from: '20', to: '40', value: '2' },
-    { from: '40', to: '60', value: '3' },
-    { from: '60', to: '80', value: '4' },
-    { from: '80', to: '', value: '5' },
-  ];
-}
-
-/** The intervals of a variable, or an empty list if it has none. */
-export const intervalsOf = (variable: ModelVariable): Interval[] => variable.intervals ?? [];
-
-/** Walk to the node at `path`; the root stands in as a virtual parent. */
-export function nodeAt(variables: ModelVariable[], path: ModelPath): ModelVariable {
-  let current: ModelVariable = { key: '', weight: '0', exclusion_variable: false, normalization: 'minmax', sub: variables };
-  for (const index of path) {
-    const children = current.sub;
-    if (!children?.[index]) throw new Error(`No model node at path ${path.join('.')}`);
-    current = children[index];
-  }
-  return current;
-}
-
-/** A bound is valid when it is blank (unbounded) or a number. */
-const boundOk = (bound: string) => bound.trim() === '' || Number.isFinite(Number(bound));
-
-/**
- * What is wrong with one interval, or null when it is fine. Returned as a
- * message so the editor can say why rather than only going red.
- *
- * `rowCount` is needed for one rule: a range open at both ends covers every
- * value, which is fine on its own but silently swallows every other range
- * beside it. That is the failure worth catching, and it is cheap — full
- * gap-and-overlap analysis across the table is not attempted here.
- */
-export function intervalError(interval: Interval, rowCount = 1): string | null {
-  if (!boundOk(interval.from)) return 'Lower bound must be a number, or blank for unbounded';
-  if (!boundOk(interval.to)) return 'Upper bound must be a number, or blank for unbounded';
-  if (!Number.isFinite(Number(interval.value)) || interval.value.trim() === '') {
-    return 'Result must be a number';
-  }
-
-  const from = interval.from.trim();
-  const to = interval.to.trim();
-  if (from !== '' && to !== '' && Number(from) >= Number(to)) {
-    return 'Lower bound must be below the upper bound';
-  }
-  if (rowCount > 1 && from === '' && to === '') {
-    return 'Open at both ends, so it would cover every other range — set a bound';
-  }
-  return null;
-}
-
-/** True when every interval on the variable is well-formed. */
-export function intervalsValid(variable: ModelVariable): boolean {
-  if (variable.normalization !== 'intervals') return true;
-  const intervals = intervalsOf(variable);
-  return intervals.length > 0 && intervals.every((i) => intervalError(i, intervals.length) === null);
-}
-
-/**
- * Top-level weights only — the figure the "weights add to" chip shows.
- *
- * Exclusion variable variables are left out: they rule a record out rather than
- * contributing a share of the score, so counting them would make the total
- * look wrong whenever one exists.
- */
-export function weightSum(model: ModelConfig): number {
-  return model.variables
-    .filter((v) => !v.exclusion_variable)
-    .reduce((total, v) => total + (Number.parseFloat(v.weight) || 0), 0);
-}
-
-/**
- * A weight of zero means the variable does not influence the score at all —
- * it is carried along to be looked at on the map, not to be counted. The UI
- * calls these *informative* and tints them differently, so a zero weight
- * reads as a deliberate choice rather than an unfinished edit.
- */
-export function isInformative(variable: ModelVariable): boolean {
-  // An exclusion variable has no weight at all, so "weight of zero" says
-  // nothing about it.
-  if (variable.exclusion_variable) return false;
-  return Number.parseFloat(variable.weight) === 0;
-}
-
-/** How many leaves sit under a node — drives the diagram's vertical spacing. */
-export function leafCount(variable: ModelVariable): number {
-  if (!variable.sub?.length) return 1;
-  return variable.sub.reduce((total, child) => total + leafCount(child), 0);
-}
-
-export function totalLeaves(variables: ModelVariable[]): number {
-  return variables.reduce((total, v) => total + leafCount(v), 0);
-}
-
-/**
- * Local validity check, mirroring what the backend's Pydantic models will
- * enforce. Kept client-side so the Apply button can react as you type.
- */
-export function isValid(model: ModelConfig): boolean {
-  const ok = (list: ModelVariable[]): boolean =>
-    list.every((v) => {
-      // An exclusion variable has neither a weight nor a transform, so there
-      // is nothing on it to be invalid.
-      if (!v.exclusion_variable) {
-        const weight = Number.parseFloat(v.weight);
-        if (Number.isNaN(weight) || weight < 0 || weight > 1) return false;
-        if (!intervalsValid(v)) return false;
-      }
-      return v.sub?.length ? ok(v.sub) : true;
-    });
-  return ok(model.variables) && /^\d+$/.test(model.resolution);
-}
-
-/**
- * Why the model is not valid, or null when it is.
- *
- * Distinguishes weights from intervals because the status chip used to say
- * "check the flagged weights" for a bad interval, sending people to look at
- * the wrong thing.
- */
-export function invalidReason(model: ModelConfig): 'weights' | 'intervals' | 'resolution' | null {
-  let badWeight = false;
-  let badInterval = false;
-
-  const walk = (list: ModelVariable[]) => {
-    for (const v of list) {
-      if (!v.exclusion_variable) {
-        const weight = Number.parseFloat(v.weight);
-        if (Number.isNaN(weight) || weight < 0 || weight > 1) badWeight = true;
-        if (!intervalsValid(v)) badInterval = true;
-      }
-      if (v.sub?.length) walk(v.sub);
-    }
-  };
-  walk(model.variables);
-
-  if (badWeight) return 'weights';
-  if (badInterval) return 'intervals';
-  if (!/^\d+$/.test(model.resolution)) return 'resolution';
-  return null;
-}
-
-
-/* ── reading a model out of YAML ───────────────────────────────────────── */
+/** The longer form, for a tooltip where there is room to explain. */
+export const LEAF_TYPE_HINTS: Record<LeafType, string> = {
+  range: 'Your own cuts: each band of values scores a number',
+  map: 'An exact value maps to a score',
+  direct: 'The value already is a score from 1 to 5',
+  minmax: 'The range present in the data, stretched onto 1 to 5',
+  zscore: 'Around the mean: a z of -2 to 2 becomes 1 to 5',
+};
 
 const asString = (value: unknown): string =>
   value === null || value === undefined ? '' : String(value);
 
-/** One `variables:` entry, or null when it is not shaped like one. */
-function toVariable(key: string, body: unknown): ModelVariable | null {
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
-  const record = body as Record<string, unknown>;
+/** A number, or null when the file does not give one. Never a default. */
+function asNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return null;
+}
 
-  const intervals = Array.isArray(record.intervals)
-    ? record.intervals
-        .filter((row): row is unknown[] => Array.isArray(row) && row.length === 3)
-        .map((row) => ({
-          from: asString(row[0] ?? ''),
-          to: asString(row[1] ?? ''),
-          value: asString(row[2]),
-        }))
-    : undefined;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
-  const children =
-    typeof record.subvariables === 'object' && record.subvariables !== null
-      ? Object.entries(record.subvariables as Record<string, unknown>)
-          .map(([childKey, childBody]) => toVariable(childKey, childBody))
-          .filter((child): child is ModelVariable => child !== null)
-      : undefined;
+/** How many steps a leaf's transform has: cuts for `range`, keys for `map`. */
+function stepsOf(record: Record<string, unknown>, type: LeafType): number {
+  if (type === 'range') return Array.isArray(record.bins) ? record.bins.length : 0;
+  if (type === 'map') return isRecord(record.map) ? Object.keys(record.map).length : 0;
+  return 0;
+}
 
-  const normalization = asString(record.normalization);
+function toLeaf(body: unknown, index: number): ModelLeaf | null {
+  if (!isRecord(body)) return null;
+
+  const rawType = asString(body.type);
+  // An unrecognised type is drawn as what it is written as rather than
+  // guessed at. The problems list below the editor says the engine will not
+  // score it; the diagram does not need to say so twice.
+  const type = (LEAF_TYPES as string[]).includes(rawType) ? (rawType as LeafType) : 'direct';
+
+  const rawSite = asString(body.site) || 'both';
+  const site = (SITES as string[]).includes(rawSite) ? (rawSite as Site) : 'both';
+
   return {
-    key,
-    weight: asString(record.weight ?? '0'),
-    exclusion_variable: Boolean(record.exclusion_variable),
-    normalization: (NORMALIZATIONS as string[]).includes(normalization)
-      ? (normalization as ModelVariable['normalization'])
-      : 'minmax',
-    ...(intervals?.length ? { intervals } : {}),
-    ...(children?.length ? { sub: children } : {}),
+    code: asString(body.code) || asString(body.column) || `leaf ${index + 1}`,
+    column: asString(body.column),
+    site,
+    type,
+    weight: asNumber(body.weight),
+    steps: stepsOf(body, type),
+    inverted: asString(body.direction) === 'cost',
   };
 }
 
-/**
- * Build the diagram's view of a model from parsed YAML.
- *
- * Returns null when the document is not shaped like a model at all, so the
- * diagram can say it cannot draw this rather than drawing something wrong.
- * Anything it does not recognise inside a variable is ignored rather than
- * rejected — the file is the user's, and the diagram is only one reading of it.
- */
-export function modelFromParsed(document: unknown): ModelConfig | null {
-  if (typeof document !== 'object' || document === null || Array.isArray(document)) return null;
-  const record = document as Record<string, unknown>;
+function toSubgroup(body: unknown, index: number): ModelSubgroup | null {
+  if (!isRecord(body)) return null;
 
-  const rawVariables = record.variables;
-  if (typeof rawVariables !== 'object' || rawVariables === null || Array.isArray(rawVariables)) {
-    return null;
-  }
-
-  const variables = Object.entries(rawVariables as Record<string, unknown>)
-    .map(([key, body]) => toVariable(key, body))
-    .filter((variable): variable is ModelVariable => variable !== null);
-
-  if (variables.length === 0) return null;
+  const leaves = Array.isArray(body.leaves)
+    ? body.leaves
+        .map((leaf, position) => toLeaf(leaf, position))
+        .filter((leaf): leaf is ModelLeaf => leaf !== null)
+    : [];
 
   return {
-    project: asString(record.project),
-    model: asString(record.model) || 'model',
-    objective: asString(record.objective),
-    resolution: asString(record.resolution ?? ''),
-    variables,
+    key: asString(body.key) || `subgroup ${index + 1}`,
+    nombre: asString(body.nombre),
+    weight: asNumber(body.weight),
+    worstWins: asString(body.combine) === 'min',
+    absent: asNumber(body.absent),
+    normalized: body.normalize !== undefined && body.normalize !== null,
+    leaves,
   };
+}
+
+function toCriterion(body: unknown, index: number): ModelCriterion | null {
+  if (!isRecord(body)) return null;
+
+  const subgroups = Array.isArray(body.subgroups)
+    ? body.subgroups
+        .map((subgroup, position) => toSubgroup(subgroup, position))
+        .filter((subgroup): subgroup is ModelSubgroup => subgroup !== null)
+    : [];
+
+  return {
+    key: asString(body.key) || `criterion ${index + 1}`,
+    nombre: asString(body.nombre),
+    weight: asNumber(body.weight),
+    subgroups,
+  };
+}
+
+const countOf = (value: unknown): number => (Array.isArray(value) ? value.length : 0);
+
+/**
+ * Build the diagram's view of the model from parsed YAML.
+ *
+ * Returns null when the document holds no criteria at all, so the pane can
+ * say there is nothing to draw rather than drawing an empty frame. A document
+ * with criteria is drawn however incomplete it is — half a model being typed
+ * is exactly when seeing its shape helps.
+ */
+export function modelFromParsed(document: unknown): ModelConfig | null {
+  if (!isRecord(document)) return null;
+  if (!Array.isArray(document.criteria)) return null;
+
+  const criteria = document.criteria
+    .map((criterion, index) => toCriterion(criterion, index))
+    .filter((criterion): criterion is ModelCriterion => criterion !== null);
+
+  if (criteria.length === 0) return null;
+
+  return {
+    criteria,
+    excludedColumns: countOf(document.exclude_columns),
+    excludedThresholds: countOf(document.exclude_thresholds),
+    prioritized: countOf(document.prioritized),
+  };
+}
+
+
+/* ── reading the tree ──────────────────────────────────────────────────── */
+
+/** How many leaves a criterion holds — drives the diagram's spacing. */
+export function leafCount(criterion: ModelCriterion): number {
+  const total = criterion.subgroups.reduce(
+    (sum, subgroup) => sum + Math.max(1, subgroup.leaves.length),
+    0,
+  );
+  return Math.max(1, total);
+}
+
+export function totalLeaves(criteria: ModelCriterion[]): number {
+  return criteria.reduce((total, criterion) => total + leafCount(criterion), 0);
+}
+
+/**
+ * What the criteria's weights add to — the figure the caption shows.
+ *
+ * The engine divides by this total, so the model still runs when it is not 1;
+ * the numbers just stop reading as shares of the whole. A criterion with no
+ * weight counts as nothing, which is what the engine does with it.
+ */
+export function weightSum(model: ModelConfig): number {
+  return model.criteria.reduce((total, criterion) => total + (criterion.weight ?? 0), 0);
+}
+
+/** Every column the model scores, in order, without repeats. */
+export function scoredColumns(model: ModelConfig): string[] {
+  const seen = new Set<string>();
+  for (const criterion of model.criteria) {
+    for (const subgroup of criterion.subgroups) {
+      for (const leaf of subgroup.leaves) {
+        if (leaf.column) seen.add(leaf.column);
+      }
+    }
+  }
+  return [...seen];
 }

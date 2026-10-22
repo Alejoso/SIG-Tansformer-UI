@@ -1,7 +1,8 @@
 /**
- * The starter structures. "Copy to editor" appends an example's variables to
- * the current model rather than replacing it, so nothing you have already
- * tuned is lost.
+ * The starter structures. "Copy to editor" adds an example to the current
+ * model rather than replacing it, so nothing you have already tuned is lost —
+ * a criterion goes at the end of `criteria:`, the zoning block at the end of
+ * the file.
  */
 
 import { useEffect, useState } from 'react';
@@ -35,12 +36,12 @@ export function ExamplesDialog({ onClose, onInsert }: ExamplesDialogProps) {
           <div className="dialog-title" id="examples-title">
             Example structures
           </div>
-          <p className="dialog-body" style={{ margin: '4px 0 0', maxWidth: 560 }}>
-            This is how a model is written. Every variable carries a <strong>weight</strong>, or
-            is an <strong>exclusion variable</strong> — ruling a record out instead of being
-            weighted at all.
-            A weighted variable has its own <strong>normalization</strong>, and any variable may
-            hold nested <strong>subvariables</strong>.
+          <p className="dialog-body" style={{ margin: '4px 0 0', maxWidth: 620 }}>
+            A model is <strong>criteria</strong>, each holding <strong>subgroups</strong>, each
+            holding <strong>leaves</strong>. A leaf names one <strong>column</strong> of the
+            master table and a <strong>type</strong> saying how its values become a score from 1
+            to 5. Weights add to 1 within each level, and the score is the weighted average all
+            the way up.
           </p>
         </div>
         <button

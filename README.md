@@ -149,8 +149,9 @@ folder set falls back to `data/projects/<id>/model/model.yaml`, so the screen
 works before one is chosen. The file is created from a commented default the
 first time it is opened.
 
-**Save** writes the file. **Apply** writes it too — running the model from it
-is the next step and is not built yet.
+**Save** writes the file. **Apply** writes it and then runs it:
+`MCDA/run_mcda.sh` in the engine's container, watched exactly like processing,
+with a progress dialog naming each step and a Stop that really stops it.
 
 Saving does not require the document to be valid. Refusing to store work in
 progress would mean losing it, and the problems come back in the response
@@ -163,56 +164,101 @@ and shows as a gutter mark, an underline and a line-numbered message. **Structur
 is checked by the server on save, because the engine's rules are the ones that
 decide.
 
+The schema is **the engine's**, read straight out of `MCDA/engine/mcda_score.py`.
+Criteria hold subgroups, subgroups hold leaves, and a leaf names one column of
+the master table:
+
 ```yaml
-project: ridgeline            # free-form; yours to use
-model: suitability_v2
-objective: maximize
-resolution: 8
+criteria:
+  - key: economia             # its name in the results
+    nombre: Economia          # optional, readable
+    weight: 0.5               # criteria add to 1
+    subgroups:
+      - key: dist_interes
+        weight: 1.0           # subgroups of one criterion add to 1
+        leaves:
+          # The column is the master table's own column name — the variable's
+          # folder, uppercased. out/maestro/<run>/*.variables.csv lists them.
+          - {code: SOE-002, column: SOE_002, site: both, type: minmax}
 
-variables:
-  wind_speed:                 # any name you like
-    weight: 0.45              # 0 to 1. A weight of 0 means "carry it, do not count it"
-    exclusion_variable: false
-    normalization: minmax     # minmax | standard | intervals
+  - key: recurso_eolico
+    weight: 0.5
+    subgroups:
+      - key: densidad_wpd
+        weight: 1.0
+        leaves:
+          - code: TEC-004
+            column: TEC_004_sv003
+            site: both        # both | onshore | offshore
+            type: range
+            bins:             # [from, to, score]; null is unbounded
+              - [null, 300, 1]   # ranges are (from, to] — exclusive lower
+              - [300, 400, 2]
+              - [400, null, 5]
 
-  land_cover:
-    weight: 0.10
-    exclusion_variable: false
-    normalization: intervals
-    intervals:                # [from, to, result]; null is unbounded
-      - [null, 0.2, 1]        # ranges are (from, to] — exclusive lower, inclusive upper
-      - [0.2, 0.4, 2]
-      - [0.8, null, 5]
-
-  grid_access:
-    weight: 0.30
-    exclusion_variable: false
-    normalization: minmax
-    subvariables:             # nest to any depth
-      distance_to_substation:
-        weight: 0.60
-        exclusion_variable: false
-        normalization: minmax
-
-  protected_area:
-    exclusion_variable: true  # rules a hexagon out; no weight, no normalization
+# Zoning. Present at all, and the engine treats this file as self-contained
+# rather than falling back to its own MCDA/config/zoning.yaml.
+exclude_columns: []           # any value in these columns excludes the hexagon
+exclude_thresholds: []        # or a cut on a continuous one
+prioritized: []               # codes kept whatever else is dropped
 ```
 
-The rules the server enforces, and nothing more:
+A leaf's `type` is how its values become a score from 1 to 5:
 
-- `variables` must exist and be a mapping.
-- A variable either has `weight` **and** `normalization`, or
-  `exclusion_variable: true`. Never both — an exclusion variable rules a
-  hexagon out, so a weight on it would never be read.
-- `weight` is a number from 0 to 1.
-- `normalization` is `minmax`, `standard` or `intervals`.
-- With `intervals`, the list must be non-empty and every row `[from, to,
-  result]`: bounds are numbers or `null`, the result is a number, and a
-  bounded lower must sit below its upper.
-- `subvariables` is a mapping, checked the same way, to any depth.
+| `type`   | what it does                                   | needs    |
+| -------- | ---------------------------------------------- | -------- |
+| `minmax` | the range present in the data, onto 1-5        | nothing  |
+| `zscore` | the same, around the mean (z of -2..2 → 1..5)  | nothing  |
+| `range`  | your own cuts                                   | `bins`   |
+| `map`    | an exact value to a score, for categories       | `map`    |
+| `direct` | the value already is a 1-5 score                | nothing  |
 
-Anything else in the file is left alone. The editor is meant to be free, so
-the server rejects what cannot be run rather than everything unusual.
+`direction: cost` inverts a `minmax` or `zscore` leaf.
+
+The server reports two kinds of finding, because the engine does:
+
+**Errors** — the engine would crash or quietly drop the leaf:
+
+- `criteria` must exist and be a list; each criterion needs a `key`, a
+  `weight` and a non-empty `subgroups`; each subgroup a `key`, a `weight` and
+  non-empty `leaves`.
+- A leaf needs a `column` and a `type` the engine scores. `range` needs
+  `bins`, `map` needs `map`. `site` must be `both`, `onshore` or `offshore` —
+  anything else never applies, so the leaf would be skipped in silence.
+- Each bin is `[from, to, score]` with numeric or null bounds, and a bounded
+  lower below its upper.
+
+**Warnings** — it runs, but probably not as meant:
+
+- A key the engine does not read, at any level. This is the one worth having:
+  a mistyped `binz:` leaves a leaf with no cuts and the run still finishes.
+- Weights that do not add to 1, at any level — with the engine's own
+  exemptions, so a subgroup that normalizes or combines with `min` is not
+  counted, and onshore and offshore leaves are summed separately. These
+  messages match `validate_weights` in the engine, checked against its four
+  shipped configs.
+
+Only YAML that does not parse stops Apply. The engine has the final word on
+its own config, so neither finding blocks a run.
+
+### The file starts from your own data
+
+A project's model file is written the first time the screen is opened, from
+the variables that project actually holds — one criterion per dimension, one
+leaf per variable, `type: minmax` throughout. `minmax` because it is the one
+type that needs no numbers chosen in advance: it reads the range out of the
+column. So the file you open with is a model the engine can score, not an
+example about somewhere else.
+
+The columns come from `out/maestro/<run>/*.variables.csv`, which every run
+writes beside the master parquet. That file is the authority: the column is
+usually the variable's folder with its code uppercased, but the loader
+appends the file name when a folder holds more than one dataset, and guessing
+would produce a config that parses and then scores nothing. Before anything
+has been processed the names are derived from the input tree instead, and the
+generated file says so in a comment.
+
+
 
 ### The diagram is a readout
 
@@ -402,46 +448,33 @@ uvicorn on its default port needs no extra config.
 - **deck.gl, react-map-gl and h3-js are no longer used** by the app now that
   the engine renders the map. They are still in `package.json`; drop them when
   you are sure nothing else wants them.
-- **Three transforms, no more.** `minmax` and `standard` (mean and standard
-  deviation) are plain selections. `intervals` carries a table of ranges, each
-  mapping to a number — which is also how a categorical result is expressed,
-  since a category is a number with a meaning attached.
+- **The model file is the engine's config, not ours.** It was not always:
+  this app invented a `variables: {weight, normalization, exclusion_variable}`
+  shape before anyone had read what the MCDA actually loads. The engine reads
+  `criteria -> subgroups -> leaves`, where a leaf names a master-table column
+  and carries explicit `bins`, and it cannot run anything else — a
+  `normalization: minmax` carries no cuts for it to score with. The editor,
+  the validation, the diagram and the examples are all that schema now.
 
-  Ranges are `(from, to]` — exclusive lower, inclusive upper — matching the
-  engine's `range` bins, and a blank bound means unbounded. `toYaml` writes
-  them the way the engine already does:
+  `backend/app/model_store.py` holds the engine's key lists and type names,
+  transcribed rather than imported: the engine runs in a container and this
+  does not. They are worth re-reading against `mcda_score.py` when the engine
+  moves — `_TOP_KEYS`, `_CRIT_KEYS`, `_SG_KEYS`, `_LEAF_KEYS`, and the
+  `leaf_score` dispatch.
 
-  ```yaml
-  normalization: intervals
-  intervals:
-    - [null, 0.2, 1]
-    - [0.2, 0.4, 2]
-    - [0.8, null, 5]
-  ```
+- **Errors and warnings are kept apart**, because the engine keeps them
+  apart: it refuses nothing in its own config, it only prints. So a weight
+  that does not add to 1 is a warning here and the Apply button stays live.
+  Only YAML that does not parse stops anything. The weight warnings are
+  checked against the engine's own `validate_weights` on its four shipped
+  configs — same subgroups, same numbers.
 
-  Switching to `intervals` seeds five rows rather than an empty table; adding a
-  row continues the numbering and starts where the previous one ended, so it
-  arrives valid instead of pre-flagged. Switching away keeps the table, so
-  going back does not lose typed work. Validation covers each row on its own
-  plus the one cross-row trap — a range open at both ends alongside others,
-  which would silently swallow them. Full gap-and-overlap analysis is not
-  attempted.
+- **The diagram has three columns, not arbitrary depth.** The old tree
+  recursed through `subvariables` to any depth; the engine's model is exactly
+  three levels, so `lib/diagram.ts` walks those three and each box says what
+  it is. A leaf shows its column, its scoring type and how many cuts it has —
+  the things you would otherwise scroll the file to find.
 
-- **The config is English throughout** — `weight`, `exclusive`,
-  `normalization`, `intervals`, `subvariables`. The keys were Spanish in the
-  original mockup. The exclusion flag is `exclusion_variable`.
-- **An exclusion variable has no weight and no transform.** It rules a hexagon
-  out rather than contributing a share of the score, so those fields are not
-  hidden but absent: nothing meaningful could go in them. They are left out of
-  the weight sum and of validation, and the value is kept while hidden so
-  toggling back does not lose it.
-- **The model tree is deliberately small** — `key`, `weight`, `exclusive`,
-  `normalization`, `intervals`, `sub` — since the real config will change a lot. The YAML
-  editor and the node diagram are two renderings of that one structure
-  (`src/lib/model.ts`), so they cannot disagree.
-- **A weight of zero means "informative"**: the variable is carried to be
-  looked at on the map, not counted in the score. Both panes tint it neutral
-  and badge it, so a zero reads as a decision rather than an unfinished edit.
 - **`MapMode` is `input | model`, not `raw | model`.** "Raw" now belongs to
   `ValueScale` (`raw | normalized`), and two meanings of the word on one
   screen would be a trap.

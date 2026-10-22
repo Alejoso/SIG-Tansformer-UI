@@ -645,9 +645,11 @@ def save_model(project_id: str, payload: SaveModelPayload) -> ModelFile:
 @app.post("/api/projects/{project_id}/model/apply")
 def apply_model(project_id: str, payload: SaveModelPayload) -> ModelFile:
     """
-    Write the file, then — eventually — run the model from it.
+    Write the file so the run can read it.
 
-    Only the write is implemented. The run is the next step.
+    Only the write: the Model screen calls `start_model_run` straight after,
+    which is what actually scores it. Kept separate because the engine reads
+    the file off disk inside its container, so it has to land there first.
     """
     project = _require_project(project_id)
     model_store.write_model(project, payload.text)
