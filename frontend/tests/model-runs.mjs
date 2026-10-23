@@ -58,6 +58,9 @@ export async function run({ project }) {
     probed = true;
   }
 
+  // However many there are now — the probe may not have been makeable.
+  const current = await api(`/projects/${project.id}/model/runs`);
+
   const { browser, page, errors } = await open();
   try {
     await openProject(page, project.name);
@@ -66,8 +69,18 @@ export async function run({ project }) {
     await page.waitForTimeout(900);
 
     const line = page.locator('.runs-line');
+    if (current.length < 2) {
+      // One run is just the result, so the line stays away on purpose. Worth
+      // checking rather than skipping over: a line that said "1 model run ·
+      // only the newest is on the map" would be noise on every project.
+      check('one run alone says nothing', (await line.count()) === 0);
+      skip('needs a second run to clean up, and one could not be made');
+      await browser.close();
+      return results;
+    }
+
     check('the Model screen says what the runs cost', (await line.count()) === 1,
-      `${before.length} runs`);
+      `${current.length} runs`);
     const text = await line.innerText();
     check('and that only the newest is on the map', /only the newest is on the map/.test(text),
       JSON.stringify(text.replace(/\n/g, ' ')));
@@ -75,8 +88,7 @@ export async function run({ project }) {
     await line.click();
     await page.locator('.run-list').waitFor({ timeout: 10000 });
     const rows = await page.locator('.run-row').count();
-    check('the dialog lists every run', rows === (await api(`/projects/${project.id}/model/runs`)).length,
-      `${rows} rows`);
+    check('the dialog lists every run', rows === current.length, `${rows} rows`);
     check('and marks the one on the map',
       (await page.locator('.run-row.is-current .run-badge').count()) === 1);
 

@@ -1,19 +1,24 @@
 # Maphex — SIG UI
 
-Local interface for the H3 multicriteria pipeline. This repository currently
-holds **the frontend only**: every screen from the design is built and working,
-running against an in-memory mock of the backend.
+Local interface for the H3 multicriteria pipeline: add your data, process it,
+score a model over it, and look at the result on a map. It drives the engine
+in the sibling **SIG-Transformer** checkout — the engine does the work, this
+runs it and shows what it did.
 
 ```
 SIG-UI/
 ├── design/      the source mockup (Maphex.dc.html + the Organic design system)
-├── HTML/        the engine's pre-rendered layer documents (git-ignored)
-├── backend/     FastAPI — projects, data folders, and the country list
+├── backend/     FastAPI — projects, data, the engine, the model file
+│   ├── app/         one module per concern; see the sections below
 │   └── reference/   vendored Natural Earth 110m countries (820 kB)
 ├── data/        projects.csv + folders.csv (git-ignored, machine-specific)
 ├── frontend/    React + Vite + TypeScript
+│   └── tests/       browser checks against the running app
 └── README.md
 ```
+
+Almost nothing is mocked any more — see
+[what is real](#what-is-real-and-what-is-still-mocked).
 
 ## The map is rendered by the engine, not by us
 
@@ -23,10 +28,11 @@ paints a map — a full mesh as JSON would be tens of megabytes to serialise,
 transfer and re-draw, where the generated document is already a map the browser
 can stream and cache.
 
-Put the generated files in `HTML/` at the repo root. The dev server serves that
-folder at `/layers/<filename>` (a small plugin in `frontend/vite.config.ts`);
-in production FastAPI serves the same route. The folder is git-ignored — the
-documents are ~9 MB each and the pipeline regenerates them.
+The documents are read out of the project's own `out/` folder and served by
+`GET …/layers/{nodeId}/document`, so nothing has to be copied anywhere for the
+map to find them. (An earlier arrangement served a repo-level `HTML/` folder
+through a Vite plugin; both are gone. A leftover `HTML/` directory in a
+checkout from back then is dead weight and can be deleted.)
 
 An iframe rather than injected markup, because each document:
 
@@ -43,22 +49,76 @@ Because the document owns its own pan, zoom, tooltip and opacity control, the
 app adds no map chrome of its own. Anything drawn on top would duplicate or
 contradict what is inside it.
 
-## Running it
+## A clean start
 
-Two processes. The backend first:
+Four things have to be in place, and the order matters — the engine holds the
+state, so it goes first.
 
-```bash
-cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && ./run.sh
+### 1. The engine, beside this checkout
+
+```
+Vento/
+├── SIG-Transformer/   the engine
+└── SIG-UI/            this
 ```
 
-Then the frontend:
+Siblings, because that is where the backend looks. Somewhere else is fine if
+you say so:
+
+```bash
+MAPHEX_PIPELINE_DIR=/path/to/SIG-Transformer ./run.sh   # in backend/
+```
+
+**Use a branch with the fixes on it.** The engine's `main` is missing four
+commits this app depends on, spread over two branches that are pushed and
+waiting to be merged. The second is stacked on the first, so checking it out
+gets all four:
+
+```bash
+cd SIG-Transformer && git checkout chore/fijar-dependencias
+```
+
+That branch carries, oldest first: the lint no longer renaming the pipeline's
+own outputs (without it, **every run after the first fails at step 10.6**),
+pyarrow held below 26 so it keeps working with the NumPy the image has,
+`run_full.sh` honouring the `DATA_DIR` it advertises (without it every
+project would read and write the engine's own folder — see
+[A project folder is the pipeline's DATA_DIR](#a-project-folder-is-the-pipelines-data_dir)),
+and an exact dependency lock (`fix/lint-no-renombrar-salidas` holds the first
+three, `chore/fijar-dependencias` the last). Merging both into `main` makes
+this step go away.
+
+Then its configuration and its data:
+
+```bash
+cp .env.example .env     # then set POSTGRES_USER / PASSWORD / DB
+docker compose up -d     # builds the image the first time; it is not quick
+```
+
+`admin/in/dane_mgn2024/` has to hold the DANE boundary shapefiles. They are
+~108 MB and not in git — ask whoever has them. Without them there is nothing
+to build the hexagon master table from, and processing stops at the first
+step. The maritime polygon beside them *is* in the repository.
+
+### 2. The backend
+
+```bash
+cd backend
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+./run.sh
+```
+
+Python 3.12. Every version in `requirements.txt` is exact, including the
+resolved ones — see the note at the bottom of that file before changing any.
+
+### 3. The frontend
 
 ```bash
 cd frontend && npm install && npm run dev
 ```
 
 Opens on http://localhost:5173; Vite proxies `/api` to uvicorn on **:8765**.
-The UI needs the backend — without it the projects list cannot load and says
+The UI needs the backend — without it the projects list cannot load, and says
 so.
 
 Port 8000 is crowded, so the default is 8765. To move it, set `MAPHEX_PORT`
@@ -72,6 +132,39 @@ MAPHEX_PORT=9000 npm run dev       # in frontend/
 
 `npm run build` emits `frontend/dist`, which the backend serves at `/` when it
 is present.
+
+### 4. The first project
+
+In the app: **New project** → name it, pick the area, and choose a folder for
+it to live in. That folder is the engine's `DATA_DIR` — everything for the
+project goes under it, and the Data screen shows the path.
+
+The resolution is worth settling here rather than later: it decides the size
+of every hexagon the first run computes, and changing it afterwards rebuilds
+the master table and reprocesses everything. **Resolution** on that screen,
+and again beside Process.
+
+Then **Data** → point at a folder holding one variable, or at a folder of
+them, and press **Process**. The first run builds the H3 master table and
+takes minutes; later ones reuse it.
+
+### What the app writes outside its own checkout
+
+Worth knowing before pointing it at an engine you care about:
+
+- **the engine's `.env`** — `H3_RES` and `RENDER_H3_RES`, set from the
+  project's settings before a run, and the app container recreated when they
+  change. See [Settings reach the engine](#settings-reach-the-engine-through-its-env).
+- **the project's folder** — `in/`, `out/`, `model/model.yaml`, `MCDA/runs/`.
+  All of it the engine's doing except the model file.
+- **`out/maestro/`** — all but the newest master export is moved to
+  `out/bck/` before a model run, because the MCDA refuses to choose between
+  several.
+- **`data/*.csv` here** — the project list, and where each variable was
+  copied from.
+
+Nothing is written to the folders variables were imported *from*. Those are
+read and copied, never moved or changed.
 
 ## Checking it still works
 
