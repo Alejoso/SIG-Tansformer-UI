@@ -70,12 +70,11 @@ MAPHEX_PIPELINE_DIR=/path/to/SIG-Transformer ./run.sh   # in backend/
 ```
 
 **Use a branch with the fixes on it.** The engine's `main` is missing four
-commits this app depends on, spread over two branches that are pushed and
-waiting to be merged. The second is stacked on the first, so checking it out
-gets all four:
+commits this app depends on. They are pushed as one branch, named after what
+it is for:
 
 ```bash
-cd SIG-Transformer && git checkout chore/fijar-dependencias
+cd SIG-Transformer && git checkout fix/compatibilidad-maphex
 ```
 
 That branch carries, oldest first: the lint no longer renaming the pipeline's
@@ -84,9 +83,12 @@ pyarrow held below 26 so it keeps working with the NumPy the image has,
 `run_full.sh` honouring the `DATA_DIR` it advertises (without it every
 project would read and write the engine's own folder — see
 [A project folder is the pipeline's DATA_DIR](#a-project-folder-is-the-pipelines-data_dir)),
-and an exact dependency lock (`fix/lint-no-renombrar-salidas` holds the first
-three, `chore/fijar-dependencias` the last). Merging both into `main` makes
-this step go away.
+and an exact dependency lock. Merging it into `main` makes this step go away.
+
+The same four commits also exist as two stacked branches,
+`fix/lint-no-renombrar-salidas` and `chore/fijar-dependencias`, from when
+they were meant to be reviewed separately. Same tree, same history — nothing
+is lost by merging the one above and deleting the other two.
 
 Then its configuration and its data:
 
