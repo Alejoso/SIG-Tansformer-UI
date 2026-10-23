@@ -15,6 +15,8 @@ interface ApplyProgressDialogProps {
   run: PipelineRun;
   onStop: () => void;
   stopping: boolean;
+  /** Put it away. The run carries on; the Apply button brings it back. */
+  onHide: () => void;
 }
 
 /**
@@ -25,13 +27,18 @@ interface ApplyProgressDialogProps {
  * thing anyone asks. It has a Stop now — the run is a real process and can
  * genuinely be stopped, which was not true when this only pretended.
  */
-export function ApplyProgressDialog({ run, onStop, stopping }: ApplyProgressDialogProps) {
+export function ApplyProgressDialog({
+  run,
+  onStop,
+  stopping,
+  onHide,
+}: ApplyProgressDialogProps) {
   const current = run.stages.find((stage) => stage.status === 'running');
   const done = run.stages.filter((stage) => stage.status === 'ok').length;
 
   return (
     <Dialog
-      onClose={() => {}}
+      onClose={onHide}
       width="min(460px, 100%)"
       style={{ alignItems: 'stretch' }}
       labelledBy="apply-progress-title"
@@ -49,6 +56,16 @@ export function ApplyProgressDialog({ run, onStop, stopping }: ApplyProgressDial
           style={{ height: 28, paddingInline: 12, fontSize: 12.5, flex: 'none' }}
         >
           {stopping ? 'Stopping…' : 'Stop'}
+        </button>
+        {/* Not the same as Stop, and the difference matters: this leaves the
+            run alone and gets out of the way. */}
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={onHide}
+          style={{ height: 28, paddingInline: 12, fontSize: 12.5, flex: 'none' }}
+        >
+          Hide
         </button>
       </div>
 
@@ -69,7 +86,8 @@ export function ApplyProgressDialog({ run, onStop, stopping }: ApplyProgressDial
 
       <div className="muted-55" style={{ fontSize: 12 }}>
         {done} of {run.stages.length} steps done. The scoring itself is the long one — it reads
-        every hexagon in the master table.
+        every hexagon in the master table. You can carry on working; this will say when it is
+        finished.
       </div>
     </Dialog>
   );

@@ -1,3 +1,4 @@
+import * as modelRun from '../lib/model-run';
 import { useApp } from '../state/app-context';
 import { SCREEN_ORDER, type Screen } from '../state/app-context';
 import { Icon } from './ui/Icon';
@@ -8,6 +9,22 @@ const NEEDS_PROJECT: Screen[] = ['data', 'map', 'tune'];
 export function Header() {
   const { screen, goTo, project } = useApp();
   const showBreadcrumb = screen !== 'projects' && screen !== 'setup' && project !== null;
+
+  /**
+   * A model run going somewhere behind the screen you are on.
+   *
+   * Here because the dialog can be put away and the Model screen is only
+   * one of five: without this, a run in progress would be invisible from
+   * the other four and there would be no way back to it.
+   */
+  const applying = modelRun.useModelRun();
+  const live =
+    applying &&
+    (applying.run.status === 'starting' || applying.run.status === 'running') &&
+    !applying.showing &&
+    // Not on the Model screen: the Apply button is already saying it there,
+    // and is the thing to press. Two of them would just be noise.
+    screen !== 'tune';
 
   return (
     <header className="header">
@@ -36,6 +53,19 @@ export function Header() {
           );
         })}
       </nav>
+
+      {live && (
+        <button
+          type="button"
+          className="header-run"
+          onClick={() => modelRun.setShowing(true)}
+          title="Show what the model is doing"
+        >
+          <Icon name="spinner" size={13} color="var(--color-accent)" className="spin" />
+          <span>Applying the model</span>
+          <span className="header-run-percent mono">{applying.run.percent}%</span>
+        </button>
+      )}
 
       {showBreadcrumb && (
         <div className="breadcrumb">

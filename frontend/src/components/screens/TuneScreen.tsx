@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import { modelFromParsed, weightSum } from '../../lib/model';
 import { forgetDraft, recallDraft, rememberDraft, takeExample } from '../../lib/model-draft';
+import * as modelRun from '../../lib/model-run';
 import { lintYaml, parseYaml } from '../../lib/yaml-lint';
-import type { ModelExample, ModelFile, ModelIssue, ModelRun, PipelineRun } from '../../types';
+import type { ModelExample, ModelFile, ModelIssue, ModelRun } from '../../types';
 import { formatSize } from '../../lib/format';
-import { ApplyDoneDialog, ApplyProgressDialog } from '../tune/ApplyDialogs';
 import { ModelRunsDialog } from '../tune/ModelRunsDialog';
 import { ModelDiagram } from '../tune/ModelDiagram';
 import { YamlCodeEditor } from '../tune/YamlCodeEditor';
@@ -49,7 +49,7 @@ function insertSnippet(text: string, example: ModelExample): string {
 }
 
 export function TuneScreen() {
-  const { project, goTo, showHints, showToast, setMapView } = useApp();
+  const { project, goTo, showHints, showToast } = useApp();
   const projectId = project?.id ?? '';
 
   const [file, setFile] = useState<ModelFile | null>(null);
@@ -58,10 +58,14 @@ export function TuneScreen() {
   const [savedText, setSavedText] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  /** The model run in flight, polled like a processing run. */
-  const [applyRun, setApplyRun] = useState<PipelineRun | null>(null);
-  const [stopping, setStopping] = useState(false);
-  const unwatchApply = useRef<(() => void) | null>(null);
+  /**
+   * The run lives above this screen now — see `lib/model-run`. Leaving the
+   * Model screen used to lose track of one that was still going.
+   */
+  const applying = modelRun.useModelRun();
+  const running =
+    applying?.projectId === projectId &&
+    (applying.run.status === 'starting' || applying.run.status === 'running');
   /** What past runs are costing. Nothing removes them on its own. */
   const [runs, setRuns] = useState<ModelRun[]>([]);
   const [showRuns, setShowRuns] = useState(false);
@@ -106,7 +110,17 @@ export function TuneScreen() {
 
   useEffect(refreshRuns, [refreshRuns]);
 
-  useEffect(() => () => unwatchApply.current?.(), []);
+  /**
+   * And again once a run ends — it has just written another one.
+   *
+   * Keyed on the status rather than done inside the watcher, because the
+   * watcher is no longer this screen's: the run may well have finished
+   * while the Map was open.
+   */
+  const applyStatus = applying?.run.status;
+  useEffect(() => {
+    if (applyStatus && applyStatus !== 'starting' && applyStatus !== 'running') refreshRuns();
+  }, [applyStatus, refreshRuns]);
 
   /** Syntax problems, found here on every keystroke rather than on save. */
   const syntaxProblems = useMemo(() => lintYaml(text), [text]);
@@ -169,54 +183,15 @@ export function TuneScreen() {
     // overruling the thing doing the work. If the engine dislikes the file it
     // says so, and that message is worth more than ours.
 
-    // The file is written; now run it. The model is a run like processing —
-    // four steps in the engine's container — so it is watched the same way.
+    // The file is written; now run it. Handed to the store, which keeps
+    // watching whatever screen you move to.
     try {
-      const started = await api.startModelRun(projectId, { useProjectModel: true });
-      setApplyRun(started);
+      modelRun.started(projectId, await api.startModelRun(projectId, { useProjectModel: true }));
     } catch (error) {
-      setBusy(false);
       showToast(error instanceof Error ? error.message : 'Could not start the model');
-      return;
-    }
-
-    unwatchApply.current = api.watchModelRun(
-      projectId,
-      (tick) => {
-        setApplyRun(tick);
-        if (tick.status === 'starting' || tick.status === 'running') return;
-        setBusy(false);
-        unwatchApply.current = null;
-        refreshRuns();
-      },
-      (error) => {
-        setBusy(false);
-        showToast(error.message);
-      },
-    );
-  };
-
-  /** Stop a model run. It is a real process, so this really stops it. */
-  const stopApply = async () => {
-    if (stopping) return;
-    setStopping(true);
-    try {
-      const { detail } = await api.abortModelRun(projectId);
-      unwatchApply.current?.();
-      unwatchApply.current = null;
-      setApplyRun(null);
-      setBusy(false);
-      showToast(detail ? `Stopped — ${detail}` : 'Stopped');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Could not stop it');
     } finally {
-      setStopping(false);
+      setBusy(false);
     }
-  };
-
-  const viewMap = () => {
-    setMapView({ mode: 'model', scale: 'raw', nodeId: 'model' });
-    goTo('map');
   };
 
   if (loadError) {
@@ -330,14 +305,19 @@ export function TuneScreen() {
           >
             Save
           </button>
+          {/* While one is going the button stops being "start a run" and
+              becomes the way back to it: the dialog can be put away, and
+              this is what reopens it. Starting a second is refused by the
+              server anyway — one engine — so offering it would only be a
+              way to get an error. */}
           <button
             type="button"
             className="btn btn-primary"
-            onClick={apply}
-            disabled={busy || syntaxProblems.length > 0}
+            onClick={running ? () => modelRun.setShowing(true) : apply}
+            disabled={!running && (busy || syntaxProblems.length > 0)}
             style={{ height: 42, paddingInline: 22, fontSize: 14.5, whiteSpace: 'nowrap' }}
           >
-            Apply
+            {running ? `Applying… ${applying?.run.percent ?? 0}%` : 'Apply'}
           </button>
         </div>
       </div>
@@ -395,14 +375,6 @@ export function TuneScreen() {
           </div>
         )}
       </div>
-
-      {applyRun && (applyRun.status === 'starting' || applyRun.status === 'running') && (
-        <ApplyProgressDialog run={applyRun} onStop={stopApply} stopping={stopping} />
-      )}
-
-      {applyRun && applyRun.status !== 'starting' && applyRun.status !== 'running' && (
-        <ApplyDoneDialog run={applyRun} onStay={() => setApplyRun(null)} onViewMap={viewMap} />
-      )}
 
       {showRuns && (
         <ModelRunsDialog

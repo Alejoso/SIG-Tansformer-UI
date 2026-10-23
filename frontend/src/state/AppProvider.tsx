@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as modelRun from '../lib/model-run';
 import { AppContext, type AppContextValue, type MapView, type Screen } from './app-context';
 import type { Project } from '../types';
 
@@ -17,6 +18,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const openProject = useCallback((next: Project, target: Screen) => {
     setProject(next);
+    // A model run started before a reload, or before this project was last
+    // closed, is still going in the engine. Pick it back up rather than
+    // letting the app claim nothing is happening.
+    void modelRun.resume(next.id);
     setMapView({ mode: 'input', scale: 'raw', nodeId: null });
     setScreen(target);
   }, []);

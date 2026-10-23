@@ -1,5 +1,6 @@
 import { useApp } from './state/app-context';
 import { Header } from './components/Header';
+import { ModelRunWatch } from './components/ModelRunWatch';
 import { DataScreen } from './components/screens/DataScreen';
 import { ExamplesScreen } from './components/screens/ExamplesScreen';
 import { MapScreen } from './components/screens/MapScreen';
@@ -21,6 +22,10 @@ export default function App() {
       {screen === 'map' && <MapScreen />}
       {screen === 'tune' && <TuneScreen />}
       {screen === 'examples' && <ExamplesScreen />}
+
+      {/* Above every screen, because a run outlives the one that started
+          it and finishing has to be able to say so from anywhere. */}
+      <ModelRunWatch />
 
       {toast && <Toast message={toast} />}
     </div>

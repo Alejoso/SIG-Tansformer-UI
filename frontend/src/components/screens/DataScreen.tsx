@@ -10,6 +10,7 @@ import type {
 } from '../../types';
 import { Dialog } from '../ui/Dialog';
 import { formatSize } from '../../lib/format';
+import * as modelRun from '../../lib/model-run';
 import { Icon } from '../ui/Icon';
 import { SettingsDialog } from './SettingsDialog';
 
@@ -287,7 +288,20 @@ export function DataScreen() {
    */
   const running = run?.status === 'starting' || run?.status === 'running';
   const phase = running ? 'processing' : run?.status === 'done' ? 'done' : 'empty';
-  const locked = running;
+  /**
+   * A model run counts as the engine being busy too.
+   *
+   * The server refuses a second run whatever starts it — one database, one
+   * container — so without this the Process button would still look live
+   * and answer with an error. Now that a model run does not hold the screen
+   * it started on, this is the screen you are most likely to be on while
+   * one is going.
+   */
+  const applying = modelRun.useModelRun();
+  const modelRunning =
+    applying?.projectId === projectId &&
+    (applying.run.status === 'starting' || applying.run.status === 'running');
+  const locked = running || modelRunning;
   /** Variables whose folder is not one readable dataset — the engine will skip them. */
   const unreadable = variables.filter((v) => v.problem && !v.processedOnly);
   /** Results with no input: the engine still loads them, so they are worth seeing. */
@@ -882,7 +896,13 @@ export function DataScreen() {
           )}
 
           <div className="path-add-status">
-            {locked && <span className="muted-55">Data is locked while a run is going.</span>}
+            {locked && (
+              <span className="muted-55">
+                {modelRunning && !running
+                  ? 'The model is being applied. One engine, so one run at a time.'
+                  : 'Data is locked while a run is going.'}
+              </span>
+            )}
             {!locked && checking && <span className="muted-55">Checking…</span>}
             {!locked && !checking && plan?.problem && (
               <span className="path-add-problem">{plan.problem}</span>

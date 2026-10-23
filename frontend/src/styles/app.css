@@ -224,3 +224,28 @@ body { margin: 0; background: var(--color-bg); }
   font-size: 13px;
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
+
+
+/* A model run going on behind whatever screen you are on. Sits beside the
+   breadcrumb, where the eye already goes for "which project am I in". */
+.header-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  background: var(--color-accent-100);
+  box-shadow: inset 0 0 0 1px var(--color-accent-300);
+  color: var(--color-accent-900);
+}
+.header-run:hover { background: var(--color-accent-200); }
+.header-run-percent { font-size: 12px; font-variant-numeric: tabular-nums; }
+/* Both want `margin-left: auto`. With the chip there it is the one that
+   pushes the pair right, and the breadcrumb just sits after it. */
+.header-run + .breadcrumb { margin-left: 0; }

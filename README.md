@@ -246,6 +246,38 @@ others are fine, and re-picking the folder to retry the rest would be worse
 than being told which one to look at — so it always answers 201 with what it
 did, per variable.
 
+## A model run outlives the screen that started it
+
+Applying takes minutes, and the engine carries on whatever you do next. The
+progress dialog used to be a wall — `onClose={() => {}}`, no way past it —
+and the watch lived inside the Model screen, so leaving lost track of a run
+that was still going. The engine kept working; the app simply stopped
+looking.
+
+The watch is in `lib/model-run.ts` now, above the screens. Three things read
+it:
+
+- the **Model screen**, whose Apply button becomes `Applying… 40%` and
+  reopens the dialog rather than starting a second run;
+- the **header**, which carries a chip on every other screen — without it a
+  hidden run would be invisible and there would be no way back to it;
+- the **app shell**, which renders both dialogs, so a run that finishes while
+  you are on the Map still says so there.
+
+A subscribable module rather than context, for the same reason the draft is
+one: it ticks once a second, and in context every screen would re-render with
+it. `useSyncExternalStore` means only those three do.
+
+Opening a project asks whether a run is already going and picks it back up,
+so a reload mid-run does not lose it — the same thing the Data screen has
+always done for processing.
+
+Two things follow from the app no longer being held still. The Data screen
+counts a model run as the engine being busy, because the server refuses a
+second run whatever starts it — one database, one container — so Process
+would otherwise look live and answer with an error. And the header chip stays
+off the Model screen, where the Apply button is already saying it.
+
 ## Model runs pile up, and only the newest is reachable
 
 Every Apply writes a whole set of rendered maps — the model, each criterion,
