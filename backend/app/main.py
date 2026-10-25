@@ -218,8 +218,7 @@ def list_layers(project_id: str) -> LayerTree:
         children: list[LayerNode] = []
     else:
         combined = _to_layer_node(model)
-        children = combined.children
-        combined.children = []
+        children = [_to_layer_node(child) for child in model.children]
 
     return LayerTree(
         model={"combined": combined, "variables": children},
@@ -228,14 +227,13 @@ def list_layers(project_id: str) -> LayerTree:
 
 
 def _to_layer_node(layer: outputs.ModelLayer) -> LayerNode:
-    """One level of the model's own output, as the sidebar draws it."""
+    """One of the model's own documents, as the sidebar draws it."""
     return LayerNode(
         id=layer.id,
         label=layer.label,
         description=layer.description,
         filename=layer.filename,
         hasDocument=bool(layer.relpath),
-        children=[_to_layer_node(child) for child in layer.children],
     )
 
 

@@ -29,7 +29,6 @@ import type {
   Project,
   ProjectSettings,
   Resolutions,
-  ValueScale,
   VariableProblem,
 } from '../types';
 
@@ -286,18 +285,11 @@ export const getLayerTree = (projectId: string): Promise<LayerTree> =>
  * the browser streams and caches them natively in an iframe. Routing them
  * through React state would not.
  *
- * `scale` is accepted but not yet used — the raw and normalised combined
- * tables come from a newer pipeline run than any on disk, and each variable
- * currently renders one document.
+ * It took a `scale` for a while, for a raw/normalized switch the engine
+ * never rendered a second document for. Both are gone.
  */
-export const getLayerUrl = (
-  projectId: string,
-  nodeId: string,
-  scale: ValueScale,
-): Promise<string> => {
-  void scale;
-  return Promise.resolve(`${API_BASE}/projects/${projectId}/layers/${nodeId}/document`);
-};
+export const getLayerUrl = (projectId: string, nodeId: string): Promise<string> =>
+  Promise.resolve(`${API_BASE}/projects/${projectId}/layers/${nodeId}/document`);
 
 /* ── model ─────────────────────────────────────────────────────────────── */
 

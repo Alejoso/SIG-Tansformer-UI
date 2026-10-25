@@ -712,7 +712,7 @@ still works.
 | Projects | `screens/ProjectsScreen.tsx` | Project list, empty state, "new project" tile |
 | New project | `screens/NewProjectScreen.tsx` | Name, mesh, results folder, description, and the resolutions the first run will use. Reached from the Projects screen, not the stepper |
 | Add your data | `screens/DataScreen.tsx` | The project's folder path, folder dropzone, folder list, processing progress, "all done" dialog |
-| Map | `screens/MapScreen.tsx` + `map/LayerTree.tsx` + `map/LayerFrame.tsx` | A file-explorer tree of what the engine rendered, and the selected document in an iframe. Raw/normalized applies to input variables only |
+| Map | `screens/MapScreen.tsx` + `map/LayerTree.tsx` + `map/LayerFrame.tsx` | A list of what the engine rendered, and the selected document in an iframe |
 | Tune the model | `screens/TuneScreen.tsx` + `tune/*` | A YAML text editor over the real file, with a read-only diagram of what it currently says |
 | Writing the model | `screens/ExamplesScreen.tsx` | What every key in the config means, and blocks to start from. Reached from the Model screen, not the stepper |
 
@@ -758,7 +758,7 @@ No component changes.
 | `watchProcessing` | `GET /api/projects/{id}/process/stream` | **SSE**, driven by `watchfiles` on the results folder |
 | `listVariables` | `GET /api/projects/{id}/variables?mode=input\|model` | |
 | `getLayerTree` | `GET /api/projects/{id}/layers` | what was rendered: the model tree and the flat input list, labels and ids only |
-| `getLayerUrl` | `GET /api/projects/{id}/layers/{nodeId}?scale=raw\|normalized` | returns the URL of the pre-rendered document the iframe loads |
+| `getLayerUrl` | `GET /api/projects/{id}/layers/{nodeId}/document` | returns the URL of the pre-rendered document the iframe loads |
 | `getModel` | `GET /api/projects/{id}/model` | **live** — the file verbatim, plus what is wrong with it |
 | `saveModel` | `PUT /api/projects/{id}/model` | **live** — writes the text as-is; valid or not |
 | `applyModel` | `POST /api/projects/{id}/model/apply` | **live for the write**; running the model is next |
@@ -806,9 +806,8 @@ uvicorn on its default port needs no extra config.
   back; it does not derive it from the model config, because what the engine
   actually rendered is the only truth about what can be displayed.
 
-- **One rendered document per node.** A node id plus the raw/normalized scale
-  names one document. Today every combination resolves to the same sample
-  file; when the engine emits one per layer, only `getLayerUrl` changes.
+- **One rendered document per node.** A node id names one document, and
+  nothing else does — `getLayerUrl` is a string built from it.
 - **Two resolutions.** `ProjectSettings.processingResolution` is what the
   engine computes and stores at; `mapResolution` is only what gets drawn.
   When the map resolution is coarser, the backend has to aggregate stored
@@ -876,9 +875,15 @@ uvicorn on its default port needs no extra config.
   it is. A leaf shows its column, its scoring type and how many cuts it has —
   the things you would otherwise scroll the file to find.
 
-- **`MapMode` is `input | model`, not `raw | model`.** "Raw" now belongs to
-  `ValueScale` (`raw | normalized`), and two meanings of the word on one
-  screen would be a trap.
+- **The map sidebar is two flat lists, not a tree.** Input variables are one
+  uploaded folder each; the model side is the whole model and one map per
+  criterion. The engine also renders each subcriterion and those are still on
+  disk, but a row that opens to reveal more rows was structure the sidebar
+  did not need.
+
+  There was also a raw/normalized switch, for a second document per variable
+  the engine never rendered — so `ValueScale`, `MapView.scale` and
+  `getLayerUrl`'s `scale` argument are all gone with it.
 - **Base map** is CARTO Positron; override with `VITE_MAP_STYLE` to
   self-host.
 - `optimizeDeps.exclude: ['maplibre-gl']` in `vite.config.ts` is required —

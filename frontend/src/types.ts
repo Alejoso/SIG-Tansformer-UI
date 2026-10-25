@@ -242,25 +242,13 @@ export interface PipelineReadiness {
 
 /* ── the layer tree ────────────────────────────────────────────────────── */
 
-/**
- * Whether the map draws each cell's value in the variable's own units or
- * after normalization.
- *
- * `raw` is the value as stored — metres per second, kilometres, percent.
- * `normalized` is that value put on a common 0-1 scale, which is what makes
- * two variables comparable to the eye.
- */
-export type ValueScale = 'raw' | 'normalized';
 
 /**
- * One entry in the structure the engine renders.
+ * One entry in what the engine rendered.
  *
- * The engine emits a document for the whole model, one for each variable, and
- * one for each subvariable a composite variable is built from — so what comes
- * back is a tree, not a list. The sidebar mirrors it the way a file explorer
- * mirrors folders: composites open to reveal what they are made of.
- *
- * Nesting is arbitrary depth. A subvariable can itself be composite.
+ * A flat list on both sides: one document per input variable, and on the
+ * model side the whole model plus one per criterion. The engine also renders
+ * each subcriterion, which the sidebar does not show.
  */
 /**
  * A variable the engine could not finish.
@@ -305,11 +293,6 @@ export interface LayerNode {
   code?: string;
   /** One line of plain-language context, shown over the map. */
   description?: string;
-  /**
-   * Present when this node is built from others. An empty array and an absent
-   * one mean the same thing — a leaf — so the UI checks for length.
-   */
-  children?: LayerNode[];
   /**
    * False when the engine produced no document for this node, e.g. a grouping
    * that exists only to hold children. Such a row still opens, but selecting

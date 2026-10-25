@@ -44,6 +44,25 @@ export async function run({ project, inputs }) {
     check('and it works through the frame',
       (await frame.locator('#maphex-opacity-value').innerText()) === '35%');
 
+    /* ── two things the sidebar no longer has ───────────────────────── */
+    check('no raw/normalized switch',
+      (await page.getByRole('radio', { name: /normalized/i }).count()) === 0);
+    check('and no disclosure arrows to open',
+      (await page.locator('.layer-caret').count()) === 0);
+
+    // The model side is the whole model and one row per criterion, in one
+    // list rather than two sections.
+    // The radio itself is visually hidden behind the segmented control, so
+    // the label is what there is to click.
+    await page.locator('.mode-switch label', { hasText: /^Model$/ }).first().click();
+    await page.waitForTimeout(1500);
+    const sections = await page.locator('.layer-section-title').allInnerTexts();
+    check('the model side is a single flat list',
+      sections.length === 1 && /model/i.test(sections[0]), JSON.stringify(sections));
+    const rows = await page.locator('.layer-list .layer-name').allInnerTexts();
+    check('starting with the whole model',
+      rows.length >= 1 && /complete model/i.test(rows[0]), JSON.stringify(rows));
+
     check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));
   } finally {
     if (results.fail) await captureFailure(page, name);

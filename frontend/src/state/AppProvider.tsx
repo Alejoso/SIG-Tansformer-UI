@@ -10,7 +10,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [screen, setScreen] = useState<Screen>('projects');
   const [project, setProject] = useState<Project | null>(null);
   const [showHints, setShowHints] = useState(true);
-  const [mapView, setMapView] = useState<MapView>({ mode: 'input', scale: 'raw', nodeId: null });
+  const [mapView, setMapView] = useState<MapView>({ mode: 'input', nodeId: null });
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -22,7 +22,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // closed, is still going in the engine. Pick it back up rather than
     // letting the app claim nothing is happening.
     void modelRun.resume(next.id);
-    setMapView({ mode: 'input', scale: 'raw', nodeId: null });
+    setMapView({ mode: 'input', nodeId: null });
     setScreen(target);
   }, []);
 

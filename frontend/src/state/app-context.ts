@@ -4,7 +4,7 @@
  */
 
 import { createContext, useContext } from 'react';
-import type { MapMode, Project, ValueScale } from '../types';
+import type { MapMode, Project } from '../types';
 
 export type Screen = 'projects' | 'setup' | 'data' | 'map' | 'tune' | 'examples';
 
@@ -50,8 +50,6 @@ export interface AppContextValue {
 export interface MapView {
   /** Which side of the project the sidebar lists. */
   mode: MapMode;
-  /** Draw values in their own units, or normalised onto 0-1. */
-  scale: ValueScale;
   /** Id of the selected node in the layer tree; `null` means "not chosen yet". */
   nodeId: string | null;
 }

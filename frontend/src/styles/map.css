@@ -41,7 +41,7 @@
   color: color-mix(in srgb, var(--color-text) 50%, transparent);
 }
 
-.layer-list, .layer-children {
+.layer-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -52,8 +52,7 @@
   align-items: center;
   gap: 2px;
   border-radius: var(--radius-md);
-  /* Left padding is set inline per depth; keep the right side constant. */
-  padding-right: 8px;
+  padding: 0 8px 0 12px;
 }
 .layer-row:hover { background: color-mix(in srgb, var(--color-text) 5%, transparent); }
 .layer-row.is-selected {
@@ -61,26 +60,6 @@
   box-shadow: inset 0 0 0 1.5px var(--color-accent-400);
 }
 .layer-row.is-empty { opacity: 0.5; }
-
-/* The disclosure arrow. Leaves render an empty one of the same width so every
-   label in the tree lines up. */
-.layer-caret {
-  width: 18px;
-  height: 18px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
-  cursor: pointer;
-  transition: transform 0.15s ease;
-}
-.layer-caret.is-open { transform: rotate(90deg); }
-.layer-caret.is-leaf { cursor: default; }
-.layer-caret:not(.is-leaf):hover { background: color-mix(in srgb, var(--color-text) 10%, transparent); }
 
 .layer-label {
   flex: 1;
@@ -110,19 +89,6 @@
 /* A variable's code is its name here, set in the mono face so the three
    letters and three digits line up down the list. */
 .layer-name.mono { font-size: 12.5px; }
-
-/* How many parts a composite is built from. */
-.layer-count {
-  flex: none;
-  min-width: 17px;
-  padding: 1px 5px;
-  border-radius: 999px;
-  font-size: 10px;
-  text-align: center;
-  background: var(--color-neutral-200);
-  color: var(--color-neutral-700);
-}
-.is-selected .layer-count { background: var(--color-accent-200); color: var(--color-accent-900); }
 
 /* ── the map canvas ─────────────────────────────────────────────────────── */
 

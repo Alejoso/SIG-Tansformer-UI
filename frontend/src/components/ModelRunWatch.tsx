@@ -59,7 +59,7 @@ export function ModelRunWatch() {
       onStay={modelRun.acknowledge}
       onViewMap={() => {
         modelRun.acknowledge();
-        setMapView({ mode: 'model', scale: 'raw', nodeId: 'model' });
+        setMapView({ mode: 'model', nodeId: 'model' });
         goTo('map');
       }}
     />

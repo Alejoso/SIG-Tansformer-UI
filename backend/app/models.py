@@ -96,7 +96,6 @@ class LayerNode(BaseModel):
     #: label taken from whatever the file happened to be called.
     code: str = ""
     description: str = ""
-    children: list["LayerNode"] = Field(default_factory=list)
     hasDocument: bool = True
     #: The file behind this layer, so the UI can name what is on screen.
     filename: str = ""

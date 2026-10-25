@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
-import type { LayerNode, LayerTree as LayerTreeData, MapMode, ValueScale } from '../../types';
+import type { LayerNode, LayerTree as LayerTreeData, MapMode } from '../../types';
 import { LayerFrame } from '../map/LayerFrame';
 import { LayerTree } from '../map/LayerTree';
 import { Icon } from '../ui/Icon';
@@ -9,42 +9,20 @@ import { SettingsDialog } from './SettingsDialog';
 
 const MODE_HINTS: Record<MapMode, string> = {
   input: 'The variables exactly as you uploaded them — one document per folder.',
-  model: 'What the model produced. Variables built from others open to show their parts.',
-};
-
-const SCALE_HINTS: Record<ValueScale, string> = {
-  raw: 'Values in their own units — metres per second, kilometres, percent.',
-  normalized: 'The same values on a common 0 to 1 scale, so layers can be compared.',
+  model: 'What the model produced: the whole thing, and one map per criterion.',
 };
 
 /** Alphabetical by label, so a specific variable is easy to find. */
 const byLabel = (nodes: LayerNode[]) =>
   [...nodes].sort((a, b) => a.label.localeCompare(b.label));
 
-/** Depth-first walk, so a node can be found by id wherever it sits. */
-function findNode(nodes: LayerNode[], id: string): LayerNode | null {
-  for (const node of nodes) {
-    if (node.id === id) return node;
-    const found = node.children ? findNode(node.children, id) : null;
-    if (found) return found;
-  }
-  return null;
-}
+const findNode = (nodes: LayerNode[], id: string) =>
+  nodes.find((node) => node.id === id) ?? null;
 
 export function MapScreen() {
   const { project, goTo, showHints, mapView, setMapView } = useApp();
   const projectId = project?.id ?? '';
-  const { mode, scale, nodeId } = mapView;
-
-  /**
-   * Raw vs normalized only means something for input variables — model output
-   * is already weighted and on its own scale. So the toggle is hidden in model
-   * mode, and the value is pinned rather than merely ignored: a leftover
-   * `normalized` would otherwise go on quietly asking for a different
-   * document than the one the sidebar says is showing.
-   */
-  const showScale = mode === 'input';
-  const effectiveScale: ValueScale = showScale ? scale : 'raw';
+  const { mode, nodeId } = mapView;
 
   const [tree, setTree] = useState<LayerTreeData | null>(null);
   /**
@@ -90,7 +68,7 @@ export function MapScreen() {
     // asking for one would 404 where an explanation belongs.
     if (!projectId || !active || active.hasDocument === false) return;
     let live = true;
-    api.getLayerUrl(projectId, active.id, effectiveScale).then((url) => {
+    api.getLayerUrl(projectId, active.id).then((url) => {
       if (live) setFetched({ nodeId: active.id, url });
     });
     return () => {
@@ -98,7 +76,7 @@ export function MapScreen() {
     };
     // The resolutions are render settings for the engine, so saving them can
     // point at a freshly generated document.
-  }, [projectId, active, effectiveScale, settingsVersion]);
+  }, [projectId, active, settingsVersion]);
 
   const layerUrl = fetched && active && fetched.nodeId === active.id ? fetched.url : null;
 
@@ -128,54 +106,23 @@ export function MapScreen() {
           </label>
         </div>
 
-        {showScale && (
-          <div className="seg mode-switch" role="group" aria-label="Value scale">
-            <label className="seg-opt">
-              <input
-                type="radio"
-                name="value-scale"
-                checked={scale === 'raw'}
-                onChange={() => setMapView({ ...mapView, scale: 'raw' })}
-              />
-              Raw data
-            </label>
-            <label className="seg-opt">
-              <input
-                type="radio"
-                name="value-scale"
-                checked={scale === 'normalized'}
-                onChange={() => setMapView({ ...mapView, scale: 'normalized' })}
-              />
-              Normalized
-            </label>
-          </div>
-        )}
-
         {showHints && (
-          <p className="mode-hint muted-55">
-            {MODE_HINTS[mode]}
-            {showScale && ` ${SCALE_HINTS[scale]}`}
-          </p>
+          <p className="mode-hint muted-55">{MODE_HINTS[mode]}</p>
         )}
 
         <div className="layer-tree-scroll">
           {tree ? (
             mode === 'model' ? (
-              <>
-                {/* One row, always: this document already holds everything. */}
-                <LayerTree
-                  title="Model HTML"
-                  nodes={[tree.model.combined]}
-                  selectedId={active?.id ?? null}
-                  onSelect={select}
-                />
-                <LayerTree
-                  title="Variables"
-                  nodes={tree.model.variables}
-                  selectedId={active?.id ?? null}
-                  onSelect={select}
-                />
-              </>
+              /* The whole model first, then one map per criterion. One list:
+                 they are the same kind of thing at different scopes, and two
+                 headings for two and one rows was more structure than there
+                 is. */
+              <LayerTree
+                title="Model"
+                nodes={[tree.model.combined, ...tree.model.variables]}
+                selectedId={active?.id ?? null}
+                onSelect={select}
+              />
             ) : (
               /* Sorted here rather than trusting the backend's order, so the
                  list stays findable whatever arrives. */
@@ -236,11 +183,7 @@ export function MapScreen() {
              whatever the processed file was named — which can come out as
              "A" or "At". The readable name moves to the line below. */
           title={active.code || active.label}
-          subtitle={
-            effectiveScale === 'normalized' && active.description
-              ? `${active.description} · normalized`
-              : active.description
-          }
+          subtitle={active.description}
         />
       ) : (
         <div className="map-canvas">
