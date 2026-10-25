@@ -262,6 +262,35 @@ export type ValueScale = 'raw' | 'normalized';
  *
  * Nesting is arbitrary depth. A subvariable can itself be composite.
  */
+/**
+ * A variable the engine could not finish.
+ *
+ * The run only ever reported a count — "4 files could not be processed" —
+ * which named nothing and was gone by the next run. The engine writes the
+ * reason into the folder where the output should have been, so this is read
+ * from there and survives a reload.
+ */
+export interface VariableProblem {
+  /** `<dimension>/<CODE>`, the same id the Data screen uses. */
+  id: string;
+  dimension: string;
+  code: string;
+  /** `error` when the engine said so, `unfinished` when it just stopped. */
+  status: 'error' | 'unfinished';
+  /** The stage it stopped at, in the engine's own word for it. */
+  stage: string;
+  /** And in English. */
+  stageLabel: string;
+  /**
+   * The engine's own reason, as it wrote it. Spanish, because that is what
+   * it says — translating it would be inventing detail.
+   */
+  reason: string;
+  /** The file it was reading. */
+  source: string;
+  executionId: string;
+}
+
 export interface LayerNode {
   /** Unique across the whole tree; this is the selection key and the URL key. */
   id: string;

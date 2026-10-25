@@ -218,6 +218,41 @@ two of them would be writing the same project's model file.
 Those last two are all that is left of the mocks. A mesh upload has no server
 route, and the examples are UI copy with nowhere else to live yet.
 
+## Why a variable did not make it through
+
+A run reports a count — "4 files could not be processed" — and that is all it
+ever said. Which four, and why, was not in the app anywhere, and the number
+was gone as soon as the next run started.
+
+The answer was already on disk. The engine carries on past a file it cannot
+read, and leaves the reason where the output should have been:
+
+* `out/<dimension>/<CODE>/<stem>.pipeline.jsonl` — one JSON line per stage,
+  with `status` and, when it failed, `details.error`;
+* `out/<dimension>/<CODE>/<stem>.error.txt` — ingest's own note, with
+  `Motivo:`. Older than the JSONL and still the only record on a project
+  processed before it existed, so it is read as a fallback.
+
+`outputs.scan_problems` walks that and reports a variable whose first
+failing stage says so. First, not last: a variable that fails at ingest has
+nothing to render either, and being told about the render is being told about
+the symptom.
+
+It cannot be done with `scan_variables`, which walks rendered documents — a
+variable that failed before the render has none, which is exactly the case
+worth reporting. Nor is diffing inputs against rendered maps enough: it finds
+*which* ones are missing but not *why*, and the why is the part nobody can
+guess.
+
+Two outcomes are told apart. An `error` is the engine saying so, with its own
+words quoted rather than translated. `unfinished` is a variable whose chain
+simply stops — no render, and nothing claiming to have failed — which is what
+an interrupted run leaves behind, and wants processing again rather than
+investigating.
+
+Read off disk on every visit, so it survives a reload and a project opened a
+week later still says what is wrong with it.
+
 ## A variable's code comes from its folder, and is shown
 
 The engine reads a variable's identity out of the folder it sits in:
@@ -730,6 +765,7 @@ No component changes.
 | `watchModelApply` | `GET /api/projects/{id}/model/apply/stream` | **SSE**, one `ApplyProgress` per variable — drives the loading dialog |
 | `listExamples` | `GET /api/model/examples` | mocked; the examples are UI copy |
 | `addInputs` | `POST /api/projects/{id}/inputs/batch` | a folder of variables; reports per variable |
+| `listProblems` | `GET /api/projects/{id}/problems` | which variables did not finish, and the engine's reason |
 | `listModelRuns` | `GET /api/projects/{id}/model/runs` | newest first; only the first is ever drawn |
 | `pruneModelRuns` | `POST /api/projects/{id}/model/runs/prune` | keep the newest N, in one container |
 | `removeModelRun` | `DELETE /api/projects/{id}/model/runs/{runId}` | |

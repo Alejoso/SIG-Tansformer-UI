@@ -30,6 +30,7 @@ import type {
   ProjectSettings,
   Resolutions,
   ValueScale,
+  VariableProblem,
 } from '../types';
 
 /* ── projects ──────────────────────────────────────────────────────────── */
@@ -90,6 +91,15 @@ export const listInputs = (projectId: string): Promise<InputVariable[]> =>
 /** ENDPOINT: GET /api/projects/{id}/inputs/dimensions — the ones already in use. */
 export const listDimensions = (projectId: string): Promise<string[]> =>
   request(`/projects/${projectId}/inputs/dimensions`);
+
+/**
+ * LIVE: GET /api/projects/{id}/problems
+ *
+ * Variables the engine could not finish, with the reason it gave. Read off
+ * disk, so it outlives the run that produced them.
+ */
+export const listProblems = (projectId: string): Promise<VariableProblem[]> =>
+  request(`/projects/${projectId}/problems`);
 
 /**
  * ENDPOINT: POST /api/projects/{id}/inputs/plan

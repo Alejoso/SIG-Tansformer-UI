@@ -5,6 +5,7 @@ import type {
   ImportCandidate,
   ImportPlan,
   InputVariable,
+  VariableProblem,
   PipelineRun,
   PipelineStage,
 } from '../../types';
@@ -135,6 +136,15 @@ export function DataScreen() {
   /** Expanded by default while running: the stage list is the interesting part. */
   const [showStages, setShowStages] = useState(true);
 
+  /**
+   * Variables the engine could not finish, with the reason it gave.
+   *
+   * Read off disk, so this is what is wrong with the project right now
+   * rather than what the last run happened to print — and it is still here
+   * after a reload.
+   */
+  const [problems, setProblems] = useState<VariableProblem[]>([]);
+
   /** The folder being added, and what the server would do with it. */
   const [draftPath, setDraftPath] = useState('');
   const [planned, setPlanned] = useState<{ path: string; result: ImportPlan } | null>(null);
@@ -200,11 +210,16 @@ export function DataScreen() {
   useEffect(() => {
     if (!projectId) return;
     let live = true;
-    Promise.all([api.listInputs(projectId), api.listDimensions(projectId)])
-      .then(([list, dims]) => {
+    Promise.all([
+      api.listInputs(projectId),
+      api.listDimensions(projectId),
+      api.listProblems(projectId).catch(() => [] as VariableProblem[]),
+    ])
+      .then(([list, dims, found]) => {
         if (!live) return;
         setVariables(list);
         setDimensions(dims);
+        setProblems(found);
         // Default to the dimension already in use, so the common case —
         // another variable alongside the others — needs no choice at all.
         // Not `|| ''`: a select whose value matches no option still *shows*
@@ -609,6 +624,53 @@ export function DataScreen() {
               <Icon name="copy" size={13} />
               Copy
             </button>
+          </div>
+        )}
+
+        {/* What the engine could not finish, and why it said so. The run
+            only ever reported a count, which named nothing and was gone by
+            the next run — the reason has been sitting in the output folder
+            all along. */}
+        {problems.length > 0 && (
+          <div className="folder-alert is-problem">
+            <div className="folder-alert-body">
+              <strong>
+                {problems.length === 1
+                  ? 'One variable did not make it through'
+                  : `${problems.length} variables did not make it through`}
+              </strong>
+              <ul className="problem-list">
+                {problems.map((problem) => (
+                  <li key={problem.id}>
+                    <span className="problem-code mono">{problem.code}</span>
+                    {problem.status === 'unfinished' ? (
+                      <span className="problem-why">
+                        stopped partway through, with nothing saying why — the run may have
+                        been interrupted. Processing again is the thing to try.
+                      </span>
+                    ) : (
+                      <span className="problem-why">
+                        failed while {problem.stageLabel}
+                        {problem.reason && (
+                          <>
+                            {' — '}
+                            <span className="problem-reason">{problem.reason}</span>
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {problem.source && (
+                      <span className="problem-source mono muted-55">{problem.source}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <span className="muted-55">
+                The engine carries on past a variable it cannot read, so the rest of the run
+                is fine. Fix or remove {problems.length === 1 ? 'it' : 'these'} and process
+                again.
+              </span>
+            </div>
           </div>
         )}
 
@@ -1108,7 +1170,8 @@ export function DataScreen() {
                   <>
                     {run.erroredFiles} {run.erroredFiles === 1 ? 'file' : 'files'} could not be
                     processed — the engine carried on without{' '}
-                    {run.erroredFiles === 1 ? 'it' : 'them'}.{' '}
+                    {run.erroredFiles === 1 ? 'it' : 'them'}
+                    {problems.length > 0 ? ', and which ones is listed at the top.' : '.'}{' '}
                   </>
                 )}
                 {run.skippedFiles > 0 && (

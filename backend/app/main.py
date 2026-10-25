@@ -61,6 +61,7 @@ from .models import (
     Project,
     SaveModelPayload,
     SaveSettingsPayload,
+    VariableProblem,
 )
 
 app = FastAPI(title="Maphex", version="0.1.0")
@@ -487,6 +488,22 @@ def list_dimensions(project_id: str) -> list[str]:
     """The dimension folders that already exist, to offer rather than make people type."""
     project = _require_project(project_id)
     return inputs.dimensions(project)
+
+
+@app.get("/api/projects/{project_id}/problems")
+def list_problems(project_id: str) -> list[VariableProblem]:
+    """
+    Variables the engine could not finish, with the reason it gave.
+
+    Read off disk rather than out of the run that produced them. The run
+    reports a count — "4 files could not be processed" — and that number is
+    gone as soon as the next one starts, while the reason is still in the
+    folder where the output should have been. It also means this survives a
+    reload, and a project opened a week later still says what is wrong with
+    it.
+    """
+    project = _require_project(project_id)
+    return [VariableProblem(**vars(problem)) for problem in outputs.scan_problems(project)]
 
 
 @app.post("/api/projects/{project_id}/inputs/plan")

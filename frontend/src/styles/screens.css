@@ -578,3 +578,40 @@
   line-height: 1.5;
   color: color-mix(in srgb, var(--color-text) 78%, transparent);
 }
+
+/* ── variables the engine could not finish ──────────────────────────────── */
+
+.folder-alert.is-problem {
+  background: var(--color-accent-100);
+  box-shadow: inset 0 0 0 1px var(--color-accent-300);
+}
+
+.problem-list {
+  margin: 8px 0 6px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.problem-list li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.problem-code {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  background: var(--color-accent-200);
+  color: var(--color-accent-900);
+}
+.problem-why { flex: 1; min-width: 0; color: color-mix(in srgb, var(--color-text) 80%, transparent); }
+/* The engine's own words, set apart so it is clear they are a quote and not
+   this app's description of what happened. */
+.problem-reason { color: var(--color-text); }
+.problem-source { flex: none; font-size: 11px; }

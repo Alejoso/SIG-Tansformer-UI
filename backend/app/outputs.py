@@ -187,6 +187,156 @@ def _read_variable_log(log_path: Path) -> tuple[list[str], bool, str]:
     return stages, ok, execution_id
 
 
+#: Stage names the engine writes, in the order it runs them. Used only to
+#: report the *first* thing that went wrong rather than the last line in the
+#: file — a variable that fails at ingest also has nothing to render, and
+#: being told about the render is being told about the symptom.
+STAGE_ORDER = ("INGESTA", "CONVERSION_H3", "RASTER_H3", "CARGA_DB", "RENDER_HTML")
+
+#: What the engine calls each stage, for someone who did not write it.
+STAGE_LABELS = {
+    "INGESTA": "reading the file",
+    "CONVERSION_H3": "converting to hexagons",
+    "RASTER_H3": "converting the raster to hexagons",
+    "CARGA_DB": "loading into the database",
+    "RENDER_HTML": "drawing the map",
+}
+
+
+@dataclass
+class VariableProblem:
+    """A variable the engine could not finish, and what it said about it."""
+
+    #: `<dimension>/<CODE>`, the same id the Data screen uses.
+    id: str
+    dimension: str
+    code: str
+    #: `error` when the engine said so, `unfinished` when it simply never got
+    #: to the end — no render, and nothing claiming to have failed.
+    status: str
+    #: The stage it stopped at, in the engine's own word for it.
+    stage: str
+    #: And in English, for the screen.
+    stageLabel: str
+    #: The engine's own reason, as it wrote it. Spanish, because that is what
+    #: it says and translating it would be inventing detail.
+    reason: str
+    #: The file it was reading.
+    source: str
+    executionId: str
+
+
+def _problem_from_log(log_path: Path) -> tuple[str, str, str, str, str]:
+    """
+    (status, stage, reason, source, execution_id) from one variable's log.
+
+    The last entry per stage wins: a variable that failed and was then fixed
+    and re-run appends to the same file, so the earlier failure is history
+    rather than news.
+    """
+    latest: dict[str, dict] = {}
+    execution_id = ""
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        execution_id = entry.get("execution_id", execution_id) or execution_id
+        stage = str(entry.get("stage", "")) or "?"
+        latest[stage] = entry
+
+    for stage in (*STAGE_ORDER, *sorted(set(latest) - set(STAGE_ORDER))):
+        entry = latest.get(stage)
+        if entry is None:
+            continue
+        if entry.get("status") in ("error", "fail", "failed"):
+            details = entry.get("details") or {}
+            reason = str(details.get("error") or details.get("motivo") or "").strip()
+            source = str(details.get("archivo_origen") or "").strip()
+            return "error", stage, reason, source, execution_id
+
+    rendered = latest.get("RENDER_HTML", {}).get("status") == "ok"
+    return ("ok" if rendered else "unfinished"), "", "", "", execution_id
+
+
+def _reject_note(folder: Path) -> tuple[str, str]:
+    """
+    The reason out of an `<stem>.error.txt`, which ingest writes beside the
+    output it did not produce.
+
+    A fallback: the JSONL carries the same thing, but it is newer and a
+    project processed before it existed would have only this.
+    """
+    for note in sorted(folder.glob("*.error.txt")):
+        try:
+            text = note.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        reason = source = ""
+        for line in text.splitlines():
+            if line.startswith("Motivo:"):
+                reason = line.split(":", 1)[1].strip()
+            elif line.startswith("Fuente:"):
+                source = Path(line.split(":", 1)[1].strip()).name
+        if reason:
+            return reason, source
+    return "", ""
+
+
+def scan_problems(project: store.ProjectRow) -> list[VariableProblem]:
+    """
+    Variables the engine did not finish, and why.
+
+    Read off disk rather than out of the run's output, for two reasons. The
+    run prints a count and moves on — "4 files could not be processed" with
+    no names — and the count is gone as soon as the next run starts, while
+    the reason is still sitting in the folder where the output should have
+    been. The engine writes it there on purpose: a `.pipeline.jsonl` with
+    the failing stage, and for ingest an `.error.txt` beside it.
+
+    `scan_variables` cannot answer this because it walks rendered documents,
+    and a variable that failed before the render has none — which is exactly
+    the case worth reporting.
+    """
+    root = out_dir(project)
+    if root is None or not root.is_dir():
+        return []
+
+    found: list[VariableProblem] = []
+    for dimension_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        if dimension_dir.name in NOT_DIMENSIONS:
+            continue
+        for code_dir in sorted(p for p in dimension_dir.iterdir() if p.is_dir()):
+            logs = sorted(code_dir.glob("*.pipeline.jsonl"))
+            status, stage, reason, source, execution_id = (
+                _problem_from_log(logs[0]) if logs else ("unfinished", "", "", "", "")
+            )
+            if status == "ok":
+                continue
+            if not reason:
+                reason, note_source = _reject_note(code_dir)
+                source = source or note_source
+                if reason and status == "unfinished":
+                    status, stage = "error", stage or "INGESTA"
+            found.append(
+                VariableProblem(
+                    id=f"{dimension_dir.name}/{code_dir.name}",
+                    dimension=dimension_dir.name,
+                    code=code_dir.name,
+                    status=status,
+                    stage=stage,
+                    stageLabel=STAGE_LABELS.get(stage, stage.lower().replace("_", " ")),
+                    reason=reason,
+                    source=source,
+                    executionId=execution_id,
+                )
+            )
+    return found
+
+
 def _documents(root: Path) -> list[Path]:
     """
     One rendered document per variable, newest spelling first.

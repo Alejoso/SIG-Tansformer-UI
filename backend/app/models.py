@@ -105,6 +105,24 @@ class LayerNode(BaseModel):
     ok: bool = True
 
 
+class VariableProblem(BaseModel):
+    """A variable the engine could not finish, and what it said about it."""
+
+    id: str
+    dimension: str
+    code: str
+    #: `error` when the engine said so, `unfinished` when it simply never got
+    #: to the end.
+    status: str
+    stage: str = ""
+    stageLabel: str = ""
+    #: The engine's own reason, as it wrote it — in Spanish, because that is
+    #: what it says and translating it would be inventing detail.
+    reason: str = ""
+    source: str = ""
+    executionId: str = ""
+
+
 class LayerTree(BaseModel):
     model: dict[str, object]
     inputs: list[LayerNode]

@@ -28,10 +28,11 @@ import * as modelRuns from './model-runs.mjs';
 import * as batchImport from './batch-import.mjs';
 import * as applyRun from './apply-run.mjs';
 import * as codes from './codes.mjs';
+import * as problems from './problems.mjs';
 
 const SUITES = [
   modelScreen, examplesScreen, layerOpacity, mapScreen, settings, modelRuns, batchImport,
-  applyRun, codes,
+  applyRun, codes, problems,
 ];
 
 const only = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));
