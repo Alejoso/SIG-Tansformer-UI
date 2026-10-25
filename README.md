@@ -218,6 +218,32 @@ two of them would be writing the same project's model file.
 Those last two are all that is left of the mocks. A mesh upload has no server
 route, and the examples are UI copy with nowhere else to live yet.
 
+## A variable's code comes from its folder, and is shown
+
+The engine reads a variable's identity out of the folder it sits in:
+`in/<dimension>/<CODE>/`, and `format_code` uppercases the leading
+`abc_123`. So the folder name is what a suggested code is taken from — the
+file inside may be called anything, and often is.
+
+A code may carry a tail. `SOE_001_poblacion` is as good a folder name as
+`SOE_001`: the engine reads the identity off the front, keeps the rest, and
+makes a column out of the whole thing. `CODE_PATTERN` allows it up to
+`MAX_CODE_LENGTH`, which is 32 — nothing in the engine stops a longer one,
+since it becomes a Postgres column name and those run to 63, but past that
+it stops being readable in the model file, on the map and in a folder
+listing, which is most of what a code is for.
+
+The same rule lives in two places and has to stay in step: `normalise_code`
+on the server, and `canonicalCode` in the Data screen, which previews where
+a variable will land before it is copied.
+
+**The map names layers by code.** The label is `_humanise` of the processed
+file's name, which is not always a name anyone chose — a real project here
+has three variables whose labels come out as `A`, `At` and `At`. The code is
+what the model file and the master table know them by, so the sidebar leads
+with it and the heading over the map shows it, with the readable name
+underneath.
+
 ## A folder of variables, not just a folder that is one
 
 The engine's input tree is `in/<dimension>/<CODE>/<one dataset>`, so adding a
@@ -357,6 +383,17 @@ settable *before* that run. It is on New project (chosen there, written to
 the project once it is created, since there is nothing to attach it to
 before), beside Process on the Data screen, and on the Map. The Map alone
 would be too late: you only get there by processing first.
+
+**Changing a resolution does not change anything already processed**, and
+the dialog says so rather than closing as if it had. The values keep the
+hexagon size they were computed at; the maps keep the size they were drawn
+at. Both need the variables processed again — including the visualization
+one, because `render_html.py` skips a map that is newer than the parquet
+behind it, so a bare re-run will not redraw it. After saving, the dialog
+stays open to say what is still to do, with a button that goes to the screen
+with Process on it. Only when there is something at the old resolution:
+`hasResults` says whether there is, and on an empty project changing a
+number costs nothing.
 
 The dialog always says which of its two states it is in — *Default values*
 or *Set for this project* — because the "Default values" button only exists

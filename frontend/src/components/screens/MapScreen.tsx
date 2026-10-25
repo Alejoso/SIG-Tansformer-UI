@@ -231,7 +231,11 @@ export function MapScreen() {
         <LayerFrame
           url={layerUrl}
           filename={active.filename}
-          title={active.label}
+          /* The code when the layer has one: it is what the model file and
+             the master table call this, while the label is taken from
+             whatever the processed file was named — which can come out as
+             "A" or "At". The readable name moves to the line below. */
+          title={active.code || active.label}
           subtitle={
             effectiveScale === 'normalized' && active.description
               ? `${active.description} · normalized`

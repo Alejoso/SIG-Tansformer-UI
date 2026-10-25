@@ -6,6 +6,7 @@ import {
   type ProjectSettings,
   type Resolutions,
 } from '../../types';
+import { useApp } from '../../state/app-context';
 import { Dialog } from '../ui/Dialog';
 import { Icon } from '../ui/Icon';
 
@@ -43,7 +44,18 @@ const inRange = (value: number) =>
  * slow at random.
  */
 export function SettingsDialog({ projectId, chosen, onChoose, onClose }: SettingsDialogProps) {
+  const { goTo } = useApp();
   const [settings, setSettings] = useState<ProjectSettings | null>(null);
+  /**
+   * What was saved, once it was — the dialog stays open to say what has to
+   * happen next.
+   *
+   * Nothing on screen changes when a resolution is saved: the values keep
+   * the hexagon size they were computed at, and the maps keep the one they
+   * were drawn at. Closing on save would make that look like it had taken
+   * effect.
+   */
+  const [justSaved, setJustSaved] = useState<{ processing: boolean; map: boolean } | null>(null);
   /** What is stored now, so a change can say what it will cost. */
   const [saved, setSaved] = useState<ProjectSettings | null>(null);
   const [saving, setSaving] = useState(false);
@@ -85,6 +97,10 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
   const reprocesses =
     !!settings && !!saved && processingValid &&
     settings.processingResolution !== saved.processingResolution;
+  const redraws =
+    !!settings && !!saved && mapValid && settings.mapResolution !== saved.mapResolution;
+  /** Only worth warning about when there is something at the old resolution. */
+  const affectsResults = (reprocesses || redraws) && !!settings?.hasResults;
   const canSave = !!settings && processingValid && mapValid && !saving;
 
   const save = async () => {
@@ -104,6 +120,14 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
     setError(null);
     try {
       await api.saveSettings(projectId, pair);
+      if (affectsResults) {
+        // Stay open and say what is still to do. The numbers are stored;
+        // nothing that has already been computed has moved.
+        setJustSaved({ processing: reprocesses, map: redraws });
+        setSaved({ ...settings, ...pair, followingEngine: false });
+        setSaving(false);
+        return;
+      }
       onClose();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Could not save the settings');
@@ -152,7 +176,30 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
         )}
       </div>
 
-      {!settings ? (
+      {justSaved ? (
+        <>
+          <p className="dialog-body" style={{ margin: 0 }}>
+            Saved. <strong>Nothing has changed yet</strong> — what is on the map was computed
+            and drawn at the old resolution, and stays that way until the data is processed
+            again.
+          </p>
+          <ul className="settings-next">
+            {justSaved.processing && (
+              <li>
+                The hexagons are a different size now, so every value has to be computed
+                again. The engine rebuilds its master table and reprocesses each variable —
+                minutes, not seconds.
+              </li>
+            )}
+            {justSaved.map && (
+              <li>
+                The maps are redrawn as part of that. On its own a re-run will not touch
+                them: the engine skips a map that is newer than the data behind it.
+              </li>
+            )}
+          </ul>
+        </>
+      ) : !settings ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '24px 0' }}>
           {error ? (
             <p className="settings-note is-error" style={{ margin: 0 }}>
@@ -221,11 +268,23 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
                 the old size, so none of them survive the change. */}
             {reprocesses && (
               <p className="settings-note">
-                {projectId
-                  ? 'Changing the processing resolution rebuilds the hexagon master table and ' +
-                    'reprocesses every variable on the next run — minutes, not seconds.'
-                  : 'Worth settling now: changing it after the first run rebuilds the hexagon ' +
-                    'master table and reprocesses every variable.'}
+                {!projectId
+                  ? 'Worth settling now: changing it after the first run rebuilds the hexagon ' +
+                    'master table and reprocesses every variable.'
+                  : settings.hasResults
+                    ? 'Nothing already processed changes until you process again — the values ' +
+                      'keep the hexagon size they were computed at. Then the master table is ' +
+                      'rebuilt and every variable reprocessed: minutes, not seconds.'
+                    : 'Nothing has been processed yet, so this costs nothing — it is simply ' +
+                      'the size the first run will use.'}
+              </p>
+            )}
+            {/* The engine skips a map that is newer than the data behind it,
+                so this one does not take effect on a bare re-run either. */}
+            {redraws && settings.hasResults && (
+              <p className="settings-note">
+                The maps already drawn keep their current resolution. They are redrawn when
+                the variables are processed again, not on a re-run on its own.
               </p>
             )}
             {mapTooFine && (
@@ -248,6 +307,24 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
       )}
 
       <div className="dialog-actions">
+        {justSaved ? (
+          <>
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
+              Later
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                onClose();
+                goTo('data');
+              }}
+            >
+              Go and process
+            </button>
+          </>
+        ) : (
+          <>
         {/* The way back, offered only when there is something to go back
             from. Typing the numbers the engine currently reports is not the
             same thing: that pins them, and they would stay put when the
@@ -269,6 +346,8 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
         <button type="button" className="btn btn-primary" onClick={save} disabled={!canSave}>
           {saving ? 'Saving…' : projectId ? 'Save settings' : 'Use these'}
         </button>
+          </>
+        )}
       </div>
     </Dialog>
   );

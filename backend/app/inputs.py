@@ -48,8 +48,22 @@ SHAPEFILE_COMPANIONS = {
 }
 
 #: Three letters and three digits, as `shared.DIM_CODE_RE` in the engine has
-#: it. The engine uppercases the code in folder names, so we store it that way.
-CODE_PATTERN = re.compile(r"^[A-Za-z]{3}_[0-9]{3}$")
+#: it — optionally followed by more, because a folder is often named
+#: `SOE_001_poblacion` and that whole name is what the engine makes the
+#: column out of. The engine only reads the identity from the first seven
+#: characters and keeps the rest, so the tail is free text.
+#:
+#: The engine uppercases the code in folder names, so we store it that way.
+CODE_PATTERN = re.compile(r"^[A-Za-z]{3}_[0-9]{3}(?:_[A-Za-z0-9_]+)?$")
+
+#: The identity the engine reads, which is always exactly this much.
+CODE_PREFIX = re.compile(r"^([A-Za-z]{3})_([0-9]{3})")
+
+#: How long a code may be. Nothing in the engine stops a longer one — it
+#: becomes a Postgres column name, and those run to 63 — but past this it
+#: stops being readable in the model file, on the map and in a folder
+#: listing, which is most of what a code is for.
+MAX_CODE_LENGTH = 32
 
 #: Folders under `out/` that hold the pipeline's own products rather than
 #: variables — the master export, archived copies, the MCDA's own output and
@@ -375,31 +389,47 @@ def normalise_dimension(name: str) -> str:
 
 def normalise_code(raw: str) -> str:
     """
-    A code in the engine's own shape: three letters, underscore, three digits.
+    A code in the engine's own shape: three letters, underscore, three digits,
+    and whatever the folder called itself after that.
 
-    Typed codes copy the file they came from, and files are named `SOE-001`
-    as often as `SOE_001`. The engine's `DIM_CODE_RE` only recognises the
-    underscore form, and a code it does not recognise stops being a code —
-    it becomes part of the name and the variable loses its identity. So a
-    hyphen is corrected rather than rejected.
+    Typed codes copy the folder or file they came from, and those are named
+    `SOE-001` as often as `SOE_001`. The engine's `DIM_CODE_RE` only
+    recognises the underscore form, and a code it does not recognise stops
+    being a code — it becomes part of the name and the variable loses its
+    identity. So a hyphen is corrected rather than rejected.
+
+    A tail is kept as it is: `SOE-001-poblacion` is `SOE_001_POBLACION`, and
+    the engine reads the identity off the front and leaves the rest alone.
     """
     cleaned = re.sub(r"[^A-Za-z0-9]+", "_", _strip_accents(raw).strip()).strip("_").upper()
     # `SOE001` is unambiguous too, and is what you get from a tidy filename.
-    match = re.fullmatch(r"([A-Za-z]{3})_?([0-9]{1,3})", cleaned)
+    match = re.fullmatch(r"([A-Za-z]{3})_?([0-9]{1,3})(?:_(.+))?", cleaned)
     if match:
-        return f"{match.group(1).upper()}_{int(match.group(2)):03d}"
+        base = f"{match.group(1).upper()}_{int(match.group(2)):03d}"
+        return f"{base}_{match.group(3)}" if match.group(3) else base
     return cleaned
 
 
-def _code_from_filename(filename: str) -> str:
+def _code_from_name(name: str) -> str:
     """
-    The code a file names itself after, if it does.
+    The code a folder or file names itself after, if it does.
 
-    `SOE-001.gpkg` is a variable announcing its own code, which is a better
-    suggestion than the next free number — and it is how these files arrive.
+    `SOE_001_poblacion` is a variable announcing its own code, which is a
+    better suggestion than the next free number — and it is how these arrive.
+    The folder is asked first because that is what the engine names the
+    variable after; a file inside it may be called anything.
     """
-    stem = filename.split(".")[0]
+    stem = name.split(".")[0]
     candidate = normalise_code(stem)
+    # `soe_001_SOE-001.gpkg` is a file saying its code twice — the folder's
+    # and its own. Once is enough.
+    prefix = CODE_PREFIX.match(candidate)
+    if prefix and candidate == f"{prefix.group(0)}_{prefix.group(0)}":
+        candidate = prefix.group(0)
+    if len(candidate) > MAX_CODE_LENGTH:
+        # Too long to keep whole. The identity is still worth having.
+        prefix = CODE_PREFIX.match(candidate)
+        candidate = prefix.group(0) if prefix else ""
     return candidate if CODE_PATTERN.match(candidate) else ""
 
 
@@ -429,30 +459,46 @@ def _taken_codes(project: store.ProjectRow, dimension: str) -> list[str]:
     ]
 
 
-def _next_code(existing: list[str], taken: set[str], dimension: str, filename: str) -> str:
+def _numbers_under(codes, prefix: str) -> set[int]:
+    """The numbers already used under a three-letter prefix."""
+    found = set()
+    for code in codes:
+        match = CODE_PREFIX.match(code)
+        if match and match.group(1).upper() == prefix:
+            found.add(int(match.group(2)))
+    return found
+
+
+def _next_code(existing: list[str], taken: set[str], dimension: str, name: str) -> str:
     """
     Which code to give a variable, against a set the caller keeps.
 
     The caller keeps it because a batch allocates several at once: each one
     has to miss the codes already on disk *and* the ones handed to the rows
     above it, which a function that re-reads the tree every call cannot do.
+
+    `name` is the folder the variable comes from, or the file when several
+    sit in one folder. A name that already says its code is taken at its
+    word — including the tail, so `SOE_001_poblacion` stays itself rather
+    than being flattened to `SOE_001`.
     """
-    from_file = _code_from_filename(filename) if filename else ""
-    if from_file and from_file not in taken:
-        return from_file
+    from_name = _code_from_name(name) if name else ""
+    if from_name and from_name not in taken:
+        return from_name
 
     if existing:
         prefix = existing[0][:3].upper()
-        used = {int(code[4:]) for code in existing if code[:3].upper() == prefix}
-    elif from_file:
-        # The filename gave a code, but it is taken — keep its prefix and
-        # move to the next free number under it.
-        prefix, used = from_file[:3], {int(from_file[4:])}
+    elif from_name:
+        # The name gave a code, but it is taken — keep its prefix and move to
+        # the next free number under it.
+        prefix = from_name[:3]
     else:
         letters = re.sub(r"[^A-Za-z]", "", dimension)[:3].upper()
-        prefix, used = (letters or "VAR").ljust(3, "X"), set()
+        prefix = (letters or "VAR").ljust(3, "X")
 
-    used |= {int(code[4:]) for code in taken if code[:3].upper() == prefix}
+    used = _numbers_under(existing, prefix) | _numbers_under(taken, prefix)
+    if from_name:
+        used |= _numbers_under([from_name], prefix)
     number = next(n for n in range(1, 1000) if n not in used)
     return f"{prefix}_{number:03d}"
 
@@ -601,7 +647,12 @@ def plan(project: store.ProjectRow, raw_source: str, dimension: str = "") -> Imp
         result.format = _format_of(dataset)
         result.files = [dataset.name] + [c.name for c in companions]
         result.sizeBytes = _measure([dataset, *companions])
-        result.code = suggest_code(project, chosen, dataset.name)
+        # The folder first: that is what the engine makes the variable's
+        # name out of, and it is the one usually called `SOE_001_algo`. The
+        # file is the fallback, for a folder called `descargas`.
+        result.code = suggest_code(project, chosen, source.name) or suggest_code(
+            project, chosen, dataset.name
+        )
         return result
 
     # Not one variable. Either several datasets side by side, or subfolders
@@ -619,7 +670,9 @@ def plan(project: store.ProjectRow, raw_source: str, dimension: str = "") -> Imp
     for candidate in candidates:
         if candidate.problem:
             continue
-        candidate.code = _next_code(existing, taken, chosen, candidate.filename)
+        # `label` is the folder for a folder of folders, and the file when
+        # several datasets share one — which is the right source either way.
+        candidate.code = _next_code(existing, taken, chosen, candidate.label)
         taken.add(candidate.code)
 
     result.variables = candidates
@@ -709,7 +762,13 @@ def _destination(project: store.ProjectRow, dimension: str, code: str) -> Path:
         raise ValueError(
             f"{code!r} is not a code the engine can read. It wants three letters "
             "and three digits, like SOE_001 — it reads the variable's identity "
-            "out of that."
+            "out of that. Anything after them is yours: SOE_001_poblacion works."
+        )
+    if len(identifier) > MAX_CODE_LENGTH:
+        raise ValueError(
+            f"{code!r} is {len(identifier)} characters. Keep a code to "
+            f"{MAX_CODE_LENGTH} — it becomes a folder name, a column and a line "
+            "on the map."
         )
 
     target = (root / folder / identifier).resolve()

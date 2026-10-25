@@ -95,6 +95,11 @@ export function LayerTree({ title, nodes, selectedId, onSelect, defaultOpen = []
               if (composite && !isOpen) toggle(node.id);
             }}
           >
+            {/* The code first, because it is the name the model file and
+                the master table use. The label beside it comes from whatever
+                the processed file was called, which is not always a name
+                anyone chose. */}
+            {node.code && <span className="layer-code mono">{node.code}</span>}
             <span className="layer-name">{node.label}</span>
             {composite && <span className="layer-count">{children.length}</span>}
           </button>

@@ -90,6 +90,11 @@ class InspectResult(BaseModel):
 class LayerNode(BaseModel):
     id: str
     label: str
+    #: The variable's code, for the rows that have one. The engine reads a
+    #: variable's identity out of this, so it is what the model file and the
+    #: master table call it — which makes it the name worth showing beside a
+    #: label taken from whatever the file happened to be called.
+    code: str = ""
     description: str = ""
     children: list["LayerNode"] = Field(default_factory=list)
     hasDocument: bool = True
@@ -150,6 +155,11 @@ class ProjectSettings(BaseModel):
     #: True while this project has never set them and is following whatever
     #: the engine's own `.env` says.
     followingEngine: bool = False
+    #: Whether anything has been processed yet. Changing a resolution only
+    #: matters if there are results sitting at the old one — on an empty
+    #: project it is just a choice, and saying "you must reprocess" would be
+    #: telling someone to redo work they have not done.
+    hasResults: bool = False
 
 
 class SaveSettingsPayload(BaseModel):

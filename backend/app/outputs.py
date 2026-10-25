@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -65,6 +66,20 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_")
 
 
+def _fold_accents(text: str) -> str:
+    """
+    `Elevación` → `Elevacion`, rather than the `Elevaci n` a plain slug gives.
+
+    Only for labels. Ids go through `_slug` untouched, because an id that
+    changed shape would stop matching the one the map had selected.
+    """
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFKD", text)
+        if not unicodedata.combining(character)
+    )
+
+
 def _strip_suffix(name: str, suffixes: tuple[str, ...]) -> str:
     """The name without whichever of the suffixes it ends with."""
     for suffix in suffixes:
@@ -98,8 +113,8 @@ def _humanise(stem: str, code: str = "") -> str:
     inside `SOE_001` — which would read as "Soe 001 SOE 001". When stripping
     the code leaves nothing behind, the code itself is the only name there is.
     """
-    normal = _slug(stem).lower()
-    key = _slug(code).lower()
+    normal = _slug(_fold_accents(stem)).lower()
+    key = _slug(_fold_accents(code)).lower()
 
     if key:
         for _ in range(2):  # it can appear at both ends

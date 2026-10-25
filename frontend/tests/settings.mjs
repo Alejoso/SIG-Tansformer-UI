@@ -78,8 +78,8 @@ export async function run({ project }) {
     await page.locator('#processing-res').fill(String(before.processingResolution + 1));
     await page.waitForTimeout(300);
     const notes = await page.locator('.settings-note').allInnerTexts();
-    check('moving the processing resolution warns about reprocessing',
-      notes.some((n) => /rebuilds the hexagon master table/.test(n)), JSON.stringify(notes));
+    check('moving the processing resolution says nothing changes until a reprocess',
+      notes.some((n) => /until you process again/i.test(n)), JSON.stringify(notes));
     await page.locator('#processing-res').fill(String(before.processingResolution));
     await page.waitForTimeout(300);
 
@@ -95,11 +95,28 @@ export async function run({ project }) {
     await page.waitForTimeout(300);
     await page.getByRole('button', { name: /save settings/i }).click();
     await page.waitForTimeout(1200);
+
+    // Saving a resolution on a project with results does not close the
+    // dialog: nothing on screen has moved yet, and closing would look like
+    // it had.
+    const next = page.locator('.settings-next');
+    check('saving says what is still to do', (await next.count()) === 1,
+      await next.innerText().catch(() => '(absent)'));
+    check('and offers to go and do it',
+      (await page.getByRole('button', { name: /go and process/i }).count()) === 1);
+
     const after = await api(`/projects/${project.id}/settings`);
     check('the change is on the server',
       after.processingResolution === before.processingResolution && after.mapResolution === wanted,
       JSON.stringify(after));
     check('and it no longer claims to follow the engine', after.followingEngine === false);
+
+    await page.getByRole('button', { name: /go and process/i }).click();
+    await page.waitForTimeout(800);
+    check('which lands on the screen with the Process button',
+      (await page.locator('.project-folder').count()) === 1);
+    await goToScreen(page, 'Map');
+    await page.waitForTimeout(1200);
 
     /* ── which is when the way back appears ─────────────────────────── */
     // It only exists once there is something to go back from, so with a

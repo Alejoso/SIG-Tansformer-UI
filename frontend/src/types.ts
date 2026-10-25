@@ -266,6 +266,14 @@ export interface LayerNode {
   /** Unique across the whole tree; this is the selection key and the URL key. */
   id: string;
   label: string;
+  /**
+   * The variable's code, on the rows that have one.
+   *
+   * The label comes from the file the engine processed, which is whatever it
+   * happened to be called. The code is what the model file and the master
+   * table know it by, so it is the one to find a variable with.
+   */
+  code?: string;
   /** One line of plain-language context, shown over the map. */
   description?: string;
   /**
@@ -512,6 +520,13 @@ export interface ProjectSettings {
    * numbers are real either way, but nobody here chose them.
    */
   followingEngine: boolean;
+  /**
+   * Whether anything has been processed yet.
+   *
+   * Changing a resolution only matters if there are results sitting at the
+   * old one. On an empty project it is just a choice.
+   */
+  hasResults: boolean;
 }
 
 /** H3 defines resolutions 0 (coarsest) through 15 (finest). */

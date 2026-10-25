@@ -47,8 +47,13 @@ const canonicalCode = (raw: string): string => {
     .replace(/[^A-Za-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .toUpperCase();
-  const match = /^([A-Za-z]{3})_?([0-9]{1,3})$/.exec(cleaned);
-  return match ? `${match[1]}_${match[2].padStart(3, '0')}` : cleaned;
+  // The tail is kept: `SOE_001_poblacion` is a code the engine reads, and
+  // the server's `normalise_code` does the same. This only previews where
+  // the variable will land, so the two have to agree.
+  const match = /^([A-Za-z]{3})_?([0-9]{1,3})(?:_(.+))?$/.exec(cleaned);
+  if (!match) return cleaned;
+  const base = `${match[1]}_${match[2].padStart(3, '0')}`;
+  return match[3] ? `${base}_${match[3]}` : base;
 };
 
 /**
