@@ -274,6 +274,14 @@ investigating.
 Read off disk on every visit, so it survives a reload and a project opened a
 week later still says what is wrong with it.
 
+It sits below the variables and above the Process button, which is the order
+of the thing: what the last run did, then the button that starts the next.
+And the "all done" dialog admits when it is not — a different title, the
+accent rather than the sage, and the count called out in its own box. A run
+that lost four variables dressed exactly like one that lost none is how four
+failures go unread, and the engine carrying on past a bad file means this is
+the only moment anything says so.
+
 ## A variable's code comes from its folder, and is shown
 
 The engine reads a variable's identity out of the folder it sits in:

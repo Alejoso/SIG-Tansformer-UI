@@ -322,6 +322,8 @@ export function DataScreen() {
     applying?.projectId === projectId &&
     (applying.run.status === 'starting' || applying.run.status === 'running');
   const locked = running || modelRunning;
+  /** The run finished, but not with everything. */
+  const someFailed = (run?.erroredFiles ?? 0) > 0;
   /** Variables whose folder is not one readable dataset — the engine will skip them. */
   const unreadable = variables.filter((v) => v.problem && !v.processedOnly);
   /** Results with no input: the engine still loads them, so they are worth seeing. */
@@ -1124,7 +1126,7 @@ export function DataScreen() {
                     {run.erroredFiles} {run.erroredFiles === 1 ? 'file' : 'files'} could not be
                     processed — the engine carried on without{' '}
                     {run.erroredFiles === 1 ? 'it' : 'them'}
-                    {problems.length > 0 ? ', and which ones is listed below.' : '.'}{' '}
+                    {problems.length > 0 ? ', and which ones is listed above.' : '.'}{' '}
                   </>
                 )}
                 {run.skippedFiles > 0 && (
@@ -1157,42 +1159,12 @@ export function DataScreen() {
           </div>
         )}
 
-        <div className="process-actions">
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={variables.length === 0 || locked}
-            onClick={startProcessing}
-            style={{ height: 44, paddingInline: 26, fontSize: 15 }}
-          >
-            {starting ? 'Starting…' : phase === 'done' ? 'Process again' : running ? 'Processing…' : 'Process'}
-          </button>
-          {/* Beside the button that starts the run, because the resolution
-              is a property of the run and this is the last moment it can be
-              chosen without reprocessing everything. */}
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setShowSettings(true)}
-            disabled={locked}
-            style={{ height: 44, paddingInline: 18, gap: 8, flex: 'none' }}
-          >
-            <Icon name="sliders" />
-            Resolution
-          </button>
-          {showHints && (
-            <span className="muted-55" style={{ fontSize: 12.5 }}>
-              {processHint}
-            </span>
-          )}
-        </div>
-
-        {/* What the engine could not finish, and why it said so. Under the
-            Process button rather than over the dropzone: it is the result of
-            a run, and it belongs where you look after starting one. The run
-            only ever reported a count, which named nothing and was gone by
-            the next run — the reason has been sitting in the output folder
-            all along. */}
+        {/* What the engine could not finish, and why it said so. Down here
+            rather than over the dropzone: it is the result of a run, and it
+            belongs where you look after starting one — with the button that
+            starts the next one directly beneath it. The run only ever
+            reported a count, which named nothing and was gone by the next
+            run; the reason has been sitting in the output folder all along. */}
         {problems.length > 0 && (
           <div className="problem-panel">
           <div className="folder-alert is-problem">
@@ -1238,6 +1210,36 @@ export function DataScreen() {
           </div>
         )}
 
+        <div className="process-actions">
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={variables.length === 0 || locked}
+            onClick={startProcessing}
+            style={{ height: 44, paddingInline: 26, fontSize: 15 }}
+          >
+            {starting ? 'Starting…' : phase === 'done' ? 'Process again' : running ? 'Processing…' : 'Process'}
+          </button>
+          {/* Beside the button that starts the run, because the resolution
+              is a property of the run and this is the last moment it can be
+              chosen without reprocessing everything. */}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowSettings(true)}
+            disabled={locked}
+            style={{ height: 44, paddingInline: 18, gap: 8, flex: 'none' }}
+          >
+            <Icon name="sliders" />
+            Resolution
+          </button>
+          {showHints && (
+            <span className="muted-55" style={{ fontSize: 12.5 }}>
+              {processHint}
+            </span>
+          )}
+        </div>
+
       </div>
 
       {showComplete && (
@@ -1247,11 +1249,20 @@ export function DataScreen() {
           style={{ alignItems: 'flex-start' }}
           labelledBy="complete-title"
         >
-          <div className="complete-icon">
-            <Icon name="check" size={26} color="var(--color-accent-2-800)" strokeWidth={3} />
+          {/* A run that lost variables is not "all done", and dressing it
+              the same as one that did not is how four failures go unread.
+              The engine carries on past a bad file, so this is the only
+              moment anything says so. */}
+          <div className={`complete-icon${someFailed ? ' is-warning' : ''}`}>
+            <Icon
+              name={someFailed ? 'close' : 'check'}
+              size={26}
+              color={someFailed ? 'var(--color-accent-800)' : 'var(--color-accent-2-800)'}
+              strokeWidth={3}
+            />
           </div>
           <div className="dialog-title" id="complete-title">
-            All done
+            {someFailed ? 'Done, with some left out' : 'All done'}
           </div>
           {/* Deliberately not "N folders converted": the folder count is our
               own record, not what the engine did with it — one folder can
@@ -1262,10 +1273,22 @@ export function DataScreen() {
             {run?.hexagonCount
               ? `Your data is on ${run.hexagonCount.toLocaleString()} hexagons. `
               : 'Your data has been converted. '}
-            {run && run.erroredFiles > 0
-              ? `${run.erroredFiles} ${run.erroredFiles === 1 ? 'file' : 'files'} could not be processed — the rest is ready to explore on the map.`
+            {someFailed
+              ? 'The rest is ready to explore on the map.'
               : 'Every variable is ready to explore on the map.'}
           </p>
+          {someFailed && run && (
+            <p className="complete-failed">
+              <strong>
+                {run.erroredFiles} {run.erroredFiles === 1 ? 'variable' : 'variables'} could not
+                be processed.
+              </strong>{' '}
+              {problems.length > 0
+                ? `Which ${problems.length === 1 ? 'one' : 'ones'}, and what the engine said
+                   about ${problems.length === 1 ? 'it' : 'them'}, is on the page behind this.`
+                : 'The engine carried on without them.'}
+            </p>
+          )}
           <div className="dialog-actions" style={{ alignSelf: 'stretch' }}>
             <button type="button" className="btn btn-secondary" onClick={() => setShowComplete(false)}>
               Stay here

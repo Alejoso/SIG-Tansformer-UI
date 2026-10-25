@@ -125,15 +125,16 @@ export async function run() {
     await goToScreen(page, 'Data');
     await page.locator('.folder-alert.is-problem').waitFor({ timeout: 15000 });
 
-    // Under the Process button, not over the dropzone: it is the result of a
-    // run, and that is where you look after starting one.
+    // Below the variables and above the button that starts the next run:
+    // it is the result of a run, and the thing to do about it is right
+    // underneath.
     const order = await page.evaluate(() => {
       const actions = document.querySelector('.process-actions');
       const panel = document.querySelector('.folder-alert.is-problem');
       if (!actions || !panel) return null;
-      return actions.getBoundingClientRect().top < panel.getBoundingClientRect().top;
+      return panel.getBoundingClientRect().top < actions.getBoundingClientRect().top;
     });
-    check('it sits below the Process button', order === true, String(order));
+    check('it sits above the Process button', order === true, String(order));
 
     const shown = await page.locator('.folder-alert.is-problem').innerText();
     check('the Data screen names each one', ['AMB_050', 'AMB_051', 'AMB_052'].every(
@@ -154,16 +155,60 @@ export async function run() {
     // height, not the visible box: the panel is usually below the fold, so
     // comparing screen rects would only say how far down it is.
     const gap = await page.evaluate(() => {
-      const panel = document.querySelector('.folder-alert.is-problem');
+      const last = document.querySelector('.process-actions');
       const screen = document.querySelector('.data-screen');
-      if (!panel || !screen) return -1;
+      if (!last || !screen) return -1;
       const bottom =
-        panel.getBoundingClientRect().bottom -
+        last.getBoundingClientRect().bottom -
         screen.getBoundingClientRect().top +
         screen.scrollTop;
       return Math.round(screen.scrollHeight - bottom);
     });
     check('with room beneath it', gap >= 40, `${gap}px`);
+
+    /* ── a run that lost variables does not look like one that did not ─ */
+    // Stubbed: the dialog only appears as a run ends, and starting a real
+    // one takes minutes and an engine. What is checked is the dressing.
+    let started = false;
+    await page.route('**/api/projects/*/process', (route) => {
+      if (route.request().method() === 'POST') started = true;
+      return route.fulfill({
+        status: route.request().method() === 'POST' ? 202 : 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          projectId,
+          status: started ? 'done' : 'running',
+          executionId: '0000_fake',
+          percent: 100,
+          statusText: 'Finished',
+          stages: [],
+          startedAt: Date.now() / 1000 - 30,
+          finishedAt: Date.now() / 1000,
+          error: '',
+          hexagonCount: 93500,
+          skippedFiles: 0,
+          erroredFiles: 3,
+          reset: false,
+          resetReason: '',
+        }),
+      });
+    });
+
+    await page.getByRole('button', { name: /^process/i }).first().click();
+    await page.locator('#complete-title').waitFor({ timeout: 15000 });
+    await page.waitForTimeout(400);
+
+    const title = await page.locator('#complete-title').innerText();
+    check('the dialog says it is not all done', /left out/i.test(title), JSON.stringify(title));
+    check('and is marked as a warning',
+      (await page.locator('.complete-icon.is-warning').count()) === 1);
+    const note = await page.locator('.complete-failed').innerText();
+    check('with the count called out, not buried in a sentence',
+      /3 variables could not be processed/.test(note), JSON.stringify(note));
+    check('and it points at where the reasons are',
+      /behind this/.test(note));
+    await page.getByRole('button', { name: /stay here/i }).click();
+    await page.waitForTimeout(300);
 
     check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));
   } finally {
