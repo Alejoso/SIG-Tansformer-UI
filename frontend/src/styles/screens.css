@@ -147,7 +147,22 @@
    flex scroll container's end padding out of the scrollable area — so
    `padding-bottom` there is invisible the moment the content overflows,
    which is exactly when it is wanted. */
-.data-screen .screen-body { max-width: 760px; padding-bottom: 72px; }
+/* `align-self` so the body hugs its content rather than being stretched to
+   the container's height. `.screen` is a flex row, so its items stretch
+   vertically — the body stayed viewport-tall while its children overflowed
+   past it, and `padding-bottom` then sat halfway up the page instead of
+   after the last thing on it. (`padding-bottom` on `.screen` itself does not
+   work either: Chromium leaves a flex scroll container's end padding out of
+   the scrollable area.)
+
+   Here and not on `.screen-body` generally: `.setup-screen` is a *column*
+   flex that centres its child with `align-items`, and a global `align-self`
+   overrides that and pins the card to the left. */
+.data-screen .screen-body {
+  max-width: 760px;
+  align-self: flex-start;
+  padding-bottom: 72px;
+}
 
 .data-title { font-size: 34px; margin: 0 0 8px; }
 .data-lede { margin: 0 0 14px; font-size: 15px; max-width: 520px; text-wrap: pretty; }

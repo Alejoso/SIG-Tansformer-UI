@@ -44,6 +44,21 @@ export async function run({ project }) {
     await page.waitForTimeout(600);
     await page.getByRole('button', { name: /^resolution$/i }).first().click();
     await page.locator('#processing-res').waitFor({ timeout: 10000 });
+    // The card is centred. It was not for a while: a fix for the Data
+    // screen's bottom padding set `align-self` on every `.screen-body`, and
+    // this screen is a column flex that centres its child with
+    // `align-items` — which `align-self` overrides.
+    const placed = await page.evaluate(() => {
+      const screen = document.querySelector('.setup-screen');
+      const body = document.querySelector('.setup-screen .screen-body');
+      if (!screen || !body) return null;
+      const outer = screen.getBoundingClientRect();
+      const inner = body.getBoundingClientRect();
+      return Math.round(inner.left - outer.left) - Math.round(outer.right - inner.right);
+    });
+    check('the New project card is centred', placed !== null && Math.abs(placed) <= 2,
+      `${placed}px off`);
+
     const engineDefault = await page.locator('#processing-res').inputValue();
     check('New project offers it too, showing the engine\'s numbers',
       Number(engineDefault) > 0, engineDefault);
