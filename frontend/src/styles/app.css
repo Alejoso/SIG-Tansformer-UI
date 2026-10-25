@@ -37,7 +37,12 @@ body { margin: 0; background: var(--color-bg); }
   justify-content: center;
 }
 
-.screen-body { width: 100%; }
+/* `align-self` so it hugs its content. `.screen` is a flex row, which
+   stretches its items to the container's height — the body then stayed
+   viewport-tall while its children overflowed past it, so any padding on its
+   bottom edge sat halfway up the page and the end of a long screen had
+   nothing beneath it. */
+.screen-body { width: 100%; align-self: flex-start; }
 
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 

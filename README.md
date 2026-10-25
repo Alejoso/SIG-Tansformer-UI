@@ -218,6 +218,27 @@ two of them would be writing the same project's model file.
 Those last two are all that is left of the mocks. A mesh upload has no server
 route, and the examples are UI copy with nowhere else to live yet.
 
+## What is a variable, and what is the engine's own working file
+
+Everything under `out/<dimension>/<CODE>/` looks like a variable, and most of
+it is. Some of it is the engine talking to itself: `distancias/` is where the
+model run's distance preprocess writes a folder per column, `mascaras/` holds
+the exclusion masks, `_impute_cache/` is a cache.
+
+`outputs.ENGINE_FOLDERS` is the list, and `is_variable_folder` the test —
+leading `_` and `.` excluded by shape so the next cache does not have to be
+found the hard way.
+
+It lives in one place because it used to live in three, and all three had
+drifted. None of them knew about `distancias`, so after a model run six of
+its intermediates appeared on the Data screen as variables with no input,
+and again in the failures panel as variables that had not finished. The real
+failures were underneath them.
+
+This has to track what the engine writes. The engine keeps its own version of
+the same list — `_SKIP_DIRS` in `MCDA/engine/distance_to_nearest.py` — worth
+comparing against when it gains a step.
+
 ## Why a variable did not make it through
 
 A run reports a count — "4 files could not be processed" — and that is all it

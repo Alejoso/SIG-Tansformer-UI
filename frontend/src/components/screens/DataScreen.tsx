@@ -627,53 +627,6 @@ export function DataScreen() {
           </div>
         )}
 
-        {/* What the engine could not finish, and why it said so. The run
-            only ever reported a count, which named nothing and was gone by
-            the next run — the reason has been sitting in the output folder
-            all along. */}
-        {problems.length > 0 && (
-          <div className="folder-alert is-problem">
-            <div className="folder-alert-body">
-              <strong>
-                {problems.length === 1
-                  ? 'One variable did not make it through'
-                  : `${problems.length} variables did not make it through`}
-              </strong>
-              <ul className="problem-list">
-                {problems.map((problem) => (
-                  <li key={problem.id}>
-                    <span className="problem-code mono">{problem.code}</span>
-                    {problem.status === 'unfinished' ? (
-                      <span className="problem-why">
-                        stopped partway through, with nothing saying why — the run may have
-                        been interrupted. Processing again is the thing to try.
-                      </span>
-                    ) : (
-                      <span className="problem-why">
-                        failed while {problem.stageLabel}
-                        {problem.reason && (
-                          <>
-                            {' — '}
-                            <span className="problem-reason">{problem.reason}</span>
-                          </>
-                        )}
-                      </span>
-                    )}
-                    {problem.source && (
-                      <span className="problem-source mono muted-55">{problem.source}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <span className="muted-55">
-                The engine carries on past a variable it cannot read, so the rest of the run
-                is fine. Fix or remove {problems.length === 1 ? 'it' : 'these'} and process
-                again.
-              </span>
-            </div>
-          </div>
-        )}
-
         {orphaned.length > 0 && (
           <div className="folder-alert">
             <div className="folder-alert-body">
@@ -1171,7 +1124,7 @@ export function DataScreen() {
                     {run.erroredFiles} {run.erroredFiles === 1 ? 'file' : 'files'} could not be
                     processed — the engine carried on without{' '}
                     {run.erroredFiles === 1 ? 'it' : 'them'}
-                    {problems.length > 0 ? ', and which ones is listed at the top.' : '.'}{' '}
+                    {problems.length > 0 ? ', and which ones is listed below.' : '.'}{' '}
                   </>
                 )}
                 {run.skippedFiles > 0 && (
@@ -1233,6 +1186,58 @@ export function DataScreen() {
             </span>
           )}
         </div>
+
+        {/* What the engine could not finish, and why it said so. Under the
+            Process button rather than over the dropzone: it is the result of
+            a run, and it belongs where you look after starting one. The run
+            only ever reported a count, which named nothing and was gone by
+            the next run — the reason has been sitting in the output folder
+            all along. */}
+        {problems.length > 0 && (
+          <div className="problem-panel">
+          <div className="folder-alert is-problem">
+            <div className="folder-alert-body">
+              <strong>
+                {problems.length === 1
+                  ? 'One variable did not make it through'
+                  : `${problems.length} variables did not make it through`}
+              </strong>
+              <ul className="problem-list">
+                {problems.map((problem) => (
+                  <li key={problem.id}>
+                    <span className="problem-code mono">{problem.code}</span>
+                    {problem.status === 'unfinished' ? (
+                      <span className="problem-why">
+                        stopped partway through, with nothing saying why — the run may have
+                        been interrupted. Processing again is the thing to try.
+                      </span>
+                    ) : (
+                      <span className="problem-why">
+                        failed while {problem.stageLabel}
+                        {problem.reason && (
+                          <>
+                            {' — '}
+                            <span className="problem-reason">{problem.reason}</span>
+                          </>
+                        )}
+                      </span>
+                    )}
+                    {problem.source && (
+                      <span className="problem-source mono muted-55">{problem.source}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <span className="muted-55">
+                The engine carries on past a variable it cannot read, so the rest of the run
+                is fine. Fix or remove {problems.length === 1 ? 'it' : 'these'} and process
+                again.
+              </span>
+            </div>
+          </div>
+          </div>
+        )}
+
       </div>
 
       {showComplete && (

@@ -141,8 +141,13 @@
 
 /* ── data upload ────────────────────────────────────────────────────────── */
 
-.data-screen { padding: 34px 24px 60px; }
-.data-screen .screen-body { max-width: 760px; }
+.data-screen { padding: 34px 24px 0; }
+/* The room at the end of the page goes on the body, not on `.screen`.
+   `.screen` is a flex container with `overflow: auto`, and Chromium leaves a
+   flex scroll container's end padding out of the scrollable area — so
+   `padding-bottom` there is invisible the moment the content overflows,
+   which is exactly when it is wanted. */
+.data-screen .screen-body { max-width: 760px; padding-bottom: 72px; }
 
 .data-title { font-size: 34px; margin: 0 0 8px; }
 .data-lede { margin: 0 0 14px; font-size: 15px; max-width: 520px; text-wrap: pretty; }
@@ -615,3 +620,7 @@
    this app's description of what happened. */
 .problem-reason { color: var(--color-text); }
 .problem-source { flex: none; font-size: 11px; }
+
+/* The failures panel sits after the Process button now, so it needs the gap
+   the stack above it gets from its own margins. */
+.problem-panel { margin-top: 22px; }

@@ -37,9 +37,6 @@ from pathlib import Path
 
 from . import outputs, pipeline, store
 
-#: The pipeline's own products under `out/`, which are not variables.
-NOT_VARIABLES = {"maestro", "exports", "bck", "verify", "render", "mascaras", "soc_ellos"}
-
 #: Beside the CSVs, for the same reason: you can open it and read it.
 STATE_FILE = store.DATA_DIR / "engine_state.json"
 
@@ -109,7 +106,7 @@ def output_set(project: store.ProjectRow) -> list[str]:
     found = []
     try:
         for dimension_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-            if dimension_dir.name in NOT_VARIABLES:
+            if not outputs.is_variable_folder(dimension_dir.name):
                 continue
             for code_dir in sorted(p for p in dimension_dir.iterdir() if p.is_dir()):
                 if any(entry.is_file() for entry in code_dir.iterdir()):

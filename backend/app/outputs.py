@@ -41,7 +41,47 @@ HTML_SUFFIXES = (".h3.html", "_h3.html")
 LOG_SUFFIXES = (".pipeline.jsonl", "_pipeline.jsonl")
 
 #: Folders under `out/` that hold pipeline bookkeeping rather than variables.
-NOT_DIMENSIONS = {"exports", "maestro", "verify", "render", "bck"}
+#: Folders under `out/` that are the engine's own working products rather
+#: than variables, so nothing should list them as one.
+#:
+#: Kept in one place because it was in three, and all three had drifted:
+#: `distancias/` — where the model run's distance preprocess writes a folder
+#: per column — was in none of them, so six of its intermediates turned up on
+#: the Data screen as variables with no input, and again as variables that
+#: had not finished processing.
+#:
+#: This has to track what the engine writes. The engine keeps its own version
+#: of the same list in `MCDA/engine/distance_to_nearest.py` (`_SKIP_DIRS`),
+#: which is worth comparing against when it gains a step.
+ENGINE_FOLDERS = frozenset(
+    {
+        "maestro",
+        "exports",
+        "bck",
+        "verify",
+        "render",
+        "distancias",
+        "mascaras",
+        "soc_ellos",
+        "MCDA",
+    }
+)
+
+
+def is_variable_folder(name: str) -> bool:
+    """
+    Whether a folder under `out/` holds a variable.
+
+    Leading `_` and `.` are the engine's own convention for a cache —
+    `_impute_cache` is the one that exists today — and are excluded by shape
+    rather than by name so the next one does not have to be found the hard
+    way.
+    """
+    return name not in ENGINE_FOLDERS and not name.startswith(("_", "."))
+
+
+#: Kept for the places that read it as a set. Prefer `is_variable_folder`.
+NOT_DIMENSIONS = ENGINE_FOLDERS
 
 
 def data_dir(project: store.ProjectRow) -> Path | None:
@@ -307,7 +347,7 @@ def scan_problems(project: store.ProjectRow) -> list[VariableProblem]:
 
     found: list[VariableProblem] = []
     for dimension_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-        if dimension_dir.name in NOT_DIMENSIONS:
+        if not is_variable_folder(dimension_dir.name):
             continue
         for code_dir in sorted(p for p in dimension_dir.iterdir() if p.is_dir()):
             logs = sorted(code_dir.glob("*.pipeline.jsonl"))
@@ -370,7 +410,7 @@ def scan_variables(project: store.ProjectRow) -> list[VariableLayer]:
         parts = relative.parts
         # Expect <dimension>/<CODE>/<name>.h3.html; anything shallower is
         # bookkeeping rather than a variable.
-        if len(parts) < 3 or parts[0] in NOT_DIMENSIONS:
+        if len(parts) < 3 or not is_variable_folder(parts[0]):
             continue
 
         dimension, code = parts[0], parts[1]

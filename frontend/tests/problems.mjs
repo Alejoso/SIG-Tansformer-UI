@@ -125,6 +125,16 @@ export async function run() {
     await goToScreen(page, 'Data');
     await page.locator('.folder-alert.is-problem').waitFor({ timeout: 15000 });
 
+    // Under the Process button, not over the dropzone: it is the result of a
+    // run, and that is where you look after starting one.
+    const order = await page.evaluate(() => {
+      const actions = document.querySelector('.process-actions');
+      const panel = document.querySelector('.folder-alert.is-problem');
+      if (!actions || !panel) return null;
+      return actions.getBoundingClientRect().top < panel.getBoundingClientRect().top;
+    });
+    check('it sits below the Process button', order === true, String(order));
+
     const shown = await page.locator('.folder-alert.is-problem').innerText();
     check('the Data screen names each one', ['AMB_050', 'AMB_051', 'AMB_052'].every(
       (code) => shown.includes(code)), JSON.stringify(shown.slice(0, 120)));
@@ -139,6 +149,21 @@ export async function run() {
     await goToScreen(page, 'Data');
     await page.locator('.folder-alert.is-problem').waitFor({ timeout: 15000 });
     check('and it survives leaving the screen', true);
+
+    // Room under the last thing on the page. Measured against the scroll
+    // height, not the visible box: the panel is usually below the fold, so
+    // comparing screen rects would only say how far down it is.
+    const gap = await page.evaluate(() => {
+      const panel = document.querySelector('.folder-alert.is-problem');
+      const screen = document.querySelector('.data-screen');
+      if (!panel || !screen) return -1;
+      const bottom =
+        panel.getBoundingClientRect().bottom -
+        screen.getBoundingClientRect().top +
+        screen.scrollTop;
+      return Math.round(screen.scrollHeight - bottom);
+    });
+    check('with room beneath it', gap >= 40, `${gap}px`);
 
     check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));
   } finally {

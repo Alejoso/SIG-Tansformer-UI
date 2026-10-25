@@ -67,8 +67,7 @@ MAX_CODE_LENGTH = 32
 
 #: Folders under `out/` that hold the pipeline's own products rather than
 #: variables — the master export, archived copies, the MCDA's own output and
-#: the verification renders. `load_h3_values` skips the same set.
-NOT_VARIABLES = {"maestro", "exports", "bck", "verify", "render", "mascaras", "soc_ellos"}
+
 
 #: A dimension is a folder name, so it has to be one — no separators, no
 #: walking upwards, nothing hidden.
@@ -317,7 +316,7 @@ def _results_without_input(
 
     orphans: list[InputVariable] = []
     for dimension_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-        if dimension_dir.name in NOT_VARIABLES:
+        if not outputs.is_variable_folder(dimension_dir.name):
             continue
         for code_dir in sorted(p for p in dimension_dir.iterdir() if p.is_dir()):
             identifier = f"{dimension_dir.name}/{code_dir.name}"
