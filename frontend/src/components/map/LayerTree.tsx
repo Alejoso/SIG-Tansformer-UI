@@ -95,12 +95,21 @@ export function LayerTree({ title, nodes, selectedId, onSelect, defaultOpen = []
               if (composite && !isOpen) toggle(node.id);
             }}
           >
-            {/* The code first, because it is the name the model file and
-                the master table use. The label beside it comes from whatever
-                the processed file was called, which is not always a name
-                anyone chose. */}
-            {node.code && <span className="layer-code mono">{node.code}</span>}
-            <span className="layer-name">{node.label}</span>
+            {/* A variable goes by its code and nothing else. The label is
+                built from whatever the processed file was called, which in
+                real data comes out as `A` or `At` — no use for telling two
+                variables apart, which is all this list is for. It stays on
+                the hover title, where it costs nothing.
+
+                Model layers have no code, and their labels are the criterion
+                names from the config, so those show as they are. */}
+            {node.code ? (
+              <span className="layer-name mono" title={node.label}>
+                {node.code}
+              </span>
+            ) : (
+              <span className="layer-name">{node.label}</span>
+            )}
             {composite && <span className="layer-count">{children.length}</span>}
           </button>
         </div>

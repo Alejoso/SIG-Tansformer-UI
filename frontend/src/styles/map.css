@@ -107,24 +107,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-/* The variable's code. Keeps its full width while the label beside it gives
-   way: a clipped code is no use for finding anything, and the label is the
-   part that is often just a file name. */
-.layer-code {
-  flex: none;
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 1px 6px;
-  border-radius: 5px;
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-  background: var(--color-accent-100);
-  color: var(--color-accent-800);
-}
-.is-selected .layer-code { background: var(--color-accent-200); color: var(--color-accent-900); }
+/* A variable's code is its name here, set in the mono face so the three
+   letters and three digits line up down the list. */
+.layer-name.mono { font-size: 12.5px; }
 
 /* How many parts a composite is built from. */
 .layer-count {

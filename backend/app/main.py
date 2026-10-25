@@ -195,10 +195,10 @@ def list_layers(project_id: str) -> LayerTree:
             id=variable.id,
             label=variable.label,
             code=variable.code,
-            # The readable name and the dimension. The code is its own field
-            # now and the heading leads with it, so repeating it here would
-            # say the same thing twice.
-            description=f"{variable.label} · {variable.dimension}",
+            # Just the dimension. The heading above it is the code, and the
+            # name built from the processed file's own name is not one
+            # anybody chose — see the note in `LayerTree`.
+            description=variable.dimension,
             filename=variable.filename,
             hasDocument=True,
             ok=variable.ok,

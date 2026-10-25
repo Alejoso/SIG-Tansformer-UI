@@ -83,12 +83,16 @@ export async function run({ project }) {
       await goToScreen(page, 'Map');
       await page.locator('.layer-list').first().waitFor({ timeout: 15000 });
       await page.waitForTimeout(800);
-      const shown = await page.locator('.layer-code').allInnerTexts();
-      check('and the sidebar shows it',
-        shown.length >= layers.inputs.length, JSON.stringify(shown));
-      check('matching what the server said',
+      const shown = await page.locator('.layer-list .layer-name').allInnerTexts();
+      check('the sidebar names each variable by its code',
         layers.inputs.every((node) => shown.includes(node.code)),
-        `${JSON.stringify(shown)} vs ${JSON.stringify(layers.inputs.map((n) => n.code))}`);
+        JSON.stringify(shown));
+      // The point of the change: the label is often `A` or `At`, which tells
+      // two variables apart not at all.
+      const labels = layers.inputs.map((node) => node.label).filter((l) => l.length < 4);
+      check('and not by the name built from the file',
+        labels.every((label) => !shown.includes(label)),
+        `labels ${JSON.stringify(labels)} vs rows ${JSON.stringify(shown)}`);
     }
 
     check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));

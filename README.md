@@ -237,12 +237,16 @@ The same rule lives in two places and has to stay in step: `normalise_code`
 on the server, and `canonicalCode` in the Data screen, which previews where
 a variable will land before it is copied.
 
-**The map names layers by code.** The label is `_humanise` of the processed
-file's name, which is not always a name anyone chose — a real project here
-has three variables whose labels come out as `A`, `At` and `At`. The code is
-what the model file and the master table know them by, so the sidebar leads
-with it and the heading over the map shows it, with the readable name
-underneath.
+**The map names a variable by its code and nothing else.** The label is
+`_humanise` of the processed file's name, which is not always a name anyone
+chose — a real project here has three variables whose labels come out as
+`A`, `At` and `At`, two of them identical. That is no use for telling two
+rows apart, which is all the list is for, so the code is the row and the
+label stays on the hover title. The heading over the map is the code too,
+with the dimension under it.
+
+Model layers have no code — their labels are the criterion keys from the
+config, which someone did choose — so those show as they are.
 
 ## A folder of variables, not just a folder that is one
 
