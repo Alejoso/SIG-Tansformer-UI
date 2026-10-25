@@ -113,7 +113,12 @@ export async function findProject() {
     } catch {
       continue;
     }
-    const inputs = (layers.inputs ?? []).filter((node) => node.hasDocument);
+    // The input side is a folder per dimension, so the layers are one level
+    // down. Flattened here: a suite wants the things that can go on a map,
+    // not the folders holding them.
+    const inputs = (layers.inputs ?? []).flatMap((node) =>
+      node.hasDocument ? [node] : (node.children ?? []).filter((child) => child.hasDocument),
+    );
     if (!inputs.length) continue;
 
     const model = await api(`/projects/${project.id}/model`);

@@ -904,11 +904,22 @@ uvicorn on its default port needs no extra config.
   it is. A leaf shows its column, its scoring type and how many cuts it has —
   the things you would otherwise scroll the file to find.
 
-- **The map sidebar is two flat lists, not a tree.** Input variables are one
-  uploaded folder each; the model side is the whole model and one map per
-  criterion. The engine also renders each subcriterion and those are still on
-  disk, but a row that opens to reveal more rows was structure the sidebar
-  did not need.
+- **The model side is flat; the input side is one level deep.** The model is
+  the whole thing and one map per criterion — the engine also renders each
+  subcriterion, and those are still on disk, but a row that opened to reveal
+  more rows was structure that side did not need.
+
+  The input side does need it. A real project has sixty variables across
+  three dimensions, and sixty rows in one list is a list nobody reads, so a
+  dimension is a folder holding the variables in it — which is also how they
+  sit on disk.
+
+  A folder is one with children, not merely one without a document: the "no
+  model run yet" placeholder has neither and is still the disabled row it
+  always was. Folders start shut so the dimensions are what you see; opening
+  the one holding the selection was the first instinct and made the first
+  screen worse, pushing the other two dimensions off the bottom behind
+  twenty-three variables.
 
   There was also a raw/normalized switch, for a second document per variable
   the engine never rendered — so `ValueScale`, `MapView.scale` and

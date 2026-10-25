@@ -246,9 +246,10 @@ export interface PipelineReadiness {
 /**
  * One entry in what the engine rendered.
  *
- * A flat list on both sides: one document per input variable, and on the
- * model side the whole model plus one per criterion. The engine also renders
- * each subcriterion, which the sidebar does not show.
+ * The model side is flat: the whole model, then one map per criterion. The
+ * input side is one level deep — a folder per dimension holding the
+ * variables in it, which is how they sit on disk and the only way sixty of
+ * them are findable.
  */
 /**
  * A variable the engine could not finish.
@@ -298,6 +299,11 @@ export interface LayerNode {
    * that exists only to hold children. Such a row still opens, but selecting
    * it shows nothing.
    */
+  /**
+   * The variables under a dimension. Only the input side has them, and only
+   * one level: a dimension is a folder, and a folder is not a layer.
+   */
+  children?: LayerNode[];
   hasDocument: boolean;
   /** The file behind this layer, so the frame can name what is on screen. */
   filename?: string;

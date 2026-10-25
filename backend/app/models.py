@@ -96,6 +96,10 @@ class LayerNode(BaseModel):
     #: label taken from whatever the file happened to be called.
     code: str = ""
     description: str = ""
+    #: The variables under a dimension. One level deep and only on the input
+    #: side: a dimension is a folder, and a folder is not a layer — it has no
+    #: document of its own, it just holds the ones that do.
+    children: list["LayerNode"] = Field(default_factory=list)
     hasDocument: bool = True
     #: The file behind this layer, so the UI can name what is on screen.
     filename: str = ""

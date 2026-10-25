@@ -191,20 +191,42 @@ def list_layers(project_id: str) -> LayerTree:
     """
     project = _require_project(project_id)
 
+    # Grouped by dimension — the folder the engine reads a variable's
+    # dimension out of. A real project has sixty of these across three
+    # dimensions, and sixty rows in one list is a list nobody reads.
+    by_dimension: dict[str, list[LayerNode]] = {}
+    for variable in outputs.scan_variables(project):
+        by_dimension.setdefault(variable.dimension, []).append(
+            LayerNode(
+                id=variable.id,
+                label=variable.label,
+                code=variable.code,
+                # Just the dimension. The heading above it is the code, and
+                # the name built from the processed file's own name is not
+                # one anybody chose — see the note in `LayerTree`.
+                description=variable.dimension,
+                filename=variable.filename,
+                hasDocument=True,
+                ok=variable.ok,
+            )
+        )
+
     variables = [
         LayerNode(
-            id=variable.id,
-            label=variable.label,
-            code=variable.code,
-            # Just the dimension. The heading above it is the code, and the
-            # name built from the processed file's own name is not one
-            # anybody chose — see the note in `LayerTree`.
-            description=variable.dimension,
-            filename=variable.filename,
-            hasDocument=True,
-            ok=variable.ok,
+            # Prefixed, because a folder and a variable share a namespace
+            # here and `social` is both a dimension and the start of every
+            # id under it.
+            id=f"dim:{dimension}",
+            label=dimension,
+            description=(
+                "1 variable" if len(children) == 1 else f"{len(children)} variables"
+            ),
+            children=children,
+            # A folder is not a layer: selecting it shows nothing, it opens.
+            hasDocument=False,
+            ok=all(child.ok for child in children),
         )
-        for variable in outputs.scan_variables(project)
+        for dimension, children in sorted(by_dimension.items())
     ]
 
     model = outputs.scan_model(project)

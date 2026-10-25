@@ -73,26 +73,33 @@ export async function run({ project }) {
     // Against what is already rendered: these new ones have not been
     // processed, so they have no layer yet.
     const layers = await api(`/projects/${project.id}/layers`);
-    if (!layers.inputs.length) {
+    // The input side is a folder per dimension; the layers are inside them.
+    const leaves = layers.inputs.flatMap((node) => node.children ?? []);
+    if (!leaves.length) {
       check('the map shows the code beside the name', true, 'nothing rendered to check');
     } else {
       check('the server sends the code with each layer',
-        layers.inputs.every((node) => typeof node.code === 'string' && node.code),
-        layers.inputs.map((n) => `${n.code}:${n.label}`).join(' '));
+        leaves.every((node) => typeof node.code === 'string' && node.code),
+        leaves.slice(0, 4).map((n) => `${n.code}:${n.label}`).join(' '));
 
       await goToScreen(page, 'Map');
       await page.locator('.layer-list').first().waitFor({ timeout: 15000 });
       await page.waitForTimeout(800);
+
+      // The folders start shut, so open one and check what it reveals.
+      const folder = layers.inputs.find((node) => (node.children ?? []).length > 0);
+      await page.locator('.layer-row.is-folder .layer-label').first().click();
+      await page.waitForTimeout(500);
       const shown = await page.locator('.layer-list .layer-name').allInnerTexts();
       check('the sidebar names each variable by its code',
-        layers.inputs.every((node) => shown.includes(node.code)),
-        JSON.stringify(shown));
+        (folder?.children ?? []).every((node) => shown.includes(node.code)),
+        JSON.stringify(shown.slice(0, 6)));
       // The point of the change: the label is often `A` or `At`, which tells
       // two variables apart not at all.
-      const labels = layers.inputs.map((node) => node.label).filter((l) => l.length < 4);
+      const labels = leaves.map((node) => node.label).filter((l) => l.length < 4);
       check('and not by the name built from the file',
         labels.every((label) => !shown.includes(label)),
-        `labels ${JSON.stringify(labels)} vs rows ${JSON.stringify(shown)}`);
+        `labels ${JSON.stringify(labels)} vs rows ${JSON.stringify(shown.slice(0, 6))}`);
     }
 
     check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));

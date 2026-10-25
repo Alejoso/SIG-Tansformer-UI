@@ -12,12 +12,25 @@ const MODE_HINTS: Record<MapMode, string> = {
   model: 'What the model produced: the whole thing, and one map per criterion.',
 };
 
-/** Alphabetical by label, so a specific variable is easy to find. */
-const byLabel = (nodes: LayerNode[]) =>
-  [...nodes].sort((a, b) => a.label.localeCompare(b.label));
+/** One level down as well, since a dimension's variables live under it. */
+function findNode(nodes: LayerNode[], id: string): LayerNode | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const child = (node.children ?? []).find((one) => one.id === id);
+    if (child) return child;
+  }
+  return null;
+}
 
-const findNode = (nodes: LayerNode[], id: string) =>
-  nodes.find((node) => node.id === id) ?? null;
+/** The first thing that can actually go on the map, folders skipped. */
+function firstLayer(nodes: LayerNode[]): LayerNode | null {
+  for (const node of nodes) {
+    if (node.hasDocument) return node;
+    const child = (node.children ?? []).find((one) => one.hasDocument);
+    if (child) return child;
+  }
+  return null;
+}
 
 export function MapScreen() {
   const { project, goTo, showHints, mapView, setMapView } = useApp();
@@ -51,7 +64,7 @@ export function MapScreen() {
     if (!tree) return { nodes: [] as LayerNode[], fallback: null as LayerNode | null };
     return mode === 'model'
       ? { nodes: [tree.model.combined, ...tree.model.variables], fallback: tree.model.combined }
-      : { nodes: tree.inputs, fallback: tree.inputs[0] ?? null };
+      : { nodes: tree.inputs, fallback: firstLayer(tree.inputs) };
   }, [tree, mode]);
 
   /**
@@ -124,11 +137,12 @@ export function MapScreen() {
                 onSelect={select}
               />
             ) : (
-              /* Sorted here rather than trusting the backend's order, so the
-                 list stays findable whatever arrives. */
+              /* Already grouped and sorted by the server: dimensions
+                 alphabetically, and the variables inside each in the order
+                 `scan_variables` found them. */
               <LayerTree
                 title="Variables"
-                nodes={byLabel(tree.inputs)}
+                nodes={tree.inputs}
                 selectedId={active?.id ?? null}
                 onSelect={select}
               />

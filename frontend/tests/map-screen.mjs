@@ -47,8 +47,33 @@ export async function run({ project, inputs }) {
     /* ── two things the sidebar no longer has ───────────────────────── */
     check('no raw/normalized switch',
       (await page.getByRole('radio', { name: /normalized/i }).count()) === 0);
-    check('and no disclosure arrows to open',
-      (await page.locator('.layer-caret').count()) === 0);
+    /* ── the input side groups by dimension ─────────────────────────── */
+    const folders = page.locator('.layer-row.is-folder');
+    const folderCount = await folders.count();
+    check('input variables sit in a folder per dimension', folderCount >= 1,
+      `${folderCount} folders`);
+
+    // All shut to start, so the dimensions are what you see. One alone
+    // opens itself, since there is nothing to choose between.
+    const openBefore = await page.locator('.layer-children').count();
+    check('all shut to start, unless there is only one',
+      folderCount === 1 ? openBefore === 1 : openBefore === 0,
+      `${openBefore} open of ${folderCount}`);
+
+    if (folderCount > 1) {
+      const shut = folders.nth(0);
+      const before = await page.locator('.layer-frame').getAttribute('src');
+      await shut.locator('.layer-label').click();
+      await page.waitForTimeout(600);
+      check('clicking a folder opens it',
+        (await page.locator('.layer-children').count()) > openBefore);
+      check('and puts nothing new on the map',
+        (await page.locator('.layer-frame').getAttribute('src')) === before);
+      await shut.locator('.layer-label').click();
+      await page.waitForTimeout(400);
+      check('clicking it again shuts it',
+        (await page.locator('.layer-children').count()) === openBefore);
+    }
 
     // The model side is the whole model and one row per criterion, in one
     // list rather than two sections.
@@ -62,6 +87,8 @@ export async function run({ project, inputs }) {
     const rows = await page.locator('.layer-list .layer-name').allInnerTexts();
     check('starting with the whole model',
       rows.length >= 1 && /complete model/i.test(rows[0]), JSON.stringify(rows));
+    check('and with nothing to open on that side',
+      (await page.locator('.layer-caret').count()) === 0);
 
     check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));
   } finally {
