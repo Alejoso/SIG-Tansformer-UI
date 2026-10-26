@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import type {
@@ -187,6 +187,12 @@ export function DataScreen() {
    * Without this the row just sits there and the obvious thing to do is
    * click again.
    */
+  /**
+   * Dimensions opened or closed by hand. Anything not in here follows the
+   * default below.
+   */
+  const [openDimensions, setOpenDimensions] = useState<Record<string, boolean>>({});
+
   const [removing, setRemoving] = useState<string | null>(null);
 
   /**
@@ -324,6 +330,36 @@ export function DataScreen() {
   const locked = running || modelRunning;
   /** The run finished, but not with everything. */
   const someFailed = (run?.erroredFiles ?? 0) > 0;
+  /**
+   * The variables, under the dimension each belongs to.
+   *
+   * Grouped here rather than by the server, which sends this screen a flat
+   * list on purpose — it is the list of what is on disk, and this is the one
+   * screen that can act on each of them.
+   */
+  const dimensionGroups = useMemo(() => {
+    const groups = new Map<string, InputVariable[]>();
+    for (const variable of variables) {
+      const inside = groups.get(variable.dimension);
+      if (inside) inside.push(variable);
+      else groups.set(variable.dimension, [variable]);
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [variables]);
+
+  /**
+   * Open by hand, or by default when there is only one dimension to look at.
+   *
+   * The same rule as the map's sidebar: with several, the point of the
+   * folders is seeing the dimensions, and opening one that is sixty deep
+   * hides the rest.
+   */
+  const isDimensionOpen = (name: string) =>
+    openDimensions[name] ?? dimensionGroups.length === 1;
+
+  const toggleDimension = (name: string) =>
+    setOpenDimensions((current) => ({ ...current, [name]: !isDimensionOpen(name) }));
+
   /** Variables whose folder is not one readable dataset — the engine will skip them. */
   const unreadable = variables.filter((v) => v.problem && !v.processedOnly);
   /** Results with no input: the engine still loads them, so they are worth seeing. */
@@ -385,6 +421,7 @@ export function DataScreen() {
       );
       reload();
       if (outcome.added.length) {
+        setOpenDimensions((current) => ({ ...current, [chosenDimension]: true }));
         setDraftPath('');
         setPlanned(null);
         setBatchCodes({});
@@ -420,6 +457,10 @@ export function DataScreen() {
       setNewDimension('');
       setDimension(added.dimension);
       setDimensionTouched(false);
+      // Open the dimension it went into: a variable added into a shut
+      // folder has nowhere to appear, and "did that work?" is the next
+      // question.
+      setOpenDimensions((current) => ({ ...current, [added.dimension]: true }));
       reload();
       showToast(`${added.filename} added as ${added.id}`);
     } catch (error) {
@@ -595,6 +636,93 @@ export function DataScreen() {
       showToast('Could not copy — select the path and copy it by hand');
     }
   };
+
+  /** One variable's row. Lifted out so the grouping above it stays readable. */
+  const variableRow = (variable: InputVariable) => (
+              <div
+                key={variable.id}
+                className={`folder-row${locked ? ' is-locked' : ''}${
+                  variable.problem ? ' is-unreadable' : ''
+                }${variable.processedOnly ? ' is-unreadable' : ''}${
+                  removing === variable.id ? ' is-going' : ''
+                }`}
+              >
+                <Icon
+                  name="file"
+                  size={18}
+                  color={
+                    variable.problem ? 'var(--color-accent)' : 'var(--color-accent-600)'
+                  }
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="folder-name">
+                    <span className="mono variable-code">{variable.code}</span>
+                    {variable.filename || 'nothing readable'}
+                  </div>
+                  {/* The dimension used to lead this line. The folder above
+                      says it now, on every row inside it, so repeating it
+                      here was the same word three deep. */}
+                  {(variable.processedOnly || variable.source) && (
+                    <div className="folder-meta muted-50">
+                      {variable.processedOnly && 'results only'}
+                      {variable.processedOnly && variable.source && ' · '}
+                      {variable.source && (
+                        <>
+                          {'from '}
+                          <span className="mono" title={variable.source}>
+                            {variable.source.split('/').pop()}
+                          </span>
+                          {/* The copy is what gets processed, so a moved
+                              source is worth noting and nothing more. */}
+                          {variable.sourceMissing && ' (moved since)'}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {removing === variable.id ? (
+                  <span className="muted-55" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
+                    Removing variable…
+                  </span>
+                ) : variable.processedOnly ? (
+                  <span className="tag folder-missing-tag" title={variable.problem}>
+                    No input
+                  </span>
+                ) : variable.problem ? (
+                  <span className="tag folder-missing-tag" title={variable.problem}>
+                    Will be skipped
+                  </span>
+                ) : (
+                  <span className="muted-55" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
+                    {variable.format} · {formatSize(variable.sizeBytes)}
+                  </span>
+                )}
+
+                {/* One at a time: each removal starts its own container, and
+                    two at once would have them racing over the same tree. */}
+                {!locked && (
+                  <button
+                    type="button"
+                    className="btn btn-icon btn-secondary"
+                    aria-label={
+                      removing === variable.id
+                        ? `Removing ${variable.id}`
+                        : `Remove ${variable.id}`
+                    }
+                    onClick={() => removeVariable(variable)}
+                    disabled={removing !== null}
+                    style={{ width: 30, height: 30, borderColor: 'transparent' }}
+                  >
+                    {removing === variable.id ? (
+                      <Icon name="spinner" size={15} className="spin" />
+                    ) : (
+                      <Icon name="close" size={15} />
+                    )}
+                  </button>
+                )}
+              </div>
+  );
 
   return (
     <div className="screen data-screen">
@@ -951,88 +1079,33 @@ export function DataScreen() {
                 {variables.length} variable{variables.length === 1 ? '' : 's'}
               </span>
             </div>
-            <div className="folders-list">
-              {variables.map((variable) => (
-                <div
-                  key={variable.id}
-                  className={`folder-row${locked ? ' is-locked' : ''}${
-                    variable.problem ? ' is-unreadable' : ''
-                  }${variable.processedOnly ? ' is-unreadable' : ''}${
-                    removing === variable.id ? ' is-going' : ''
-                  }`}
+            {dimensionGroups.map(([name, inside]) => (
+              <div key={name} className="dimension-group">
+                {/* The dimension is a folder here too, for the same reason it
+                    is one on the map: sixty variables in a flat list is a
+                    list nobody reads, and this is the screen where you go
+                    looking for one to remove. */}
+                <button
+                  type="button"
+                  className="dimension-row"
+                  onClick={() => toggleDimension(name)}
+                  aria-expanded={isDimensionOpen(name)}
                 >
-                  <Icon
-                    name="file"
-                    size={18}
-                    color={
-                      variable.problem ? 'var(--color-accent)' : 'var(--color-accent-600)'
-                    }
-                  />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="folder-name">
-                      <span className="mono variable-code">{variable.code}</span>
-                      {variable.filename || 'nothing readable'}
-                    </div>
-                    <div className="folder-meta muted-50">
-                      <span className="mono">{variable.dimension}</span>
-                      {variable.processedOnly && ' · results only'}
-                      {variable.source && (
-                        <>
-                          {' · from '}
-                          <span className="mono" title={variable.source}>
-                            {variable.source.split('/').pop()}
-                          </span>
-                          {/* The copy is what gets processed, so a moved
-                              source is worth noting and nothing more. */}
-                          {variable.sourceMissing && ' (moved since)'}
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {removing === variable.id ? (
-                    <span className="muted-55" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
-                      Removing variable…
-                    </span>
-                  ) : variable.processedOnly ? (
-                    <span className="tag folder-missing-tag" title={variable.problem}>
-                      No input
-                    </span>
-                  ) : variable.problem ? (
-                    <span className="tag folder-missing-tag" title={variable.problem}>
-                      Will be skipped
-                    </span>
-                  ) : (
-                    <span className="muted-55" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
-                      {variable.format} · {formatSize(variable.sizeBytes)}
-                    </span>
+                  <span className={`layer-caret${isDimensionOpen(name) ? ' is-open' : ''}`}>
+                    <Icon name="chevronRight" size={12} strokeWidth={3} />
+                  </span>
+                  <span className="dimension-name mono">{name}</span>
+                  {inside.some((variable) => variable.problem || variable.processedOnly) && (
+                    <span className="tag folder-missing-tag">needs a look</span>
                   )}
+                  <span className="layer-count">{inside.length}</span>
+                </button>
 
-                  {/* One at a time: each removal starts its own container, and
-                      two at once would have them racing over the same tree. */}
-                  {!locked && (
-                    <button
-                      type="button"
-                      className="btn btn-icon btn-secondary"
-                      aria-label={
-                        removing === variable.id
-                          ? `Removing ${variable.id}`
-                          : `Remove ${variable.id}`
-                      }
-                      onClick={() => removeVariable(variable)}
-                      disabled={removing !== null}
-                      style={{ width: 30, height: 30, borderColor: 'transparent' }}
-                    >
-                      {removing === variable.id ? (
-                        <Icon name="spinner" size={15} className="spin" />
-                      ) : (
-                        <Icon name="close" size={15} />
-                      )}
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
+                {isDimensionOpen(name) && (
+                  <div className="folders-list">{inside.map(variableRow)}</div>
+                )}
+              </div>
+            ))}
           </div>
         )}
 

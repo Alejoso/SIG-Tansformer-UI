@@ -218,6 +218,60 @@
 .folders-head h4 { margin: 0; }
 .folders-list { display: flex; flex-direction: column; gap: 8px; }
 
+/* A dimension, as a folder over the variables in it. Same idea as the map's
+   sidebar, and the same reason: sixty rows in one list is a list nobody
+   reads, and this is the screen you come to looking for one. */
+.dimension-group + .dimension-group { margin-top: 10px; }
+.dimension-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  margin-bottom: 6px;
+  border: 0;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+}
+.dimension-row:hover { background: color-mix(in srgb, var(--color-text) 5%, transparent); }
+.dimension-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+}
+/* The caret and the count are the map sidebar's, reused so the two lists
+   read as the same thing in two places. */
+.dimension-row .layer-caret {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+  transition: transform 0.15s ease;
+}
+.dimension-row .layer-caret.is-open { transform: rotate(90deg); }
+.dimension-row .layer-count {
+  flex: none;
+  min-width: 17px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  text-align: center;
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+}
+
 .folder-row {
   display: flex;
   align-items: center;

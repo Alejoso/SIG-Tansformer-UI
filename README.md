@@ -921,6 +921,13 @@ uvicorn on its default port needs no extra config.
   screen worse, pushing the other two dimensions off the bottom behind
   twenty-three variables.
 
+  The Data screen's list groups the same way, and for the same reason — it is
+  the screen you come to looking for one variable to remove. Grouped in the
+  component rather than by the server, which sends that screen a flat list of
+  what is on disk on purpose. One difference: adding a variable opens the
+  dimension it went into, because a row appearing inside a shut folder has
+  nowhere to appear and "did that work?" is the next question.
+
   There was also a raw/normalized switch, for a second document per variable
   the engine never rendered — so `ValueScale`, `MapView.scale` and
   `getLayerUrl`'s `scale` argument are all gone with it.

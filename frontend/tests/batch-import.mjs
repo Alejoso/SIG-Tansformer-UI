@@ -96,6 +96,29 @@ export async function run({ project }) {
     added.push(...mine.map((v) => v.code));
     check('all three land in the project', mine.length === 3,
       mine.map((v) => v.id).join(' '));
+
+    /* ── and the list groups them under their dimension ─────────────── */
+    // The CSS uppercases the name, so compare case-insensitively.
+    const folders = await page.locator('.dimension-name').allInnerTexts();
+    check('the variables sit under a folder per dimension',
+      folders.some((name) => name.toLowerCase() === DIMENSION), JSON.stringify(folders));
+
+    // Open, because they were just added: a variable appearing in a shut
+    // folder has nowhere to appear, and "did that work?" is the next
+    // question.
+    const group = page.locator('.dimension-group', {
+      has: page.locator('.dimension-name', { hasText: DIMENSION }),
+    });
+    const showing = await group.locator('.folder-row').count();
+    check('and the one just added to is open', showing === 3, `${showing} rows showing`);
+
+    await group.locator('.dimension-row').click();
+    await page.waitForTimeout(300);
+    check('clicking the folder shuts it',
+      (await group.locator('.folder-row').count()) === 0);
+    await group.locator('.dimension-row').click();
+    await page.waitForTimeout(300);
+    check('and opens it again', (await group.locator('.folder-row').count()) === 3);
     check('each in its own folder under the one dimension',
       new Set(mine.map((v) => v.code)).size === 3, mine.map((v) => v.code).join(' '));
 
