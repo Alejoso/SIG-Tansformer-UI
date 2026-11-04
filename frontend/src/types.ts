@@ -101,22 +101,23 @@ export interface InputVariable {
    * chain of methods (`spatial, median`), a number, or `none`.
    */
   fill: string;
-  /** Where the fill applies: hexagons in a municipality, the rest, or both. */
+  /**
+   * Where the fill applies: hexagons in a municipality, the rest, or both.
+   * What is still empty after it is scored by the model's `absent`, which
+   * is set in the model file, leaf by leaf.
+   */
   fillDomain: FillDomain;
-  /** The 1-5 score the model gives a hexagon still without a value. */
-  absent: number;
-  /** True while those three are the defaults for its kind of file. */
+  /** True while those two are the default for its kind of file. */
   settingsDefault: boolean;
 }
 
 /** `land` is every hexagon in a municipality, `sea` the rest. */
 export type FillDomain = 'all' | 'land' | 'sea';
 
-/** A variable's fill and absent, as the Data screen edits them. */
+/** A variable's fill, as the Data screen edits it. */
 export interface VariableSettings {
   fill: string;
   fillDomain: FillDomain;
-  absent: number;
 }
 
 /** What removing a variable took away. */
@@ -149,7 +150,6 @@ export interface ImportCandidate {
   /** Suggested from the kind of file, and editable before it is added. */
   fill: string;
   fillDomain: FillDomain;
-  absent: number;
 }
 
 /** What adding a folder of variables did. */
@@ -171,7 +171,6 @@ export interface ImportPlan {
   /** Suggested from the kind of file, and editable before it is added. */
   fill: string;
   fillDomain: FillDomain;
-  absent: number;
   /**
    * Set when the folder holds several variables rather than one — subfolders
    * with a dataset each, or several datasets side by side. The single fields

@@ -168,8 +168,9 @@ const LEAF_FIELDS: Field[] = [
       'The score, 1 to 5, of a hexagon with no value for this variable. Every leaf should ' +
       'have one: without it such a hexagon gets no score and the run reports an error. 5 ' +
       'when no data means no restriction (no hazard recorded, no protected area), 1 when it ' +
-      'means not knowing. A new model file takes it from the variable’s settings on the ' +
-      'Data screen.',
+      'means not knowing. A new model file starts every leaf at 1. This is the place to ' +
+      'set it: the Data screen only says how each variable’s gaps are filled while ' +
+      'processing, and `absent` scores whatever is still empty after that.',
   },
 ];
 

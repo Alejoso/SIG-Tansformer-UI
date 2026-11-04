@@ -151,7 +151,7 @@ Worth knowing before pointing it at an engine you care about:
   the model file and `config/transform.yaml`, which is rewritten from each
   variable's fill before every run.
 - **`data/*.csv` here**: the project list, where each variable was copied
-  from, and each variable's fill and absent when changed from the defaults
+  from, and each variable's fill when changed from the default
   (`variable_settings.csv`).
 
 Every pipeline run exports another master table into `out/maestro/`; the
@@ -659,8 +659,8 @@ its own config, so neither finding blocks a run.
 
 A project's model file is written the first time the screen is opened, from
 the variables that project actually holds — one criterion per dimension, one
-leaf per variable, `type: minmax` throughout, and each leaf's `absent` taken
-from that variable's setting on the Data screen. `minmax` because it is the
+leaf per variable, `type: minmax` throughout, and `absent: 1` on every leaf
+(change it here, leaf by leaf). `minmax` because it is the
 one type that needs no numbers chosen in advance: it reads the range out of
 the column. So the file you open with is a model the engine can score, not an
 example about somewhere else.
@@ -739,23 +739,27 @@ still works.
 
 ## Working with the current engine
 
-**Each variable's fill and absent.** The engine splits missing data in two:
-while processing, step 13.5 fills each master-table column's empty hexagons
-with a chain of methods (`spatial` the neighbours' mean, `region` the
-municipality's, `nearest` the closest value, `idw`, `mean`, `median`, a fixed
-number, or `none`), inside a domain (`all`, `land` = hexagons in a
-municipality, `sea` = the rest); then the model scores whatever is still
-empty with each leaf's `absent`, 1 to 5. So every variable has both, shown
-when it is added (one row per file in a batch) and editable afterwards from
-its row on the Data screen.
+**Each variable's fill, and each leaf's absent.** The engine splits missing
+data in two, and so does the app:
 
-The defaults depend on the kind of file: a raster or a table is a measurement
-that should exist everywhere, so its gaps are filled with `spatial, median`; a
-vector is usually a layer of where something is, and a hexagon outside it is
-an answer rather than a gap, so it is not filled. `absent` starts at 1, the
-cautious choice; 5 is for variables where no data means no restriction. Only
-values changed from the defaults are stored (`data/variable_settings.csv`),
-and "Default values" puts a variable back.
+- **Fill, on the Data screen.** While processing, step 13.5 fills each
+  master-table column's empty hexagons with a chain of methods (`spatial` the
+  neighbours' mean, `region` the municipality's, `nearest` the closest value,
+  `idw`, `mean`, `median`, a fixed number, or `none`), inside a domain
+  (`all`, `land` = hexagons in a municipality, `sea` = the rest). Every
+  variable is asked for its fill when it is added (one row per file in a
+  batch) and can change it afterwards from its row. The default depends on
+  the kind of file: a raster or a table is a measurement that should exist
+  everywhere, so its gaps are filled with `spatial, median`; a vector is
+  usually a layer of where something is, and a hexagon outside it is an
+  answer rather than a gap, so it is not filled. Only fills changed from the
+  default are stored (`data/variable_settings.csv`), and "Default values"
+  puts a variable back.
+- **Absent, in the model file.** The model scores whatever is still empty
+  with each leaf's `absent`, 1 to 5, decided beside the leaf's cuts and
+  weight. A generated model starts every leaf at 1, the cautious choice; 5 is
+  for variables where no data means no restriction. The editor warns about a
+  leaf without one.
 
 Before every run the backend writes the project's `config/transform.yaml` in
 the engine's own format and passes it as `PROJECT_TRANSFORM`; what was filled,
@@ -847,8 +851,8 @@ No component changes.
 | `listModelRunFiles` | `GET /api/projects/{id}/model/runs/{runId}/files` | what a run wrote, reports first |
 | `modelRunFileUrl` | `GET /api/projects/{id}/model/runs/{runId}/files/{path}` | text opens in the browser, the rest downloads (`?download=true` forces it) |
 | `runReportUrl` | `GET /api/runs/{executionId}/report` | the engine's `run_report.yaml` for any run |
-| `saveVariableSettings` | `PUT /api/projects/{id}/inputs/{dimension}/{code}/settings` | a variable's fill and absent |
-| `resetVariableSettings` | `DELETE /api/projects/{id}/inputs/{dimension}/{code}/settings` | back to the defaults for its kind of file |
+| `saveVariableSettings` | `PUT /api/projects/{id}/inputs/{dimension}/{code}/settings` | a variable's fill |
+| `resetVariableSettings` | `DELETE /api/projects/{id}/inputs/{dimension}/{code}/settings` | back to the default fill for its kind of file |
 | `pruneModelRuns` | `POST /api/projects/{id}/model/runs/prune` | keep the newest N, in one container |
 | `removeModelRun` | `DELETE /api/projects/{id}/model/runs/{runId}` | |
 | `getEngineSettings` | `GET /api/settings` | the engine's own numbers, with no project to ask about |

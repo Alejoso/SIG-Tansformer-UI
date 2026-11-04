@@ -1,11 +1,12 @@
 /**
- * A variable's fill and absent: how the engine fills its empty hexagons while
- * processing, and what the model scores where one is still empty.
+ * A variable's fill: how the engine fills its empty hexagons while
+ * processing. What is still empty after it is scored by the model's
+ * `absent`, which belongs in the model file, not here.
  *
- * The same three fields wherever a variable is set up: on each row of a
- * folder being added (already holding the defaults for that kind of file),
- * and when an added variable is edited. The backend has the final word on
- * what is valid; the fields only offer the common choices.
+ * The same two fields wherever a variable is set up: on each row of a folder
+ * being added (already holding the default for that kind of file), and when
+ * an added variable is edited. The backend has the final word on what is
+ * valid; the fields only offer the common choices.
  */
 
 import { FILL_SUGGESTIONS } from '../../lib/variable-settings';
@@ -17,8 +18,6 @@ const DOMAINS: { value: FillDomain; label: string }[] = [
   { value: 'land', label: 'land' },
   { value: 'sea', label: 'sea' },
 ];
-
-const SCORES = [1, 2, 3, 4, 5];
 
 interface Props {
   value: VariableSettings;
@@ -32,7 +31,6 @@ interface Props {
 
 export function VariableSettingsFields({ value, onChange, idPrefix, disabled, compact }: Props) {
   const listId = `${idPrefix}-fill-options`;
-  const scores = SCORES.includes(value.absent) ? SCORES : [...SCORES, value.absent].sort();
 
   return (
     <div className={`variable-settings${compact ? ' is-compact' : ''}`}>
@@ -45,7 +43,8 @@ export function VariableSettingsFields({ value, onChange, idPrefix, disabled, co
               method fills what the previous one left. <code>spatial</code> takes the
               neighbours' mean, <code>region</code> the municipality's, <code>nearest</code>{' '}
               the closest value, <code>median</code> the variable's median, a number a fixed
-              value. <code>none</code> leaves the gaps for <code>absent</code>.
+              value. <code>none</code> leaves the gaps; the model's <code>absent</code>{' '}
+              scores whatever is still empty.
             </InfoTip>
           )}
         </span>
@@ -76,32 +75,6 @@ export function VariableSettingsFields({ value, onChange, idPrefix, disabled, co
           {DOMAINS.map((domain) => (
             <option key={domain.value} value={domain.value}>
               {domain.label}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="variable-settings-field" htmlFor={`${idPrefix}-absent`}>
-        <span>
-          Absent
-          {!compact && (
-            <InfoTip label="About absent">
-              The score, 1 to 5, the model gives a hexagon that still has no value for this
-              variable. 5 when having nothing there means no restriction (no hazard, no
-              protected area); 1 when it means not knowing, the cautious choice.
-            </InfoTip>
-          )}
-        </span>
-        <select
-          id={`${idPrefix}-absent`}
-          className="input"
-          value={String(value.absent)}
-          disabled={disabled}
-          onChange={(e) => onChange({ ...value, absent: Number(e.target.value) })}
-        >
-          {scores.map((score) => (
-            <option key={score} value={String(score)}>
-              {score}
             </option>
           ))}
         </select>

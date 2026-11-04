@@ -259,10 +259,10 @@ _PREAMBLE = """\
 #
 # Every leaf also has `absent`: the 1-5 score of a hexagon with no value for
 # it. 5 when no data there means no restriction, 1 when it means not knowing
-# (the conservative choice). Each one below starts from the value set for the
-# variable on the Data screen. Filling missing data is not done here: the
-# engine does it while processing, as set there too, and `absent` scores
-# what is still empty.
+# (the conservative choice, which every leaf below starts with: change it
+# here, leaf by leaf). Filling missing data is not done here: the engine
+# fills each variable's gaps while processing, as set on the Data screen,
+# and `absent` scores what is still empty.
 #
 # Edit this freely. The engine reads the file, so it has the final word on
 # what is in it; this app only checks the shape before handing it over.
@@ -301,7 +301,7 @@ criteria: []
 """
 
 
-def default_model(project: store.ProjectRow, absent: dict[str, float] | None = None) -> str:
+def default_model(project: store.ProjectRow) -> str:
     """
     A runnable model built from what this project actually holds.
 
@@ -311,10 +311,9 @@ def default_model(project: store.ProjectRow, absent: dict[str, float] | None = N
     opens with is a model the engine can score, rather than an example of a
     model about something else.
 
-    `absent` is each column's score for a hexagon with no value, as set per
-    variable on the Data screen; a column not in it gets 1.
+    Every leaf gets `absent: 1`, the cautious score for a hexagon with no
+    value; the model file is where each one is decided.
     """
-    absent = absent or {}
     found = master_variables(project)
     from_disk = bool(found)
     if not found:
@@ -358,8 +357,7 @@ def default_model(project: store.ProjectRow, absent: dict[str, float] | None = N
             weight_part = f", weight: {leaf_weight}" if len(variables) > 1 else ""
             lines.append(
                 f"          - {{code: {variable.code}, column: {variable.column}, "
-                f"site: both, type: minmax, absent: {absent.get(variable.column, 1.0):g}"
-                f"{weight_part}}}\n"
+                f"site: both, type: minmax, absent: 1{weight_part}}}\n"
             )
         lines.append("\n")
 
@@ -382,9 +380,7 @@ def model_path(project: store.ProjectRow) -> Path:
     return root / MODEL_DIRNAME / MODEL_FILENAME
 
 
-def read_model(
-    project: store.ProjectRow, absent: dict[str, float] | None = None
-) -> tuple[str, bool]:
+def read_model(project: store.ProjectRow) -> tuple[str, bool]:
     """
     The file's contents, and whether it had to be created.
 
@@ -398,7 +394,7 @@ def read_model(
     if path.exists():
         return path.read_text(encoding="utf-8"), False
 
-    seeded = default_model(project, absent)
+    seeded = default_model(project)
     write_model(project, seeded)
     return seeded, True
 

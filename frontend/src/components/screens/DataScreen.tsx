@@ -173,13 +173,13 @@ export function DataScreen() {
   /** Rows the user has unticked. Everything else in the batch is coming. */
   const [batchSkipped, setBatchSkipped] = useState<Record<string, boolean>>({});
   /**
-   * Fill and absent for each row of a batch, once changed. A row not in here
+   * The fill for each row of a batch, once changed. A row not in here
    * keeps what the server suggested for its kind of file.
    */
   const [batchSettings, setBatchSettings] = useState<Record<string, VariableSettings>>({});
   /** The same for a single variable: null until changed from the suggestion. */
   const [singleSettings, setSingleSettings] = useState<VariableSettings | null>(null);
-  /** The added variable whose fill and absent are being edited, and the draft. */
+  /** The added variable whose fill is being edited, and the draft. */
   const [editing, setEditing] = useState<{ id: string; value: VariableSettings } | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState('');
@@ -542,14 +542,14 @@ export function DataScreen() {
   };
 
   // A different folder is a different file: its suggestion replaces any
-  // fill or absent chosen for the previous one.
+  // fill chosen for the previous one.
   useEffect(() => {
     setSingleSettings(null);
     setBatchSettings({});
   }, [draftPath]);
 
   /**
-   * Save an added variable's fill and absent. They take effect on the next
+   * Save an added variable's fill. It takes effect on the next
    * run: what was already processed keeps the fill it was made with.
    */
   const saveSettings = async (variable: InputVariable, value: VariableSettings | null) => {
@@ -767,9 +767,9 @@ export function DataScreen() {
                   <button
                     type="button"
                     className="btn btn-icon btn-secondary"
-                    aria-label={`Fill and absent for ${variable.id}`}
+                    aria-label={`Fill for ${variable.id}`}
                     aria-expanded={editing?.id === variable.id}
-                    title="Fill and absent"
+                    title="How its gaps are filled"
                     onClick={() => {
                       setSettingsError('');
                       setEditing((current) =>
@@ -809,7 +809,7 @@ export function DataScreen() {
                 )}
               </div>
 
-              {/* Fill and absent, edited in place under the row they belong
+              {/* The fill, edited in place under the row it belongs
                   to. Saved per variable; the next run uses them. */}
               {editing?.id === variable.id && (
                 <div className="variable-settings-editor">
@@ -853,8 +853,8 @@ export function DataScreen() {
                   {settingsError && <div className="path-add-error">{settingsError}</div>}
                   <div className="muted-55" style={{ fontSize: 11.5 }}>
                     Used from the next run. What is already processed keeps the fill it was
-                    made with; the model's own file says each leaf's <code>absent</code>, and
-                    a new model file starts from these.
+                    made with. Whatever is still empty after it is scored by each leaf's{' '}
+                    <code>absent</code>, in the model file.
                   </div>
                 </div>
               )}
@@ -1082,7 +1082,7 @@ export function DataScreen() {
                 </button>
               </div>
 
-              {/* A single variable: its fill and absent, suggested for its
+              {/* A single variable: its fill, suggested for its
                   kind of file and editable before it is added. */}
               {batch.length === 0 && plan && !plan.problem && (
                 <VariableSettingsFields

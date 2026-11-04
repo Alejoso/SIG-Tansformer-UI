@@ -355,11 +355,10 @@ class InputVariable(BaseModel):
     #: `variable_settings`.
     fill: str = "none"
     #: Where the fill applies: `all`, `land` (hexagons in a municipality) or
-    #: `sea`. A domain is only ever filled from itself.
+    #: `sea`. A domain is only ever filled from itself. What is still empty
+    #: after it is scored by the model's `absent`, set in the model file.
     fillDomain: str = "all"
-    #: The 1-5 score the model gives a hexagon still without a value.
-    absent: float = 1.0
-    #: True while the three above are the defaults for its kind of file.
+    #: True while the two above are the default for its kind of file.
     settingsDefault: bool = True
 
 
@@ -380,8 +379,6 @@ class ImportCandidate(BaseModel):
     #: Where the fill applies: `all`, `land` (hexagons in a municipality) or
     #: `sea`. A domain is only ever filled from itself.
     fillDomain: str = "all"
-    #: The 1-5 score the model gives a hexagon still without a value.
-    absent: float = 1.0
 
 
 class ImportPlan(BaseModel):
@@ -398,7 +395,6 @@ class ImportPlan(BaseModel):
     #: Suggested from the kind of file, and editable before it is added.
     fill: str = "none"
     fillDomain: str = "all"
-    absent: float = 1.0
     #: Set when the folder holds several variables rather than one. The
     #: single fields above stay empty then, and these are what to show.
     variables: list[ImportCandidate] = Field(default_factory=list)
@@ -453,15 +449,13 @@ class ImportPayload(BaseModel):
     #: Left out, the defaults for the kind of file.
     fill: str | None = None
     fillDomain: str | None = None
-    absent: float | None = None
 
 
 class VariableSettingsPayload(BaseModel):
-    """A variable's fill and absent, as the Data screen edits them."""
+    """A variable's fill, as the Data screen edits it."""
 
     fill: str
     fillDomain: str = "all"
-    absent: float
 
 
 class ImportItem(BaseModel):
@@ -474,7 +468,6 @@ class ImportItem(BaseModel):
     #: Left out, the defaults for the kind of file.
     fill: str | None = None
     fillDomain: str | None = None
-    absent: float | None = None
 
 
 class ImportManyPayload(BaseModel):

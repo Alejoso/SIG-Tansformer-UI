@@ -1,11 +1,11 @@
 /**
- * A variable's fill and absent: suggested when it is added, editable after.
+ * A variable's fill: suggested when it is added, editable after.
  *
  * The engine fills a variable's gaps while processing (a chain of methods per
- * variable, in the project's transform.yaml) and the model scores what is
- * still empty with each leaf's `absent`. So every variable carries both, with
- * defaults that depend on the kind of file: a raster or a table is filled
- * (`spatial, median`), a vector is not (`none`), and `absent` starts at 1.
+ * variable, in the project's transform.yaml), with a default that depends on
+ * the kind of file: a raster or a table is filled (`spatial, median`), a
+ * vector is not (`none`). What is still empty is scored by each leaf's
+ * `absent`, which belongs to the model file and is not asked for here.
  *
  * Added through the screen against throwaway files, so nothing real is
  * touched; they are removed at the end.
@@ -52,16 +52,11 @@ export async function run({ project }) {
     check('every row asks for its fill', fills.length === 2, JSON.stringify(fills));
     check('a table is filled by default', fills.includes('spatial, median'), JSON.stringify(fills));
     check('a vector is not', fills.includes('none'), JSON.stringify(fills));
-    const absents = await Promise.all(
-      (await page.locator('.batch-list select[id$="-absent"]').all()).map((select) =>
-        select.inputValue(),
-      ),
-    );
-    check('and every row has an absent, 1 by default',
-      absents.length === 2 && absents.every((value) => value === '1'), JSON.stringify(absents));
+    check('absent is not asked for here: it belongs to the model',
+      (await page.locator('.batch-list [id$="-absent"]').count()) === 0);
 
     // Change one before adding it: the choice has to survive the copy.
-    await page.locator('.batch-list select[id$="-absent"]').last().selectOption('5');
+    await page.locator('.batch-list input[id$="-fill"]').first().fill('nearest');
 
     await page.locator('#variable-dimension').selectOption({ label: 'New dimension…' });
     await page.locator('input[aria-label="New dimension name"]').fill(DIMENSION);
@@ -73,18 +68,20 @@ export async function run({ project }) {
     let mine = inputs.filter((v) => v.dimension === DIMENSION);
     added.push(...mine.map((v) => v.code));
     check('both were added', mine.length === 2, mine.map((v) => v.id).join(' '));
-    const changed = mine.find((v) => v.absent === 5);
-    check('the absent chosen before adding was kept', Boolean(changed),
-      mine.map((v) => `${v.id}:${v.absent}`).join(' '));
-    check('and only that one is no longer on its defaults',
+    check('the fill chosen before adding was kept', mine.some((v) => v.fill === 'nearest'),
+      mine.map((v) => `${v.id}:${v.fill}`).join(' '));
+    check('and only that one is no longer on its default',
       mine.filter((v) => !v.settingsDefault).length === 1);
+    check('no variable carries an absent', mine.every((v) => !('absent' in v)));
 
     /* ── edited afterwards, from the row ────────────────────────────── */
-    const target = mine.find((v) => v.fill === 'spatial, median') ?? mine[0];
+    const target = mine.find((v) => v.fill === 'none') ?? mine[0];
     // Open its dimension, unless adding already did.
     const group = page.locator('.dimension-row', { hasText: DIMENSION.toUpperCase() });
     if ((await group.getAttribute('aria-expanded')) !== 'true') await group.click();
-    await page.getByRole('button', { name: `Fill and absent for ${target.id}` }).click();
+    await page.getByRole('button', { name: `Fill for ${target.id}` }).click();
+    check('the editor has no absent either',
+      (await page.locator('.variable-settings-editor [id$="-absent"]').count()) === 0);
     const fill = page.locator('.variable-settings-editor input[id$="-fill"]');
     await fill.fill('region, nearest');
     await page.locator('.variable-settings-editor').getByRole('button', { name: 'Save' }).click();
@@ -94,7 +91,7 @@ export async function run({ project }) {
     check('an edited fill is saved', saved?.fill === 'region, nearest', saved?.fill);
 
     // A method the engine does not have is refused, with the reason.
-    await page.getByRole('button', { name: `Fill and absent for ${target.id}` }).click();
+    await page.getByRole('button', { name: `Fill for ${target.id}` }).click();
     await fill.fill('magic');
     await page.locator('.variable-settings-editor').getByRole('button', { name: 'Save' }).click();
     await page.waitForTimeout(800);
@@ -107,7 +104,7 @@ export async function run({ project }) {
     await page.waitForTimeout(1000);
     inputs = await api(`/projects/${project.id}/inputs`);
     const reset = inputs.find((v) => v.id === target.id);
-    check('"Default values" puts it back', reset?.settingsDefault && reset.fill === 'spatial, median',
+    check('"Default values" puts it back', reset?.settingsDefault && reset.fill === 'none',
       `${reset?.fill} ${reset?.settingsDefault}`);
 
     // The refused save above is a 400 on purpose, and the browser logs it.

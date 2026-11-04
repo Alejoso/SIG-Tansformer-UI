@@ -517,36 +517,34 @@ def list_inputs(project_id: str) -> list[InputVariable]:
 
 
 def _input(project, variable, rows=None) -> InputVariable:
-    """A variable from the input tree, with its fill and absent attached."""
+    """A variable from the input tree, with its fill attached."""
     settings = variable_settings.settings_for(project.id, variable.id, variable.format, rows)
     return InputVariable(
         **vars(variable),
         fill=settings.fill,
         fillDomain=settings.fillDomain,
-        absent=settings.absent,
         settingsDefault=settings.isDefault,
     )
 
 
 def _defaults(file_format: str) -> dict[str, object]:
-    """The suggested fill and absent for a file that is about to be added."""
+    """The suggested fill for a file that is about to be added."""
     suggested = variable_settings.defaults_for(file_format)
-    return {"fill": suggested.fill, "fillDomain": suggested.fillDomain, "absent": suggested.absent}
+    return {"fill": suggested.fill, "fillDomain": suggested.fillDomain}
 
 
-def _wanted_settings(item) -> tuple[str, str, float] | None:
+def _wanted_settings(item) -> tuple[str, str] | None:
     """
-    What a request row asked for, checked, or None for the defaults.
+    The fill a request row asked for, checked, or None for the default.
 
-    Raises `variable_settings.SettingsError` when a value would not be
-    accepted, so it is refused before anything is copied.
+    Raises `variable_settings.SettingsError` when it would not be accepted,
+    so the row is refused before anything is copied.
     """
-    if item.fill is None and item.fillDomain is None and item.absent is None:
+    if item.fill is None and item.fillDomain is None:
         return None
     return variable_settings.check(
         item.fill if item.fill is not None else variable_settings.NO_FILL,
         item.fillDomain or variable_settings.DEFAULT_FILL_DOMAIN,
-        item.absent if item.absent is not None else variable_settings.DEFAULT_ABSENT,
     )
 
 
@@ -662,15 +660,16 @@ def save_input_settings(
     project_id: str, dimension: str, code: str, payload: VariableSettingsPayload
 ) -> InputVariable:
     """
-    Set how a variable's gaps are filled while processing, and what the model
-    scores where one is left. Takes effect on the next run; already
-    processed results keep the fill they were made with.
+    Set how a variable's gaps are filled while processing. Takes effect on the
+    next run; already processed results keep the fill they were made with.
+    What is still empty after it is scored by the model's `absent`, which is
+    set in the model file.
     """
     project = _require_project(project_id)
     variable = _find_input(project, dimension, code)
     try:
         variable_settings.save(project.id, variable.id, payload.fill, payload.fillDomain,
-                               payload.absent, file_format=variable.format)
+                               file_format=variable.format)
     except variable_settings.SettingsError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return _input(project, variable)
@@ -678,7 +677,7 @@ def save_input_settings(
 
 @app.delete("/api/projects/{project_id}/inputs/{dimension}/{code}/settings")
 def reset_input_settings(project_id: str, dimension: str, code: str) -> InputVariable:
-    """Back to the defaults for the variable's kind of file."""
+    """Back to the default fill for the variable's kind of file."""
     project = _require_project(project_id)
     variable = _find_input(project, dimension, code)
     variable_settings.reset(project.id, variable.id)
@@ -953,9 +952,7 @@ def get_model(project_id: str) -> ModelFile:
     parser would quietly rewrite what someone typed.
     """
     project = _require_project(project_id)
-    text, created = model_store.read_model(
-        project, variable_settings.absent_by_column(project, inputs.scan(project))
-    )
+    text, created = model_store.read_model(project)
     return _describe_model(project, text, created)
 
 

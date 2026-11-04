@@ -1,8 +1,7 @@
 """
-What to do with each variable's missing values: how to fill its gaps, and what
-the model scores where a gap is left.
+How each variable's gaps are filled while processing.
 
-The engine splits that in two, and so does this module:
+The engine splits missing data in two, and only the first half lives here:
 
 * **fill** belongs to processing. After the master table is exported, the
   engine's step 13.5 (`app/pipeline/fill_master.py`) fills each column's empty
@@ -11,16 +10,15 @@ The engine splits that in two, and so does this module:
   It reads that from a `transform.yaml`, which this module writes into the
   project's folder before a run (`config/transform.yaml`) and hands to the
   engine as `PROJECT_TRANSFORM`.
-* **absent** belongs to the model. It is the 1-5 score a hexagon gets for a
-  variable when it still has no value, and the engine asks for it on every
-  leaf. It is kept here as the variable's default, and the model file this
-  app writes for a project starts from it.
+* **absent** belongs to the model: the 1-5 score a hexagon gets for a
+  variable when it still has no value. It is written in the model file, leaf
+  by leaf, beside the cuts and the weights, and nowhere else.
 
-So every variable has both, with a default that depends on what kind of file
-it is, and the Data screen shows them when the variable is added and lets them
-be changed afterwards. Stored like the rest of the app's own records: a CSV
-that can be opened and fixed by hand, `data/variable_settings.csv`, one row
-per variable that has been changed from its default.
+So every variable has a fill, with a default that depends on what kind of
+file it is; the Data screen asks for it when the variable is added and lets
+it be changed afterwards. Stored like the rest of the app's own records: a
+CSV that can be opened and fixed by hand, `data/variable_settings.csv`, one
+row per variable that has been changed from its default.
 """
 
 from __future__ import annotations
@@ -32,7 +30,7 @@ from pathlib import Path
 from . import model_store, outputs, store
 
 SETTINGS_CSV = store.DATA_DIR / "variable_settings.csv"
-SETTINGS_FIELDS = ["project_id", "variable_id", "fill", "fill_domain", "absent", "updated_at"]
+SETTINGS_FIELDS = ["project_id", "variable_id", "fill", "fill_domain", "updated_at"]
 
 #: Where the generated `transform.yaml` goes inside the project folder, and
 #: where the engine sees it (the project folder is mounted at `/data`).
@@ -47,7 +45,7 @@ FILL_METHODS = ("spatial", "nearest", "idw", "region", "mean", "median")
 #: `land` is every hexagon inside a municipality, `sea` the rest. A domain is
 #: filled only from itself, so the sea never fills the land or the other way.
 FILL_DOMAINS = ("all", "land", "sea")
-#: No fill at all: the gaps stay, and `absent` scores them.
+#: No fill at all: the gaps stay, and the model's `absent` scores them.
 NO_FILL = "none"
 
 #: The defaults, by the kind of file.
@@ -58,18 +56,13 @@ NO_FILL = "none"
 #: vector is usually a layer of where something is (a protected area, a
 #: road), and a hexagon outside it is not a gap but an answer; spreading the
 #: neighbours into it would invent presence. So vectors are not filled, and
-#: `absent` decides what "not there" scores.
+#: the model's `absent` decides what "not there" scores.
 DEFAULT_FILL_BY_KIND = {
     "raster": "spatial, median",
     "table": "spatial, median",
     "vector": NO_FILL,
 }
 DEFAULT_FILL_DOMAIN = "all"
-#: 1, the conservative choice: a hexagon with no value is treated as the
-#: worst case until someone says otherwise. Where "no data" means "no
-#: restriction" (no hazard recorded, no protected area), 5 is the answer, and
-#: that is a decision per variable.
-DEFAULT_ABSENT = 1.0
 
 _KIND_BY_FORMAT = {
     "GEOTIFF": "raster",
@@ -80,11 +73,10 @@ _KIND_BY_FORMAT = {
 
 @dataclass(frozen=True)
 class VariableSettings:
-    """A variable's fill and absent, and whether they are its defaults."""
+    """A variable's fill, and whether it is its default."""
 
     fill: str
     fillDomain: str
-    absent: float
     #: True when nothing has been changed: the values are the defaults for
     #: the variable's kind of file, and follow them if those change.
     isDefault: bool
@@ -103,7 +95,6 @@ def defaults_for(file_format: str) -> VariableSettings:
     return VariableSettings(
         fill=DEFAULT_FILL_BY_KIND[kind_of(file_format)],
         fillDomain=DEFAULT_FILL_DOMAIN,
-        absent=DEFAULT_ABSENT,
         isDefault=True,
     )
 
@@ -150,17 +141,11 @@ def normalise_fill(text: str) -> str:
     return ", ".join(f"{step:g}" if isinstance(step, float) else str(step) for step in chain)
 
 
-def check(fill: str, fill_domain: str, absent: object) -> tuple[str, str, float]:
-    """The three values, checked and normalised, or a SettingsError."""
+def check(fill: str, fill_domain: str) -> tuple[str, str]:
+    """The chain and its domain, checked and normalised, or a SettingsError."""
     if fill_domain not in FILL_DOMAINS:
         raise SettingsError(f"The fill domain must be one of {', '.join(FILL_DOMAINS)}.")
-    try:
-        score = float(absent)  # type: ignore[arg-type]
-    except (TypeError, ValueError) as error:
-        raise SettingsError("`absent` must be a score from 1 to 5.") from error
-    if not 1.0 <= score <= 5.0:
-        raise SettingsError("`absent` must be a score from 1 to 5.")
-    return normalise_fill(fill), fill_domain, score
+    return normalise_fill(fill), fill_domain
 
 
 # ── the stored values ─────────────────────────────────────────────────────
@@ -186,30 +171,25 @@ def settings_for(project_id: str, variable_id: str, file_format: str,
     if row is None:
         return defaults_for(file_format)
     default = defaults_for(file_format)
-    try:
-        absent = float(row["absent"]) if row["absent"] else default.absent
-    except ValueError:
-        absent = default.absent
     return VariableSettings(
         fill=row["fill"] or default.fill,
         fillDomain=row["fill_domain"] if row["fill_domain"] in FILL_DOMAINS else default.fillDomain,
-        absent=absent,
         isDefault=False,
     )
 
 
-def save(project_id: str, variable_id: str, fill: str, fill_domain: str, absent: object,
+def save(project_id: str, variable_id: str, fill: str, fill_domain: str,
          file_format: str = "") -> None:
     """
-    Store a variable's values. Raises SettingsError when one is not valid.
+    Store a variable's fill. Raises SettingsError when it is not valid.
 
-    Values equal to the defaults for its kind of file (`file_format`) are not
-    stored: the variable keeps following the defaults, as if never changed.
+    A fill equal to the default for its kind of file (`file_format`) is not
+    stored: the variable keeps following the default, as if never changed.
     """
-    fill, fill_domain, score = check(fill, fill_domain, absent)
+    fill, fill_domain = check(fill, fill_domain)
     if file_format:
         default = defaults_for(file_format)
-        if (fill, fill_domain, score) == (default.fill, default.fillDomain, default.absent):
+        if (fill, fill_domain) == (default.fill, default.fillDomain):
             reset(project_id, variable_id)
             return
     rows = [row for row in _rows()
@@ -219,7 +199,6 @@ def save(project_id: str, variable_id: str, fill: str, fill_domain: str, absent:
         "variable_id": variable_id,
         "fill": fill,
         "fill_domain": fill_domain,
-        "absent": f"{score:g}",
         "updated_at": store.now(),
     })
     _write_rows(rows)
@@ -340,18 +319,6 @@ def write_transform(project: store.ProjectRow, variables: list) -> Path | None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(transform_document(project, variables), encoding="utf-8")
     return path
-
-
-def absent_by_column(project: store.ProjectRow, variables: list) -> dict[str, float]:
-    """Each variable's `absent`, by the column it becomes, for a new model file."""
-    rows = stored(project.id)
-    by_folder = _columns_by_folder(project)
-    found: dict[str, float] = {}
-    for variable in variables:
-        settings = settings_for(project.id, variable.id, variable.format, rows)
-        for column in master_columns(project, variable, by_folder):
-            found[column] = settings.absent
-    return found
 
 
 def as_dict(settings: VariableSettings) -> dict[str, object]:
