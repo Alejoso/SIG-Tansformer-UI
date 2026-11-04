@@ -14,10 +14,10 @@ a half minutes to do fifty seconds of work: the H3 master, the grid and the
 PMTiles are rebuilt each time, and none of them depend on the project at all
 — they come from the boundaries in `admin/`.
 
-Those are separable. `RESET_ARCHIVOS=1` truncates `archivos`, `variables` and
-`archivo_valores` and leaves the master alone, which is exactly what switching
-projects needs. So this module tracks what the database last had in it, and a
-run clears those tables only when it has to:
+Those are separable. `RESET_FILES=1` (formerly `RESET_ARCHIVOS`) truncates
+`archivos`, `variables` and `archivo_valores` and leaves the master alone,
+which is exactly what switching projects needs. So this module tracks what the
+database last had in it, and a run clears those tables only when it has to:
 
 * another project ran last — otherwise its variables are still in there;
 * a variable was removed from this project — an incremental load never

@@ -9,6 +9,7 @@
 
 import type { PipelineRun } from '../../types';
 import { Dialog } from '../ui/Dialog';
+import { RunReportLine } from '../variables/RunReportLine';
 import { Icon } from '../ui/Icon';
 
 interface ApplyProgressDialogProps {
@@ -133,13 +134,21 @@ export function ApplyDoneDialog({ run, onStay, onViewMap }: ApplyDoneDialogProps
             {run.stages.find((stage) => stage.status === 'failed')?.label ?? 'one of the steps'}.
           </p>
           {run.error && <pre className="process-error">{run.error}</pre>}
+          <RunReportLine run={run} />
         </>
       ) : (
-        <p className="dialog-body" style={{ margin: 0 }}>
-          Scored in {seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`}. The map's
-          Model side now shows this run — the whole model, each criterion, and the subcriteria
-          beneath them.
-        </p>
+        <>
+          <p className="dialog-body" style={{ margin: 0 }}>
+            Scored in {seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`}. The
+            map's Model side now shows this run: the whole model and each criterion. Its tables,
+            maps and report are under Past runs.
+          </p>
+          {/* Finished, but the engine flags its results (a leaf with no
+              column, hexagons left without a score): said here, not only in
+              the report file. */}
+          {run.error && <pre className="process-error">{run.error}</pre>}
+          <RunReportLine run={run} />
+        </>
       )}
 
       <div className="dialog-actions" style={{ alignSelf: 'stretch' }}>

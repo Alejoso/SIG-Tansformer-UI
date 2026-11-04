@@ -141,6 +141,20 @@ class ModelRun(BaseModel):
     #: the app, which is the reason this list exists.
     current: bool
     documentCount: int
+    #: The engine's verdict from the run's own `run_report.yaml`: ok, failed
+    #: or with_errors. Empty for runs older than the report.
+    status: str = ""
+    errorCount: int = 0
+
+
+class RunFile(BaseModel):
+    """One file a model run wrote."""
+
+    #: Relative to the run's folder.
+    path: str
+    sizeBytes: int
+    #: report, table, map, archive or other.
+    kind: str
 
 
 class ModelRunsRemoval(BaseModel):
@@ -241,6 +255,24 @@ class PipelineStageState(BaseModel):
     durationSeconds: float | None = None
 
 
+class RunReport(BaseModel):
+    """
+    The engine's own report of a finished run (`logs/<id>/run_report.yaml`).
+
+    `status` is ok, failed or with_errors: the last one is a run that exited
+    cleanly but whose results the engine itself flags, which no exit code
+    says.
+    """
+
+    status: str
+    path: str
+    duration: str = ""
+    #: The first few, as `script: message`. The file has every one.
+    errors: list[str] = Field(default_factory=list)
+    errorCount: int = 0
+    warningCount: int = 0
+
+
 class PipelineRun(BaseModel):
     projectId: str
     #: starting | running | done | failed | aborted
@@ -268,6 +300,8 @@ class PipelineRun(BaseModel):
     rebuildEverything: bool = False
     #: The last few hundred lines of the engine's output.
     logTail: list[str] = Field(default_factory=list)
+    #: The engine's final report, once the run has ended and written one.
+    report: RunReport | None = None
 
 
 class PipelineReadiness(BaseModel):
@@ -316,6 +350,17 @@ class InputVariable(BaseModel):
     #: Results with no input behind them. Still a column in the master table
     #: and a leaf the model can score, so worth seeing and removing.
     processedOnly: bool = False
+    #: How the engine fills this variable's empty hexagons while processing:
+    #: a chain of methods (`spatial, median`), a number, or `none`. See
+    #: `variable_settings`.
+    fill: str = "none"
+    #: Where the fill applies: `all`, `land` (hexagons in a municipality) or
+    #: `sea`. A domain is only ever filled from itself.
+    fillDomain: str = "all"
+    #: The 1-5 score the model gives a hexagon still without a value.
+    absent: float = 1.0
+    #: True while the three above are the defaults for its kind of file.
+    settingsDefault: bool = True
 
 
 class ImportCandidate(BaseModel):
@@ -330,6 +375,13 @@ class ImportCandidate(BaseModel):
     code: str = ""
     #: Why this one cannot be added. The others still can.
     problem: str = ""
+    #: Suggested from the kind of file, and editable before it is added.
+    fill: str = "none"
+    #: Where the fill applies: `all`, `land` (hexagons in a municipality) or
+    #: `sea`. A domain is only ever filled from itself.
+    fillDomain: str = "all"
+    #: The 1-5 score the model gives a hexagon still without a value.
+    absent: float = 1.0
 
 
 class ImportPlan(BaseModel):
@@ -343,6 +395,10 @@ class ImportPlan(BaseModel):
     dimension: str = ""
     code: str = ""
     problem: str = ""
+    #: Suggested from the kind of file, and editable before it is added.
+    fill: str = "none"
+    fillDomain: str = "all"
+    absent: float = 1.0
     #: Set when the folder holds several variables rather than one. The
     #: single fields above stay empty then, and these are what to show.
     variables: list[ImportCandidate] = Field(default_factory=list)
@@ -353,9 +409,10 @@ class ModelRunPayload(BaseModel):
 
     #: onshore | offshore | both — the engine scores leaves per site.
     site: str = "both"
-    #: Use the project's own model file as the config. Off until that file is
-    #: in the shape the engine reads; the engine's own config is used instead.
-    useProjectModel: bool = False
+    #: Use the project's own model file as the config. The engine has no
+    #: default model any more, so this is the only option and the route
+    #: refuses `false`.
+    useProjectModel: bool = True
     #: Skip the three preprocesses when their inputs have not changed.
     skipPreprocesses: bool = False
     #: The engine renders its own maps. Worth keeping on — it is what the
@@ -393,6 +450,18 @@ class ImportPayload(BaseModel):
     path: str
     dimension: str
     code: str
+    #: Left out, the defaults for the kind of file.
+    fill: str | None = None
+    fillDomain: str | None = None
+    absent: float | None = None
+
+
+class VariableSettingsPayload(BaseModel):
+    """A variable's fill and absent, as the Data screen edits them."""
+
+    fill: str
+    fillDomain: str = "all"
+    absent: float
 
 
 class ImportItem(BaseModel):
@@ -402,6 +471,10 @@ class ImportItem(BaseModel):
     code: str
     #: Which dataset, when the folder holds more than one. Empty otherwise.
     filename: str = ""
+    #: Left out, the defaults for the kind of file.
+    fill: str | None = None
+    fillDomain: str | None = None
+    absent: float | None = None
 
 
 class ImportManyPayload(BaseModel):

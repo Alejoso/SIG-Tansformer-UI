@@ -96,6 +96,27 @@ export interface InputVariable {
    * come from an input deleted outside this app.
    */
   processedOnly: boolean;
+  /**
+   * How the engine fills this variable's empty hexagons while processing: a
+   * chain of methods (`spatial, median`), a number, or `none`.
+   */
+  fill: string;
+  /** Where the fill applies: hexagons in a municipality, the rest, or both. */
+  fillDomain: FillDomain;
+  /** The 1-5 score the model gives a hexagon still without a value. */
+  absent: number;
+  /** True while those three are the defaults for its kind of file. */
+  settingsDefault: boolean;
+}
+
+/** `land` is every hexagon in a municipality, `sea` the rest. */
+export type FillDomain = 'all' | 'land' | 'sea';
+
+/** A variable's fill and absent, as the Data screen edits them. */
+export interface VariableSettings {
+  fill: string;
+  fillDomain: FillDomain;
+  absent: number;
 }
 
 /** What removing a variable took away. */
@@ -125,6 +146,10 @@ export interface ImportCandidate {
   code: string;
   /** Why this one cannot be added. The others still can. */
   problem: string;
+  /** Suggested from the kind of file, and editable before it is added. */
+  fill: string;
+  fillDomain: FillDomain;
+  absent: number;
 }
 
 /** What adding a folder of variables did. */
@@ -143,6 +168,10 @@ export interface ImportPlan {
   dimension: string;
   code: string;
   problem: string;
+  /** Suggested from the kind of file, and editable before it is added. */
+  fill: string;
+  fillDomain: FillDomain;
+  absent: number;
   /**
    * Set when the folder holds several variables rather than one — subfolders
    * with a dataset each, or several datasets side by side. The single fields
@@ -211,6 +240,33 @@ export interface PipelineRun {
   rebuildEverything: boolean;
   /** The tail of the engine's output, for when something goes wrong. */
   logTail: string[];
+  /** The engine's own report of the run, once it has ended. */
+  report: RunReport | null;
+}
+
+/**
+ * The engine's final report of a run (`logs/<id>/run_report.yaml`).
+ *
+ * `with_errors` is a run that exited cleanly but whose results the engine
+ * itself flags (a leaf with no column, hexagons left without a value),
+ * which no exit code says.
+ */
+export interface RunReport {
+  status: 'ok' | 'failed' | 'with_errors' | string;
+  path: string;
+  duration: string;
+  /** The first few, as `script: message`. The file has every one. */
+  errors: string[];
+  errorCount: number;
+  warningCount: number;
+}
+
+/** One file a model run wrote. */
+export interface RunFile {
+  /** Relative to the run's folder. */
+  path: string;
+  sizeBytes: number;
+  kind: 'report' | 'table' | 'map' | 'archive' | 'other';
 }
 
 /**
@@ -387,15 +443,17 @@ export interface ModelLeaf {
   steps: number;
   /** `direction: cost` — a high value scores low. */
   inverted: boolean;
+  /** The score of a hexagon with no value for it, when the file sets one. */
+  absent: number | null;
 }
 
 /** A group of leaves that answer the same question. */
 export interface ModelSubgroup {
   key: string;
   /** The readable name, when the file gives one. */
-  nombre: string;
+  name: string;
   weight: number | null;
-  /** `combine: min` — the worst leaf decides, rather than the average. */
+  /** `agg: min`: the worst leaf decides, rather than the average. */
   worstWins: boolean;
   /** What a hexagon the variable does not cover scores, when it sets that. */
   absent: number | null;
@@ -406,7 +464,7 @@ export interface ModelSubgroup {
 
 export interface ModelCriterion {
   key: string;
-  nombre: string;
+  name: string;
   weight: number | null;
   subgroups: ModelSubgroup[];
 }
@@ -443,6 +501,12 @@ export interface ModelRun {
   /** The one the map draws. Every other run is unreachable from the app. */
   current: boolean;
   documentCount: number;
+  /**
+   * The engine's verdict from the run's own `run_report.yaml`: ok, failed or
+   * with_errors. Empty for runs older than the report.
+   */
+  status: string;
+  errorCount: number;
 }
 
 /** What a clean-up took away. */

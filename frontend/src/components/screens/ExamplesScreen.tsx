@@ -37,10 +37,16 @@ const CRITERION_FIELDS: Field[] = [
       'to letters, digits and underscores.',
   },
   {
-    name: 'nombre',
+    name: 'name',
     what:
       'A readable name for the engine’s own report. Nothing is scored differently for it. ' +
-      'The key is Spanish because the engine is.',
+      '(Older files call it `nombre`; the engine now only reads `name`.)',
+  },
+  {
+    name: 'agg',
+    what:
+      'How its subgroups combine: `wmean` (the default, a weighted mean), `min`, `max`, ' +
+      '`gmean` (geometric mean) or `sum`.',
   },
   {
     name: 'weight',
@@ -59,7 +65,7 @@ const CRITERION_FIELDS: Field[] = [
 
 const SUBGROUP_FIELDS: Field[] = [
   { name: 'key', required: true, what: 'Its name, and its folder under the criterion’s.' },
-  { name: 'nombre', what: 'A readable name, as above.' },
+  { name: 'name', what: 'A readable name, as above.' },
   {
     name: 'weight',
     required: true,
@@ -67,18 +73,24 @@ const SUBGROUP_FIELDS: Field[] = [
   },
   { name: 'leaves', required: true, what: 'The variables it scores.' },
   {
-    name: 'combine',
+    name: 'agg',
     what:
-      '`min` makes the worst leaf decide instead of the average — one protected area is ' +
-      'enough to rule a hexagon down, however good the rest is. Anything else means the ' +
-      'default, a weighted mean.',
+      'How its leaves combine. `min` makes the worst leaf decide instead of the average: ' +
+      'one protected area is enough to rule a hexagon down, however good the rest is. ' +
+      'Also `wmean` (the default), `max`, `gmean` and `sum`. (Older files call it ' +
+      '`combine`.)',
+  },
+  {
+    name: 'on_missing',
+    what:
+      'What a hexagon missing some leaves gets: `renormalize` (the default) averages the ' +
+      'ones it has; `require` leaves it without a score.',
   },
   {
     name: 'absent',
     what:
-      'The score for hexagons the variable does not cover at all. Presence layers want ' +
-      '`absent: 5`: nothing found there is the good case, and without this they would ' +
-      'score nothing rather than well.',
+      'A score for hexagons none of its leaves cover. Each leaf has its own `absent` too, ' +
+      'which is the usual place for it.',
   },
   {
     name: 'domain',
@@ -143,18 +155,21 @@ const LEAF_FIELDS: Field[] = [
   {
     name: 'map',
     what:
-      'For `type: map`. An exact value to a score: {"1": 0} is the usual presence layer — ' +
-      'where it is present, score 0.',
+      'For `type: map`. An exact value to a score from 1 to 5: {"1": 1} is the usual ' +
+      'presence layer, where being present is the worst case.',
   },
   {
     name: 'direction',
     what: '`cost` inverts a `minmax` or `zscore` leaf, for a variable where high is bad.',
   },
   {
-    name: 'impute',
+    name: 'absent',
     what:
-      'How to fill gaps before scoring. The file’s own top-level `fill` covers every leaf ' +
-      'already; this overrides it for one.',
+      'The score, 1 to 5, of a hexagon with no value for this variable. Every leaf should ' +
+      'have one: without it such a hexagon gets no score and the run reports an error. 5 ' +
+      'when no data means no restriction (no hazard recorded, no protected area), 1 when it ' +
+      'means not knowing. A new model file takes it from the variable’s settings on the ' +
+      'Data screen.',
   },
 ];
 
@@ -340,10 +355,10 @@ export function ExamplesScreen() {
           <section className="reference-block">
             <h2>Zoning</h2>
             <p className="reference-lede">
-              Top-level keys, not part of a criterion. They do not score anything — they remove
-              hexagons before the model runs. Having any of them in the file is also what makes
-              the engine treat it as self-contained, rather than falling back to its own{' '}
-              <code>zoning.yaml</code>, which names variables your project does not have.
+              Top-level keys, not part of a criterion. They do not score anything: the
+              exclusions remove hexagons before the model runs (they show as -1 on the map),
+              and the alerts mark them (-2) without changing their score. The engine reads them
+              from this same file.
             </p>
             <FieldTable fields={ZONING} />
           </section>

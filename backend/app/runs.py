@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import engine_state, pipeline, store
+from . import engine_state, pipeline, store, variable_settings
 
 #: How many lines of the script's output to keep for the UI. Enough to show
 #: what a failure said without holding a thirteen-minute transcript in memory.
@@ -122,6 +122,9 @@ class RunState:
     #: True when the H3 master itself is being rebuilt — minutes, not seconds.
     rebuildEverything: bool = False
     logTail: list[str] = field(default_factory=list)
+    #: The engine's own report of the run, once it has ended (see
+    #: `pipeline.read_report`).
+    report: dict | None = None
 
 
 class Run:
@@ -218,6 +221,7 @@ class Run:
                 resetReason=state.resetReason,
                 rebuildEverything=state.rebuildEverything,
                 logTail=list(state.logTail),
+                report=dict(state.report) if state.report else None,
             )
 
     @property
@@ -420,6 +424,7 @@ class Run:
                     "written is on disk; process again to carry on. " + _not_ours(folder)
                 )
             self._state.finishedAt = time.time()
+        self._absorb_report(self._state.executionId)
         self._recompute()
 
     def _run(self) -> None:
@@ -435,6 +440,10 @@ class Run:
             )
             if self.data_dir:
                 extra["DATA_DIR"] = str(self.data_dir)
+                # The fill per variable, written by the process route (see
+                # `variable_settings`); the engine reads it at step 13.5.
+                if (self.data_dir / variable_settings.TRANSFORM_RELPATH).is_file():
+                    extra["PROJECT_TRANSFORM"] = variable_settings.CONTAINER_TRANSFORM
             env = pipeline.run_full_env(extra=extra)
         try:
             process = subprocess.Popen(
@@ -531,8 +540,10 @@ class Run:
                     [f"The pipeline exited with code {code}."] + (flagged[-6:] or lines[-8:])
                 )
             self._state.finishedAt = time.time()
-            finished_ok = self._state.status == "done"
             execution = self._state.executionId
+        self._absorb_report(execution)
+        with self._lock:
+            finished_ok = self._state.status == "done"
         self._recompute()
 
         # The engine's database now holds this project's variables — or, if
@@ -550,6 +561,27 @@ class Run:
             finished_ok,
             engine_state.output_set(project) if project else [],
         )
+
+    def _absorb_report(self, execution_id: str) -> None:
+        """
+        Fold in the engine's final report, written as its runner exits.
+
+        A clean exit whose report says `with_errors` stays "done": the run
+        finished and its outputs are there. The report's errors go into
+        `error` so they are not missed, the way skipped files are counted.
+        """
+        report = pipeline.read_report(execution_id)
+        if report is None:
+            return
+        with self._lock:
+            self._state.report = report
+            if report["status"] == "with_errors" and self._state.status == "done":
+                self._state.statusText = "Finished, with errors in the results"
+                if not self._state.error:
+                    self._state.error = "\n".join(
+                        [f"The engine reported {report['errorCount']} error(s) in the "
+                         f"results ({report['path']}):"] + report["errors"]
+                    )
 
     # ── the full transcript on disk ───────────────────────────────────────
 
@@ -750,6 +782,8 @@ def adopt(project: store.ProjectRow) -> Run | None:
                 if stage.status == "pending":
                     stage.status = unfinished
 
+    if not alive:
+        run._absorb_report(folder.name)
     run._recompute()
     return run
 

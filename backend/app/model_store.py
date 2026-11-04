@@ -54,7 +54,6 @@ TOP_KEYS = frozenset(
         "markers",
         "global_agg",
         "global_on_missing",
-        "fill",
         "on_missing",
         "exclude_columns",
         "exclude_thresholds",
@@ -63,14 +62,13 @@ TOP_KEYS = frozenset(
         "prioritized",
     }
 )
-CRITERION_KEYS = frozenset({"key", "nombre", "weight", "subgroups", "agg", "on_missing"})
+CRITERION_KEYS = frozenset({"key", "name", "weight", "subgroups", "agg", "on_missing"})
 SUBGROUP_KEYS = frozenset(
     {
         "key",
-        "nombre",
+        "name",
         "weight",
         "leaves",
-        "combine",
         "normalize",
         "absent",
         "domain",
@@ -86,7 +84,7 @@ LEAF_KEYS = frozenset(
         "site",
         "type",
         "weight",
-        "nombre",
+        "name",
         "bins",
         "map",
         "absent",
@@ -96,7 +94,6 @@ LEAF_KEYS = frozenset(
         "vmin",
         "vmax",
         "clip",
-        "impute",
     }
 )
 
@@ -104,6 +101,28 @@ LEAF_KEYS = frozenset(
 LEAF_TYPES = frozenset({"range", "map", "direct", "minmax", "zscore"})
 #: Which half of the country a leaf applies to.
 SITES = frozenset({"both", "onshore", "offshore"})
+#: How a subgroup or criterion combines what is under it, and what it does
+#: when a hexagon is missing some of it.
+AGGREGATIONS = frozenset({"wmean", "min", "max", "gmean", "sum"})
+ON_MISSING = frozenset({"renormalize", "require"})
+
+#: Every fixed score in the model is on this scale (`bins`, `map`, `absent`,
+#: `out_min`/`out_max`). -1 and -2 are the engine's own markers for excluded
+#: and alerted hexagons, never scores.
+SCORE_MIN, SCORE_MAX = 1.0, 5.0
+
+#: Keys an older version of the schema had, and where that idea lives now.
+#: Said explicitly, because the engine only calls them unknown.
+RETIRED_KEYS = {
+    "fill": (
+        "filling missing data moved out of the model: the engine fills the master "
+        "table while processing (its project's transform.yaml). Here, `absent` "
+        "scores whatever is still empty."
+    ),
+    "impute": "replaced by the fill step of the processing; use `absent` here.",
+    "nombre": "renamed `name`.",
+    "combine": "renamed `agg` (wmean, min, max, gmean or sum).",
+}
 
 #: The engine's tolerance when it checks that weights add to 1.
 WEIGHT_TOLERANCE = 0.005
@@ -162,10 +181,14 @@ def master_variables(project: store.ProjectRow) -> list[MasterVariable]:
         column = (row.get("columna_maestra") or "").strip()
         if not column:
             continue
+        # `codigo` is the variable's code (AMB_001); the engine's configs write
+        # it hyphenated (AMB-001). `nombre_columna` is the value column inside
+        # the source file (often just `presencia`), not a code.
+        code = (row.get("codigo") or column).strip()
         found.append(
             MasterVariable(
                 column=column,
-                code=(row.get("nombre_columna") or column).strip(),
+                code=code.replace("_", "-", 1),
                 dimension=(row.get("dimension") or "").strip(),
             )
         )
@@ -230,22 +253,27 @@ _PREAMBLE = """\
 #   map      an exact value to a score, for categories.
 #   direct   the value already is a 1-5 score; use it as it stands.
 #
-# On a minmax or zscore leaf, `direction: cost` inverts it — for a variable
+# On a minmax or zscore leaf, `direction: cost` inverts it, for a variable
 # where a high value is worse. On a range leaf, write the cuts whichever way
 # round you mean.
+#
+# Every leaf also has `absent`: the 1-5 score of a hexagon with no value for
+# it. 5 when no data there means no restriction, 1 when it means not knowing
+# (the conservative choice). Each one below starts from the value set for the
+# variable on the Data screen. Filling missing data is not done here: the
+# engine does it while processing, as set there too, and `absent` scores
+# what is still empty.
 #
 # Edit this freely. The engine reads the file, so it has the final word on
 # what is in it; this app only checks the shape before handing it over.
 """
 
-#: The zoning block, which makes the file self-contained.
+#: The zoning block. The engine reads it from this same file.
 _ZONING = """\
 # Zoning: which hexagons are ruled out before scoring, and which codes must
-# be kept whatever else is dropped. Empty, so nothing is excluded.
-#
-# These keys being here at all is what makes the engine treat this file as
-# self-contained. Without them it falls back to its own MCDA/config/zoning.yaml,
-# which names variables this project does not have.
+# be kept whatever else is dropped. Empty, so nothing is excluded. The engine
+# reads it from this same file (alert_columns and alert_thresholds also go
+# here, to mark hexagons with -2 without changing their score).
 exclude_columns: []
 exclude_thresholds: []
 prioritized: []
@@ -260,20 +288,20 @@ _EMPTY_MODEL = """\
 #
 # criteria:
 #   - key: example
-#     nombre: An example criterion
+#     name: An example criterion
 #     weight: 1.0
 #     subgroups:
 #       - key: variables
 #         weight: 1.0
 #         leaves:
-#           - {code: ABC-001, column: ABC_001, site: both, type: minmax}
+#           - {code: ABC-001, column: ABC_001, site: both, type: minmax, absent: 1}
 
 criteria: []
 
 """
 
 
-def default_model(project: store.ProjectRow) -> str:
+def default_model(project: store.ProjectRow, absent: dict[str, float] | None = None) -> str:
     """
     A runnable model built from what this project actually holds.
 
@@ -282,7 +310,11 @@ def default_model(project: store.ProjectRow) -> str:
     advance, since it reads the range out of the data. So the file the screen
     opens with is a model the engine can score, rather than an example of a
     model about something else.
+
+    `absent` is each column's score for a hexagon with no value, as set per
+    variable on the Data screen; a column not in it gets 1.
     """
+    absent = absent or {}
     found = master_variables(project)
     from_disk = bool(found)
     if not found:
@@ -313,10 +345,12 @@ def default_model(project: store.ProjectRow) -> str:
     for (dimension, variables), weight in zip(by_dimension.items(), dimension_weights):
         lines.append(f"  - key: {dimension.lower()}\n")
         if dimension != dimension.lower():
-            lines.append(f"    nombre: {dimension}\n")
+            lines.append(f"    name: {dimension}\n")
         lines.append(f"    weight: {weight}\n")
         lines.append("    subgroups:\n")
-        lines.append("      - key: variables\n")
+        # Named after the criterion: the engine names its outputs by subgroup
+        # key, so the same key under two criteria would overwrite each other.
+        lines.append(f"      - key: {dimension.lower()}_variables\n")
         lines.append("        weight: 1.0\n")
         lines.append("        leaves:\n")
         leaf_weights = _shares(len(variables))
@@ -324,7 +358,8 @@ def default_model(project: store.ProjectRow) -> str:
             weight_part = f", weight: {leaf_weight}" if len(variables) > 1 else ""
             lines.append(
                 f"          - {{code: {variable.code}, column: {variable.column}, "
-                f"site: both, type: minmax{weight_part}}}\n"
+                f"site: both, type: minmax, absent: {absent.get(variable.column, 1.0):g}"
+                f"{weight_part}}}\n"
             )
         lines.append("\n")
 
@@ -347,7 +382,9 @@ def model_path(project: store.ProjectRow) -> Path:
     return root / MODEL_DIRNAME / MODEL_FILENAME
 
 
-def read_model(project: store.ProjectRow) -> tuple[str, bool]:
+def read_model(
+    project: store.ProjectRow, absent: dict[str, float] | None = None
+) -> tuple[str, bool]:
     """
     The file's contents, and whether it had to be created.
 
@@ -361,7 +398,7 @@ def read_model(project: store.ProjectRow) -> tuple[str, bool]:
     if path.exists():
         return path.read_text(encoding="utf-8"), False
 
-    seeded = default_model(project)
+    seeded = default_model(project, absent)
     write_model(project, seeded)
     return seeded, True
 
@@ -463,11 +500,14 @@ def _check_unknown_keys(
     if not isinstance(node, dict):
         return
     for key in node:
-        if str(key) not in allowed:
-            problems.warn(
-                f"{where}: `{key}` is not a key the engine reads, so it will be ignored.",
-                _line_of(node, key),
-            )
+        if str(key) in allowed:
+            continue
+        retired = RETIRED_KEYS.get(str(key))
+        problems.warn(
+            f"{where}: `{key}` is not a key the engine reads, so it will be ignored"
+            + (f": {retired}" if retired else "."),
+            _line_of(node, key),
+        )
 
 
 def _check_bins(problems: _Problems, bins: object, where: str, line: int | None) -> None:
@@ -564,6 +604,9 @@ def _check_leaf(problems: _Problems, leaf: object, where: str, line: int | None)
     if weight is not None and not _is_number(weight):
         problems.error(f"{where}: `weight` must be a number.", _line_of(leaf, "weight") or line)
 
+    _check_absent(problems, leaf, where, line, required=True)
+    _check_scale(problems, leaf, where, line)
+
     direction = leaf.get("direction")
     if direction is not None and str(direction) not in {"cost", "benefit"}:
         problems.warn(
@@ -573,15 +616,64 @@ def _check_leaf(problems: _Problems, leaf: object, where: str, line: int | None)
         )
 
 
+def _check_absent(
+    problems: _Problems, node: dict, where: str, line: int | None, *, required: bool
+) -> None:
+    """
+    `absent`: the 1-5 score of a hexagon with no value for this leaf.
+
+    The engine asks for it on every leaf, even one whose data comes complete,
+    so the model says variable by variable what a missing value means: 5 when
+    having nothing there means no restriction, 1 when it means not knowing
+    (the conservative choice). Without it, a hexagon with no value is left
+    without a score and the run report lists it as an error.
+    """
+    absent = node.get("absent")
+    at = _line_of(node, "absent") or line
+    if absent is None:
+        if required:
+            problems.warn(
+                f"{where}: no `absent`. A hexagon with no value here gets no score; "
+                "set the score it should get, 1 to 5 (5 if no data means no "
+                "restriction, 1 if it means not knowing).",
+                line,
+            )
+        return
+    if not _is_number(absent):
+        problems.error(f"{where}: `absent` must be a score from 1 to 5.", at)
+
+
+def _check_scale(problems: _Problems, leaf: dict, where: str, line: int | None) -> None:
+    """Fixed scores outside 1-5, the same rule the engine and its lint apply."""
+
+    def check(what: str, value: object, at: int | None) -> None:
+        if _is_number(value) and not SCORE_MIN <= float(value) <= SCORE_MAX:
+            problems.warn(f"{where}: {what} = {value} is outside the 1-5 scale.", at)
+
+    bins = leaf.get("bins")
+    if isinstance(bins, list):
+        for index, row in enumerate(bins):
+            if isinstance(row, list) and len(row) == 3:
+                check(f"bin {index + 1}'s score", row[2], _line_of(bins, index) or line)
+    mapping = leaf.get("map")
+    if isinstance(mapping, dict):
+        for key, score in mapping.items():
+            check(f"`map` entry `{key}`", score, _line_of(mapping, key) or line)
+    for key in ("absent", "out_min", "out_max"):
+        if key in leaf:
+            check(f"`{key}`", leaf[key], _line_of(leaf, key) or line)
+
+
 def _leaf_weight_sums(problems: _Problems, subgroup: dict, where: str) -> None:
     """
     Whether a subgroup's leaves add to 1, with the engine's own exemptions.
 
-    From `validate_weights`: a subgroup that normalizes, or combines with
-    `min`, is not a weighted average at all; and onshore and offshore leaves
-    never cover the same hexagon, so each domain is summed on its own.
+    From `validate_weights`: a subgroup that normalizes, or aggregates with
+    `min` or `max`, is not a weighted average at all; and onshore and
+    offshore leaves never cover the same hexagon, so each domain is summed on
+    its own.
     """
-    if subgroup.get("normalize") is not None or subgroup.get("combine") == "min":
+    if subgroup.get("normalize") is not None or subgroup.get("agg") in ("min", "max"):
         return
     leaves = subgroup.get("leaves")
     if not isinstance(leaves, list) or not leaves:
@@ -617,6 +709,20 @@ def _leaf_weight_sums(problems: _Problems, subgroup: dict, where: str) -> None:
             )
 
 
+def _check_choice(
+    problems: _Problems, node: dict, key: str, allowed: frozenset[str], where: str,
+    line: int | None,
+) -> None:
+    """A key whose value must be one of a fixed list, as the engine checks it."""
+    value = node.get(key)
+    if value is not None and str(value) not in allowed:
+        problems.error(
+            f"{where}: `{key}: {value}` is not one the engine knows. Use one of "
+            f"{', '.join(sorted(allowed))}.",
+            _line_of(node, key) or line,
+        )
+
+
 def _check_subgroup(problems: _Problems, subgroup: object, where: str, line: int | None) -> None:
     if not isinstance(subgroup, dict):
         problems.error(f"{where} must be a mapping.", line)
@@ -637,13 +743,9 @@ def _check_subgroup(problems: _Problems, subgroup: object, where: str, line: int
     elif not _is_number(weight):
         problems.error(f"{where}: `weight` must be a number.", _line_of(subgroup, "weight") or line)
 
-    combine = subgroup.get("combine")
-    if combine is not None and str(combine) not in {"min", "nanmean"}:
-        problems.warn(
-            f"{where}: `combine` is read only as `min`. `{combine}` means the default, "
-            "a weighted mean.",
-            _line_of(subgroup, "combine") or line,
-        )
+    _check_choice(problems, subgroup, "agg", AGGREGATIONS, where, line)
+    _check_choice(problems, subgroup, "on_missing", ON_MISSING, where, line)
+    _check_absent(problems, subgroup, where, line, required=False)
 
     domain = subgroup.get("domain")
     if domain is not None and str(domain) not in SITES:
@@ -724,6 +826,11 @@ def structure_errors(text: str) -> list[dict[str, object]]:
         )
         return problems.found
 
+    _check_choice(problems, document, "global_agg", AGGREGATIONS, "top level", None)
+    for key in ("global_on_missing", "on_missing"):
+        _check_choice(problems, document, key, ON_MISSING, "top level", None)
+
+    seen_subgroups: dict[str, str] = {}
     for index, criterion in enumerate(criteria):
         line = _line_of(criteria, index) or criteria_line
         if not isinstance(criterion, dict):
@@ -733,6 +840,8 @@ def structure_errors(text: str) -> list[dict[str, object]]:
         key = str(criterion.get("key", "")).strip()
         where = key or f"criterion {index + 1}"
         _check_unknown_keys(problems, criterion, CRITERION_KEYS, where)
+        _check_choice(problems, criterion, "agg", AGGREGATIONS, where, line)
+        _check_choice(problems, criterion, "on_missing", ON_MISSING, where, line)
 
         if not key:
             problems.error(f"{where} needs a `key`: its name in the results.", line)
@@ -765,6 +874,16 @@ def structure_errors(text: str) -> list[dict[str, object]]:
             continue
 
         for position, subgroup in enumerate(subgroups):
+            sub_key = str(subgroup.get("key", "")).strip() if isinstance(subgroup, dict) else ""
+            if sub_key and sub_key in seen_subgroups:
+                problems.warn(
+                    f"{where}/{sub_key}: the same subgroup key is used under "
+                    f"{seen_subgroups[sub_key]}. The engine names its outputs by it, so "
+                    "one would overwrite the other.",
+                    _line_of(subgroups, position) or subgroups_line,
+                )
+            elif sub_key:
+                seen_subgroups[sub_key] = where
             label = (
                 str(subgroup.get("key", "")).strip() or f"subgroup {position + 1}"
                 if isinstance(subgroup, dict)

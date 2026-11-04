@@ -82,20 +82,21 @@ const formatWeight = (weight: number | null): string =>
   weight === null ? '' : String(Number(weight.toFixed(4)));
 
 /**
- * Whether a `nombre` is just the key again.
+ * Whether a `name` is just the key again.
  *
  * A generated file names a criterion after the dimension folder it came from,
  * so the key and the name can be the same word in different cases. Showing it
  * twice reads as a mistake.
  */
-const sameName = (key: string, nombre: string): boolean =>
-  nombre.trim().toLowerCase() === key.trim().toLowerCase();
+const sameName = (key: string, name: string): boolean =>
+  name.trim().toLowerCase() === key.trim().toLowerCase();
 
 function leafBadges(leaf: ModelLeaf): string[] {
   const badges: string[] = [];
   if (leaf.site !== 'both') badges.push(leaf.site);
   if (leaf.steps > 0) badges.push(`${leaf.steps} ${leaf.type === 'map' ? 'values' : 'cuts'}`);
   if (leaf.inverted) badges.push('inverted');
+  if (leaf.absent !== null) badges.push(`absent ${leaf.absent}`);
   return badges;
 }
 
@@ -148,7 +149,7 @@ export function buildDiagram(criteria: ModelCriterion[]): Diagram {
         id: `c${criterionIndex}`,
         kind: 'criterion',
         label: criterion.key,
-        detail: sameName(criterion.key, criterion.nombre) ? '' : criterion.nombre,
+        detail: sameName(criterion.key, criterion.name) ? '' : criterion.name,
         weight: formatWeight(criterion.weight),
         type: '',
         badges: [],
@@ -170,7 +171,7 @@ export function buildDiagram(criteria: ModelCriterion[]): Diagram {
           id: `c${criterionIndex}s${subgroupIndex}`,
           kind: 'subgroup',
           label: subgroup.key,
-          detail: sameName(subgroup.key, subgroup.nombre) ? '' : subgroup.nombre,
+          detail: sameName(subgroup.key, subgroup.name) ? '' : subgroup.name,
           weight: formatWeight(subgroup.weight),
           type: '',
           badges: subgroupBadges(subgroup),

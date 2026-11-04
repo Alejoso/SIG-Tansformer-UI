@@ -479,10 +479,23 @@ class ModelLayer:
 
 
 #: Where the model puts each level of its own result. It renders the whole
-#: model and each criterion separately — and each subcriterion too, which
+#: model and each criterion separately, and each subcriterion too, which
 #: this does not read: one map per criterion is what the sidebar shows.
-MODEL_WHOLE = "criterios/global"
-MODEL_CRITERIA = "criterios"
+#:
+#: `criteria/` since the engine moved its outputs to English (2026-11-03);
+#: runs made before that have `criterios/`, and are still read.
+MODEL_CRITERIA_DIRS = ("criteria", "criterios")
+#: Folders inside the criteria folder that are not criteria: the whole model,
+#: and the alert layer (`alert`, or `alerta` in older runs).
+MODEL_NOT_CRITERIA = frozenset({"global", "alert", "alerta"})
+
+
+def _criteria_dir(base: Path) -> Path | None:
+    """The run's criteria folder, in whichever naming the run was made with."""
+    for name in MODEL_CRITERIA_DIRS:
+        if (base / name).is_dir():
+            return base / name
+    return None
 
 
 def _model_document(folder: Path) -> Path | None:
@@ -499,11 +512,11 @@ def scan_model(project: store.ProjectRow, run: str | None = None) -> ModelLayer 
     """
     The newest model run: the whole model, and one map per criterion.
 
-    `criterios/global` is the whole model and `criterios/<key>` is each
-    criterion, named after the keys in the config — so what the sidebar shows
+    `criteria/global` is the whole model and `criteria/<key>` is each
+    criterion, named after the keys in the config, so what the sidebar shows
     is what was written in the model file.
 
-    The engine also renders `subcriterios/<key>/<sub>`, which this does not
+    The engine also renders `subcriteria/<key>/<sub>`, which this does not
     read. One map per criterion is what the sidebar is for; the subcriteria
     are still on disk for anyone who wants to open them.
     """
@@ -516,13 +529,14 @@ def scan_model(project: store.ProjectRow, run: str | None = None) -> ModelLayer 
         return None
 
     base = root / MCDA_RUNS_DIRNAME / chosen
-    whole = _model_document(base / MODEL_WHOLE) if (base / MODEL_WHOLE).is_dir() else None
+    criteria_dir = _criteria_dir(base)
+    whole_dir = criteria_dir / "global" if criteria_dir else None
+    whole = _model_document(whole_dir) if whole_dir and whole_dir.is_dir() else None
 
     criteria: list[ModelLayer] = []
-    criteria_dir = base / MODEL_CRITERIA
-    if criteria_dir.is_dir():
+    if criteria_dir is not None:
         for folder in sorted(p for p in criteria_dir.iterdir() if p.is_dir()):
-            if folder.name == "global":
+            if folder.name in MODEL_NOT_CRITERIA:
                 continue
             document = _model_document(folder)
             if document is None:
@@ -593,6 +607,11 @@ class ModelRun:
     current: bool
     #: How many documents it holds, which is what the size is.
     documentCount: int
+    #: The engine's own verdict, from the `run_report.yaml` it copies into
+    #: the run's folder: ok, failed or with_errors. Empty for runs made
+    #: before the engine wrote one.
+    status: str = ""
+    errorCount: int = 0
 
 
 def folder_size(folder: Path) -> tuple[int, int]:
@@ -632,6 +651,7 @@ def model_runs(project: store.ProjectRow) -> list[ModelRun]:
             modified = folder.stat().st_mtime
         except OSError:
             modified = 0.0
+        status, errors = _run_verdict(folder)
         found.append(
             ModelRun(
                 id=name,
@@ -639,9 +659,124 @@ def model_runs(project: store.ProjectRow) -> list[ModelRun]:
                 modifiedAt=modified,
                 current=index == 0,
                 documentCount=count,
+                status=status,
+                errorCount=errors,
             )
         )
     return found
+
+
+def _run_report(folder: Path) -> Path | None:
+    """
+    A model run's `run_report.yaml`: in its folder when the engine copied it
+    there, otherwise in the engine's own logs under the same id. The engine
+    only copies it into run folders it knows (its own `MCDA/runs/`), and this
+    app sends each run to the project's folder, named after the run's id.
+    """
+    inside = folder / "run_report.yaml"
+    if inside.is_file():
+        return inside
+    from . import pipeline  # noqa: PLC0415 - pipeline is heavier and only needed here
+
+    logged = pipeline.report_path(folder.name)
+    return logged if logged.is_file() else None
+
+
+def _run_verdict(folder: Path) -> tuple[str, int]:
+    """Status and error count from a run's `run_report.yaml`, if any."""
+    report = _run_report(folder)
+    if report is None:
+        return "", 0
+    from ruamel.yaml import YAML  # noqa: PLC0415
+
+    try:
+        data = YAML(typ="safe").load(report.read_text(encoding="utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001 - an unreadable report is just "no verdict"
+        return "", 0
+    if not isinstance(data, dict):
+        return "", 0
+    summary = data.get("summary") or {}
+    return str(data.get("status", "")), int(summary.get("errors") or 0)
+
+
+@dataclass
+class RunFile:
+    """One file a model run wrote, for the list of results to open or download."""
+
+    #: Relative to the run's folder, with forward slashes.
+    path: str
+    sizeBytes: int
+    #: report, table, map, archive or other: what it is for, from its name.
+    kind: str
+
+
+#: What a file is, by how it ends. Checked in order, so the double suffixes
+#: (`.h3.parquet`, `.h3.html`) come first.
+_KINDS = (
+    ("run_report.yaml", "report"),
+    ("run.yaml", "report"),
+    ("config_used.yaml", "report"),
+    (".error.txt", "report"),
+    (".h3.html", "map"),
+    (".html", "map"),
+    (".h3.parquet", "table"),
+    (".parquet", "table"),
+    (".csv", "table"),
+    (".zip", "archive"),
+)
+
+
+def _kind_of(name: str) -> str:
+    for suffix, kind in _KINDS:
+        if name.endswith(suffix):
+            return kind
+    return "other"
+
+
+def model_run_files(project: store.ProjectRow, run_id: str) -> list[RunFile] | None:
+    """
+    Every file in one run's folder, reports first, then tables, maps and the
+    rest. None when there is no such run.
+    """
+    folder = model_run_path(project, run_id)
+    if folder is None:
+        return None
+    order = {"report": 0, "table": 1, "archive": 2, "map": 3, "other": 4}
+    found = []
+    for item in folder.rglob("*"):
+        if not item.is_file():
+            continue
+        relative = item.relative_to(folder).as_posix()
+        try:
+            size = item.stat().st_size
+        except OSError:
+            size = 0
+        found.append(RunFile(path=relative, sizeBytes=size, kind=_kind_of(item.name)))
+    report = _run_report(folder)
+    if report is not None and report.parent != folder:
+        found.append(RunFile(path=report.name, sizeBytes=report.stat().st_size, kind="report"))
+    found.sort(key=lambda entry: (order.get(entry.kind, 9), entry.path))
+    return found
+
+
+def model_run_file(project: store.ProjectRow, run_id: str, relative: str) -> Path | None:
+    """
+    One file of a run, or None. The path has to resolve inside the run's own
+    folder: it comes from a URL, and `..` must not walk out of it.
+    """
+    folder = model_run_path(project, run_id)
+    if folder is None:
+        return None
+    base = folder.resolve()
+    candidate = (folder / relative).resolve()
+    if candidate != base and base not in candidate.parents:
+        return None
+    if candidate.is_file():
+        return candidate
+    # The report lives in the engine's logs when it was not copied in.
+    if relative == "run_report.yaml":
+        return _run_report(folder)
+    return None
 
 
 def model_run_path(project: store.ProjectRow, run_id: str) -> Path | None:

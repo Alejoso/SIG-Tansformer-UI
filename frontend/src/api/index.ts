@@ -29,7 +29,9 @@ import type {
   Project,
   ProjectSettings,
   Resolutions,
+  RunFile,
   VariableProblem,
+  VariableSettings,
 } from '../types';
 
 /* ── projects ──────────────────────────────────────────────────────────── */
@@ -131,7 +133,7 @@ export const planImport = (
 export const addInputs = (
   projectId: string,
   dimension: string,
-  variables: { source: string; code: string; filename?: string }[],
+  variables: ({ source: string; code: string; filename?: string } & Partial<VariableSettings>)[],
 ): Promise<ImportOutcome> =>
   request(`/projects/${projectId}/inputs/batch`, {
     method: 'POST',
@@ -143,11 +145,37 @@ export const addInput = (
   path: string,
   dimension: string,
   code: string,
+  settings?: VariableSettings,
 ): Promise<InputVariable> =>
   request(`/projects/${projectId}/inputs`, {
     method: 'POST',
-    body: JSON.stringify({ path, dimension, code }),
+    body: JSON.stringify({ path, dimension, code, ...settings }),
   });
+
+/**
+ * LIVE: PUT /api/projects/{id}/inputs/{dimension}/{code}/settings
+ *
+ * How a variable's gaps are filled while processing, and what the model
+ * scores where one is left. Takes effect on the next run.
+ */
+export const saveVariableSettings = (
+  projectId: string,
+  dimension: string,
+  code: string,
+  settings: VariableSettings,
+): Promise<InputVariable> =>
+  request(`/projects/${projectId}/inputs/${dimension}/${code}/settings`, {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  });
+
+/** LIVE: DELETE /api/projects/{id}/inputs/{dimension}/{code}/settings: back to the defaults. */
+export const resetVariableSettings = (
+  projectId: string,
+  dimension: string,
+  code: string,
+): Promise<InputVariable> =>
+  request(`/projects/${projectId}/inputs/${dimension}/${code}/settings`, { method: 'DELETE' });
 
 /**
  * ENDPOINT: DELETE /api/projects/{id}/inputs/{dimension}/{code}
@@ -408,6 +436,35 @@ export const pruneModelRuns = (projectId: string, keep: number): Promise<ModelRu
     method: 'POST',
     body: JSON.stringify({ keep }),
   });
+
+/**
+ * LIVE: GET /api/projects/{id}/model/runs/{runId}/files
+ *
+ * What one run wrote: its report and record, the tables, the zip and the
+ * maps. Reports first.
+ */
+export const listModelRunFiles = (projectId: string, runId: string): Promise<RunFile[]> =>
+  request(`/projects/${projectId}/model/runs/${encodeURIComponent(runId)}/files`);
+
+/**
+ * The address of one file of a run: text files (reports, CSV) open in the
+ * browser, the rest download. `download` forces a download either way.
+ */
+export const modelRunFileUrl = (
+  projectId: string,
+  runId: string,
+  path: string,
+  download = false,
+): string =>
+  `${API_BASE}/projects/${projectId}/model/runs/${encodeURIComponent(runId)}/files/` +
+  `${path.split('/').map(encodeURIComponent).join('/')}${download ? '?download=true' : ''}`;
+
+/**
+ * The address of a run's final report (`run_report.yaml`), by its id: the
+ * processing and the model alike.
+ */
+export const runReportUrl = (executionId: string): string =>
+  `${API_BASE}/runs/${encodeURIComponent(executionId)}/report`;
 
 /** LIVE: DELETE /api/projects/{id}/model/runs/{runId} */
 export const removeModelRun = (

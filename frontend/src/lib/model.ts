@@ -86,6 +86,7 @@ function toLeaf(body: unknown, index: number): ModelLeaf | null {
     weight: asNumber(body.weight),
     steps: stepsOf(body, type),
     inverted: asString(body.direction) === 'cost',
+    absent: asNumber(body.absent),
   };
 }
 
@@ -100,9 +101,11 @@ function toSubgroup(body: unknown, index: number): ModelSubgroup | null {
 
   return {
     key: asString(body.key) || `subgroup ${index + 1}`,
-    nombre: asString(body.nombre),
+    // `nombre` and `combine` are the names an older engine read; a file
+    // written for it still draws, and the problems list says to rename them.
+    name: asString(body.name) || asString(body.nombre),
     weight: asNumber(body.weight),
-    worstWins: asString(body.combine) === 'min',
+    worstWins: (asString(body.agg) || asString(body.combine)) === 'min',
     absent: asNumber(body.absent),
     normalized: body.normalize !== undefined && body.normalize !== null,
     leaves,
@@ -120,7 +123,7 @@ function toCriterion(body: unknown, index: number): ModelCriterion | null {
 
   return {
     key: asString(body.key) || `criterion ${index + 1}`,
-    nombre: asString(body.nombre),
+    name: asString(body.name) || asString(body.nombre),
     weight: asNumber(body.weight),
     subgroups,
   };

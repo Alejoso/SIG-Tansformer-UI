@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime
@@ -101,6 +102,12 @@ STAGES: tuple[Stage, ...] = (
           "/app/app/tools/collect_verification_html.py", conditional=True, weight=5),
     Stage(13, "export_master", "Export the master table",
           "/app/app/pipeline/export_hexagonos_csv.py", args=("--limit", "0"), needs_db=True, weight=33),
+    # Fills the gaps of the exported master, as the engine project's
+    # transform.yaml says. A run driven from here has no engine project, so
+    # it finds nothing to fill and finishes at once; the leaves' `absent`
+    # scores what is still empty when the model runs.
+    Stage(13.5, "fill_master", "Fill the gaps of the master table",
+          "/app/app/pipeline/fill_master.py", needs_db=True, weight=38),
 )
 
 STAGES_BY_KEY = {stage.key: stage for stage in STAGES}
@@ -329,8 +336,35 @@ def read_env_file() -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         name, _, value = line.partition("=")
-        values[name.strip()] = value.strip()
+        values[name.strip()] = _shell_value(value.strip(), values)
     return values
+
+
+_REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _shell_value(raw: str, known: dict[str, str]) -> str:
+    """
+    One value as the engine's scripts see it once bash has sourced the file:
+    quotes removed, a trailing comment dropped, and `${NAME}` replaced by what
+    the file set before (or the environment). The engine's own `.env` builds
+    `DATABASE_URL` out of `${POSTGRES_DB}` and the rest, so the raw text is
+    not a URL anything can connect to.
+    """
+    if raw[:1] in ("'", '"'):
+        quote = raw[0]
+        end = raw.find(quote, 1)
+        body = raw[1:end] if end > 0 else raw[1:]
+        if quote == "'":
+            return body
+        raw = body
+    else:
+        raw = raw.split(" #", 1)[0].strip()
+    return _REFERENCE.sub(
+        lambda match: known.get(match.group(1) or match.group(2),
+                                os.environ.get(match.group(1) or match.group(2), "")),
+        raw,
+    )
 
 
 def write_env_values(values: dict[str, str]) -> bool:
@@ -342,12 +376,14 @@ def write_env_values(values: dict[str, str]) -> bool:
     interpolates `${H3_RES}` into the app service's `environment:` from here,
     and `env_file: .env` supplies the rest, `RENDER_H3_RES` among them.
 
-    `H3_RES` is the one that bites. `run_full.sh` compares the *host* value
-    against what the last master build recorded, but never forwards it to the
-    container — it is not in that script's `FORWARD_VARS` — so the build
-    itself uses whatever came from here. Exporting a different value without
-    writing it would make the script rebuild the master on every single run,
-    comparing a number the build never sees against the one it keeps writing.
+    `H3_RES` is the one that bites on older engines: their `run_full.sh`
+    compared the *host* value against what the last master build recorded
+    but never forwarded it to the container, so exporting a different value
+    without writing it here rebuilt the master on every run. The current
+    engine forwards it (and `run_mcda.sh` forwards `H3_RES` and
+    `RENDER_H3_RES` too), but the model's preprocesses and any container
+    started with `compose run` still read the file, so it stays the one
+    mechanism that covers every path.
 
     Existing lines are edited in place, keeping their position and the
     comments around them: this is a file the engine's own README explains, and
@@ -397,9 +433,23 @@ def database_url() -> str:
     "DATABASE_URL no configurada".
     """
     env = read_env_file()
+    # A POSTGRES_DB set where this server runs wins over the file, as it does
+    # for `run_full.sh`: the engine then treats it as a database of its own,
+    # next to the main one (and creates it), and the URL has to follow it or
+    # the Python stages would write to the main database.
+    wanted_db = os.environ.get("POSTGRES_DB", "").strip()
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
     if env.get("DATABASE_URL"):
-        return env["DATABASE_URL"]
+        url = env["DATABASE_URL"]
+        if wanted_db and wanted_db != env.get("POSTGRES_DB"):
+            base, _, query = url.partition("?")
+            url = base.rsplit("/", 1)[0] + "/" + wanted_db + (f"?{query}" if query else "")
+        return url
 
+    env.update({key: os.environ[key] for key in ("POSTGRES_USER", "POSTGRES_PASSWORD",
+                                                   "POSTGRES_DB", "DB_HOST", "DB_PORT")
+                if os.environ.get(key)})
     user = env.get("POSTGRES_USER", "")
     password = env.get("POSTGRES_PASSWORD", "")
     database = env.get("POSTGRES_DB", "")
@@ -447,6 +497,55 @@ def manifest_path(execution_id: str) -> Path:
     """Host-side path to a run's manifest, via the bind-mounted logs folder."""
     log_dir = Path(os.environ.get("MAPHEX_PIPELINE_LOG_DIR", PIPELINE_DIR / "logs"))
     return log_dir / execution_id / "run_manifest.jsonl"
+
+
+#: The final report both runners write for every run, finished or not:
+#: stage times, results, errors, warnings and the parameters it ran with.
+REPORT_FILE = "run_report.yaml"
+#: How many of its errors to carry into the run's state. The file has them all.
+REPORT_ERRORS = 10
+
+
+def report_path(execution_id: str) -> Path:
+    """Host-side path to a run's final report."""
+    return manifest_path(execution_id).parent / REPORT_FILE
+
+
+def read_report(execution_id: str) -> dict | None:
+    """
+    The engine's own verdict on a run, from its `run_report.yaml`.
+
+    Worth reading even when the script exits 0: the report says `with_errors`
+    when the run finished but something in its results is wrong (a leaf with
+    no column, hexagons left without a value), which no exit code shows.
+    None when there is no report, which is the case for engines older than
+    the report itself.
+    """
+    path = report_path(execution_id) if execution_id else None
+    if path is None or not path.is_file():
+        return None
+    from ruamel.yaml import YAML  # noqa: PLC0415 - only needed once a run ends
+
+    try:
+        data = YAML(typ="safe").load(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001 - a half-written or odd file is just "no report"
+        return None
+    if not isinstance(data, dict):
+        return None
+    summary = data.get("summary") or {}
+    errors = [
+        f"{item.get('script', '?')}: {item.get('message', '')}".strip()
+        for item in (data.get("errors") or [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "status": str(data.get("status", "")),
+        "path": str(path),
+        "duration": str(data.get("duration") or ""),
+        "errors": errors[:REPORT_ERRORS],
+        "errorCount": int(summary.get("errors") or len(errors)),
+        "warningCount": int(summary.get("warnings") or 0),
+    }
 
 
 # ── running the whole pipeline ────────────────────────────────────────────
@@ -523,6 +622,7 @@ STAGE_LOG_MARKERS: tuple[tuple[str, str, str], ...] = (
     ("generando renders html", "render_html", "running"),
     ("recopilando renders html", "collect_html", "running"),
     ("exportando tabla maestra", "export_master", "running"),
+    ("rellenando huecos de la tabla maestra", "fill_master", "running"),
 )
 
 
@@ -618,9 +718,10 @@ def reload_env(*, reset: bool, rebuild_everything: bool = False) -> dict[str, st
 
     They are separable:
 
-    * `RESET_ARCHIVOS=1` truncates `archivos`, `variables` and
+    * `RESET_FILES=1` truncates `archivos`, `variables` and
       `archivo_valores` and leaves the master alone. That is what switching
-      projects needs, and it is cheap.
+      projects needs, and it is cheap. (Older engines called it
+      `RESET_ARCHIVOS`; the current one ignores that name.)
     * `FORCE_MASTER_REBUILD=1` is only for when the master itself is wrong —
       and the script already detects that on its own, comparing H3_RES, the
       bbox flag and the boundaries' mtime against `pipeline_state`.
@@ -634,8 +735,19 @@ def reload_env(*, reset: bool, rebuild_everything: bool = False) -> dict[str, st
     return {
         # Off, not absent: `.env` sets it, and a value here wins.
         "FORCE_MASTER_REBUILD": "0",
-        "RESET_ARCHIVOS": "1" if reset else "0",
+        "RESET_FILES": "1" if reset else "0",
     }
+
+
+#: Set but empty, so neither runner loads a project of the engine's own.
+#:
+#: The engine keeps its projects in `projects/<name>/` and its `.env` may
+#: name a default one (`PROJECT=colombia`). Loaded, that project would bring
+#: its own data folder, database, region and fill rules into a run that is
+#: about this app's project. Both runners read an empty `PROJECT` as "no
+#: project" (`run_mcda.sh` also has `--no-project`), and then everything
+#: comes from `.env` and from what is passed here, `DATA_DIR` first.
+NO_ENGINE_PROJECT = {"PROJECT": ""}
 
 
 def run_full_env(*, skip_build: bool = True, extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -652,6 +764,7 @@ def run_full_env(*, skip_build: bool = True, extra: dict[str, str] | None = None
     says the script will use it — see `engine_data_dir`.
     """
     env = dict(os.environ)
+    env.update(NO_ENGINE_PROJECT)
     if skip_build:
         env["SKIP_BUILD"] = "1"
     # Unbuffered, or the script's children trickle out in 4 KB blocks and the
@@ -687,77 +800,6 @@ for p in /proc/[0-9]*; do
 done
 echo "killed=$killed"
 """
-
-
-def shell_as_root(data_dir: Path, script: str, timeout: int = 120) -> str:
-    """
-    Run a shell snippet against a project's data folder, as root.
-
-    The pipeline writes everything under `out/` as root — the daemon runs as
-    root — so the server cannot move or delete any of it. `compose run`
-    rather than `exec`, with DATA_DIR set, because the long-lived container
-    is mounted on whichever project ran last.
-
-    Returns "" on success, or what went wrong.
-    """
-    result = _run(
-        ["docker", "compose", "run", "--rm", "--no-deps", "--entrypoint", "sh",
-         APP_SERVICE, "-c", script],
-        cwd=PIPELINE_DIR,
-        timeout=timeout,
-        env=run_full_env(extra={"DATA_DIR": str(data_dir)}),
-    )
-    if result is None:
-        return "could not reach Docker"
-    if result.returncode != 0:
-        return (result.stderr or result.stdout or "").strip()[-300:] or "the container refused"
-    return ""
-
-
-#: Where the pipeline writes one master export per run.
-MASTER_GLOB = "tabla_maestra_programa_*.h3.parquet"
-
-
-def extra_master_exports(data_dir: Path) -> list[Path]:
-    """
-    Master exports beyond the newest one.
-
-    Every pipeline run writes `out/maestro/<run_id>/tabla_maestra_programa_*`,
-    and the MCDA's preprocesses refuse to choose: "Se esperaba exactamente 1
-    master ... hay 3". The engine's own two halves disagree here, so the model
-    run keeps the newest — the one describing the data as it stands — and
-    puts the rest where the pipeline puts superseded things.
-    """
-    maestro = data_dir / "out" / "maestro"
-    if not maestro.is_dir():
-        return []
-    runs = [
-        folder for folder in maestro.iterdir()
-        if folder.is_dir() and any(folder.glob(MASTER_GLOB))
-    ]
-    if len(runs) <= 1:
-        return []
-    runs.sort(key=lambda folder: folder.stat().st_mtime)
-    return runs[:-1]
-
-
-def archive_extra_masters(data_dir: Path) -> tuple[int, str]:
-    """
-    Move all but the newest master export aside. Returns (moved, problem).
-
-    Moved rather than deleted: they are results, and `bck/` is where the
-    pipeline's own `prune_stale_outputs` puts results it supersedes.
-    """
-    extras = extra_master_exports(data_dir)
-    if not extras:
-        return 0, ""
-    names = " ".join(f"'{folder.name}'" for folder in extras)
-    script = (
-        'set -e; dest="/data/out/bck/maestro_$(date +%Y-%m-%d_%H-%M)"; mkdir -p "$dest"; '
-        f'for name in {names}; do mv "/data/out/maestro/$name" "$dest/"; done'
-    )
-    problem = shell_as_root(data_dir, script)
-    return (0 if problem else len(extras)), problem
 
 
 def remove_as_root(data_dir: Path, relative: str) -> str:
@@ -914,6 +956,7 @@ def model_env(
     whatever `DATA_DIR` was mounted last is what it would read.
     """
     env = dict(os.environ)
+    env.update(NO_ENGINE_PROJECT)
     env["PYTHONUNBUFFERED"] = "1"
     env.setdefault("DATABASE_URL", database_url())
     if data_dir:

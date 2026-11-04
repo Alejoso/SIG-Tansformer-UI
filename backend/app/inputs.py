@@ -25,7 +25,7 @@ import os
 import re
 import unicodedata
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import engine_state, fsutil, outputs, pipeline, store
@@ -577,6 +577,14 @@ def _batch_candidates(source: Path) -> list[ImportCandidate]:
     for folder in subfolders:
         inner = _datasets_in(folder)
         if not inner:
+            # One level further: the engine's own data groups a variable's
+            # versions as `TEC_001_t/TEC_001_sv003/x.tif`, a folder of
+            # folders with one dataset each. Each of those is a variable, the
+            # same ones pointing at `TEC_001_t` itself would offer.
+            found += [
+                replace(candidate, label=f"{folder.name}/{candidate.label}")
+                for candidate in _nested_candidates(folder)
+            ]
             continue
         if len(inner) > 1:
             found.append(
@@ -599,6 +607,35 @@ def _batch_candidates(source: Path) -> list[ImportCandidate]:
             ImportCandidate(
                 source=str(folder),
                 label=folder.name,
+                filename=dataset.name,
+                format=_format_of(dataset),
+                sizeBytes=_measure([dataset, *companions]),
+                files=[dataset.name] + [c.name for c in companions],
+            )
+        )
+    return found
+
+
+def _nested_candidates(folder: Path) -> list[ImportCandidate]:
+    """The subfolders of `folder` holding exactly one dataset each, as candidates."""
+    try:
+        inner_folders = [
+            entry for entry in sorted(folder.iterdir())
+            if entry.is_dir() and entry.suffix.lower() != ".gdb" and not entry.name.startswith(".")
+        ]
+    except OSError:
+        return []
+    found = []
+    for inner_folder in inner_folders:
+        datasets = _datasets_in(inner_folder)
+        if len(datasets) != 1:
+            continue
+        dataset = datasets[0]
+        companions = _companions(dataset)
+        found.append(
+            ImportCandidate(
+                source=str(inner_folder),
+                label=inner_folder.name,
                 filename=dataset.name,
                 format=_format_of(dataset),
                 sizeBytes=_measure([dataset, *companions]),
@@ -671,7 +708,9 @@ def plan(project: store.ProjectRow, raw_source: str, dimension: str = "") -> Imp
             continue
         # `label` is the folder for a folder of folders, and the file when
         # several datasets share one — which is the right source either way.
-        candidate.code = _next_code(existing, taken, chosen, candidate.label)
+        # A nested one is labelled `TEC_001_t/TEC_001_sv003`; its code comes
+        # from the inner folder, the one that holds the data.
+        candidate.code = _next_code(existing, taken, chosen, candidate.label.rsplit("/", 1)[-1])
         taken.add(candidate.code)
 
     result.variables = candidates
@@ -871,6 +910,9 @@ class ImportOutcome:
     """What adding a folder of variables actually did."""
 
     added: list[InputVariable] = field(default_factory=list)
+    #: The request row behind each entry of `added`, in the same order, so the
+    #: caller can apply what else the row asked for (its fill and absent).
+    added_items: list[dict] = field(default_factory=list)
     #: One entry per variable that did not make it, with the server's own
     #: reason. A batch does not stop at the first failure: the others are
     #: fine, and re-picking the folder to retry the rest would be worse than
@@ -902,6 +944,7 @@ def import_many(
             outcome.added.append(
                 import_folder(project, source, dimension, code, item.get("filename", ""))
             )
+            outcome.added_items.append(item)
         except ValueError as error:
             outcome.failed.append(
                 {"source": source, "code": code, "problem": str(error)}

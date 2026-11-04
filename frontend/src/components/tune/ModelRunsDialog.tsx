@@ -15,9 +15,16 @@
 import { useState } from 'react';
 import * as api from '../../api';
 import { formatSize, formatWhen } from '../../lib/format';
-import type { ModelRun } from '../../types';
+import type { ModelRun, RunFile } from '../../types';
 import { Dialog } from '../ui/Dialog';
 import { Icon } from '../ui/Icon';
+
+/** The engine's verdict on a run, from its own report. */
+const VERDICT: Record<string, string> = {
+  ok: 'no errors',
+  with_errors: 'with errors in the results',
+  failed: 'failed',
+};
 
 interface ModelRunsDialogProps {
   projectId: string;
@@ -33,6 +40,23 @@ export function ModelRunsDialog({ projectId, runs, onChanged, onClose }: ModelRu
   const [confirming, setConfirming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [freed, setFreed] = useState<number | null>(null);
+  /** The run whose files are listed, and the list once it has arrived. */
+  const [opened, setOpened] = useState<{ id: string; files: RunFile[] | null } | null>(null);
+
+  const toggleFiles = async (run: ModelRun) => {
+    if (opened?.id === run.id) {
+      setOpened(null);
+      return;
+    }
+    setOpened({ id: run.id, files: null });
+    try {
+      const files = await api.listModelRunFiles(projectId, run.id);
+      setOpened((current) => (current?.id === run.id ? { id: run.id, files } : current));
+    } catch (listError) {
+      setOpened(null);
+      setError(listError instanceof Error ? listError.message : 'Could not list its files');
+    }
+  };
 
   const older = runs.filter((run) => !run.current);
   const reclaimable = older.reduce((total, run) => total + run.sizeBytes, 0);
@@ -77,8 +101,9 @@ export function ModelRunsDialog({ projectId, runs, onChanged, onClose }: ModelRu
         Model runs
       </div>
       <p className="dialog-body" style={{ margin: 0 }}>
-        Every Apply writes a new set of maps. The map only ever shows the newest, so the rest
-        are taking up room without being reachable.
+        Every Apply writes a new run: its report, the tables (the aggregated one is{' '}
+        <span className="mono">aggregate/mcda_aggregate.h3.parquet</span>), a zip and the
+        maps. The map only ever shows the newest; open a run to read or download its files.
       </p>
 
       <div className="run-list">
@@ -87,10 +112,20 @@ export function ModelRunsDialog({ projectId, runs, onChanged, onClose }: ModelRu
             <div className="run-row-main">
               <span className="run-id mono">{run.id}</span>
               <span className="run-meta muted-55">
-                {formatWhen(run.modifiedAt)} · {run.documentCount} maps
+                {formatWhen(run.modifiedAt)} · {run.documentCount} files
+                {run.status && ` · ${VERDICT[run.status] ?? run.status}`}
+                {run.errorCount > 0 && ` (${run.errorCount} error${run.errorCount === 1 ? '' : 's'})`}
               </span>
             </div>
             {run.current && <span className="run-badge">on the map</span>}
+            <button
+              type="button"
+              className="btn btn-ghost run-files-toggle"
+              onClick={() => toggleFiles(run)}
+              aria-expanded={opened?.id === run.id}
+            >
+              {opened?.id === run.id ? 'Hide files' : 'Files'}
+            </button>
             <span className="run-size mono">{formatSize(run.sizeBytes)}</span>
             <button
               type="button"
@@ -102,6 +137,37 @@ export function ModelRunsDialog({ projectId, runs, onChanged, onClose }: ModelRu
             >
               {confirming === run.id ? 'Sure?' : <Icon name="close" size={13} strokeWidth={3} />}
             </button>
+            {opened?.id === run.id && (
+              <div className="run-files">
+                {opened.files === null ? (
+                  <span className="muted-55">Listing…</span>
+                ) : (
+                  opened.files.map((file) => (
+                    <div key={file.path} className="run-file">
+                      <span className={`tag run-file-kind is-${file.kind}`}>{file.kind}</span>
+                      {/* Reports and tables open as text in a new tab; maps
+                          open as the page they are; anything else downloads. */}
+                      <a
+                        className="mono run-file-name"
+                        href={api.modelRunFileUrl(projectId, run.id, file.path)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {file.path}
+                      </a>
+                      <span className="muted-55 mono">{formatSize(file.sizeBytes)}</span>
+                      <a
+                        className="run-file-download"
+                        href={api.modelRunFileUrl(projectId, run.id, file.path, true)}
+                        aria-label={`Download ${file.path}`}
+                      >
+                        download
+                      </a>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         ))}
         {runs.length === 0 && (

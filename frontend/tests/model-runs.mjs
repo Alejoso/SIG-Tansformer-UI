@@ -10,7 +10,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { api, captureFailure, goToScreen, open, openProject, suite } from './harness.mjs';
+import { API, api, captureFailure, goToScreen, open, openProject, suite } from './harness.mjs';
 
 const exec = promisify(execFile);
 
@@ -25,8 +25,8 @@ async function makeProbe(dataDir) {
     'docker',
     [
       'compose', 'run', '--rm', '--no-deps', '--entrypoint', 'sh', 'app', '-c',
-      `mkdir -p "/data/MCDA/runs/${PROBE}/criterios/global" && ` +
-        `head -c 1000000 /dev/zero > "/data/MCDA/runs/${PROBE}/criterios/global/probe.h3.html"`,
+      `mkdir -p "/data/MCDA/runs/${PROBE}/criteria/global" && ` +
+        `head -c 1000000 /dev/zero > "/data/MCDA/runs/${PROBE}/criteria/global/probe.h3.html"`,
     ],
     { cwd: PIPELINE_DIR, env: { ...process.env, DATA_DIR: dataDir }, timeout: 120000 },
   );
@@ -45,6 +45,21 @@ export async function run({ project }) {
     before.map((r) => `${r.id}:${r.current}`).join(' '));
   check('each run reports a size and a count',
     before.every((r) => r.sizeBytes > 0 && r.documentCount > 0));
+
+  // What a run wrote can be read: its report, its record and its tables.
+  const files = await api(`/projects/${project.id}/model/runs/${before[0].id}/files`);
+  const paths = files.map((f) => f.path);
+  check('a run lists its report and its record',
+    paths.includes('run_report.yaml') && paths.includes('run.yaml'), paths.slice(0, 6).join(' '));
+  check('and the aggregated table',
+    paths.includes('aggregate/mcda_aggregate.h3.parquet'), paths.join(' ').slice(0, 200));
+  check('reports come first', files[0]?.kind === 'report', files[0]?.kind);
+  const report = await fetch(
+    `${API}/projects/${project.id}/model/runs/${encodeURIComponent(before[0].id)}/files/run_report.yaml`,
+  ).then((r) => r.text());
+  check('the report opens as text', /status: (ok|with_errors|failed)/.test(report), report.slice(0, 80));
+  check('and the run carries its verdict', ['ok', 'with_errors', 'failed'].includes(before[0].status),
+    before[0].status);
 
   let probed = false;
   if (!before.some((r) => r.id === PROBE)) {

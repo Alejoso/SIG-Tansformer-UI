@@ -6,10 +6,14 @@ import type {
   ImportPlan,
   InputVariable,
   VariableProblem,
+  VariableSettings,
   PipelineRun,
   PipelineStage,
 } from '../../types';
 import { Dialog } from '../ui/Dialog';
+import { RunReportLine } from '../variables/RunReportLine';
+import { VariableSettingsFields } from '../variables/VariableSettingsFields';
+import { describeSettings, settingsOf } from '../../lib/variable-settings';
 import { formatSize } from '../../lib/format';
 import * as modelRun from '../../lib/model-run';
 import { Icon } from '../ui/Icon';
@@ -168,6 +172,17 @@ export function DataScreen() {
   const [batchCodes, setBatchCodes] = useState<Record<string, string>>({});
   /** Rows the user has unticked. Everything else in the batch is coming. */
   const [batchSkipped, setBatchSkipped] = useState<Record<string, boolean>>({});
+  /**
+   * Fill and absent for each row of a batch, once changed. A row not in here
+   * keeps what the server suggested for its kind of file.
+   */
+  const [batchSettings, setBatchSettings] = useState<Record<string, VariableSettings>>({});
+  /** The same for a single variable: null until changed from the suggestion. */
+  const [singleSettings, setSingleSettings] = useState<VariableSettings | null>(null);
+  /** The added variable whose fill and absent are being edited, and the draft. */
+  const [editing, setEditing] = useState<{ id: string; value: VariableSettings } | null>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
   /**
    * Whether the dimension on screen is the user's choice rather than ours.
    *
@@ -417,6 +432,7 @@ export function DataScreen() {
           source: candidate.source,
           code: batchCodes[rowKey(candidate)] ?? candidate.code,
           filename: candidate.filename,
+          ...(batchSettings[rowKey(candidate)] ?? settingsOf(candidate)),
         })),
       );
       reload();
@@ -426,6 +442,7 @@ export function DataScreen() {
         setPlanned(null);
         setBatchCodes({});
         setBatchSkipped({});
+        setBatchSettings({});
         setDimensionTouched(false);
       }
       if (outcome.failed.length) {
@@ -450,10 +467,17 @@ export function DataScreen() {
     setAdding(true);
     setAddError('');
     try {
-      const added = await api.addInput(projectId, draftPath, chosenDimension, code);
+      const added = await api.addInput(
+        projectId,
+        draftPath,
+        chosenDimension,
+        code,
+        singleSettings ?? (plan ? settingsOf(plan) : undefined),
+      );
       setDraftPath('');
       setPlanned(null);
       setCode('');
+      setSingleSettings(null);
       setNewDimension('');
       setDimension(added.dimension);
       setDimensionTouched(false);
@@ -514,6 +538,40 @@ export function DataScreen() {
       showToast(error instanceof Error ? error.message : 'Could not remove it');
     } finally {
       setRemoving(null);
+    }
+  };
+
+  // A different folder is a different file: its suggestion replaces any
+  // fill or absent chosen for the previous one.
+  useEffect(() => {
+    setSingleSettings(null);
+    setBatchSettings({});
+  }, [draftPath]);
+
+  /**
+   * Save an added variable's fill and absent. They take effect on the next
+   * run: what was already processed keeps the fill it was made with.
+   */
+  const saveSettings = async (variable: InputVariable, value: VariableSettings | null) => {
+    setSavingSettings(true);
+    setSettingsError('');
+    try {
+      const saved = value
+        ? await api.saveVariableSettings(projectId, variable.dimension, variable.code, value)
+        : await api.resetVariableSettings(projectId, variable.dimension, variable.code);
+      setVariables((current) => current.map((v) => (v.id === saved.id ? saved : v)));
+      setEditing(null);
+      showToast(
+        value
+          ? `${variable.id}: saved. Process again for it to take effect.`
+          : `${variable.id}: back to the defaults`,
+      );
+    } catch (error) {
+      // The server's reason, as it says it: it names the method or the score
+      // it would not accept.
+      setSettingsError(error instanceof Error ? error.message : 'Could not save that');
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -639,8 +697,8 @@ export function DataScreen() {
 
   /** One variable's row. Lifted out so the grouping above it stays readable. */
   const variableRow = (variable: InputVariable) => (
+            <div key={variable.id} className="variable-item">
               <div
-                key={variable.id}
                 className={`folder-row${locked ? ' is-locked' : ''}${
                   variable.problem ? ' is-unreadable' : ''
                 }${variable.processedOnly ? ' is-unreadable' : ''}${
@@ -662,6 +720,12 @@ export function DataScreen() {
                   {/* The dimension used to lead this line. The folder above
                       says it now, on every row inside it, so repeating it
                       here was the same word three deep. */}
+                  {!variable.processedOnly && !variable.problem && (
+                    <div className="folder-meta muted-50 variable-settings-summary">
+                      {describeSettings(variable)}
+                      {variable.settingsDefault && ' (default)'}
+                    </div>
+                  )}
                   {(variable.processedOnly || variable.source) && (
                     <div className="folder-meta muted-50">
                       {variable.processedOnly && 'results only'}
@@ -699,6 +763,28 @@ export function DataScreen() {
                   </span>
                 )}
 
+                {!locked && !variable.processedOnly && !variable.problem && (
+                  <button
+                    type="button"
+                    className="btn btn-icon btn-secondary"
+                    aria-label={`Fill and absent for ${variable.id}`}
+                    aria-expanded={editing?.id === variable.id}
+                    title="Fill and absent"
+                    onClick={() => {
+                      setSettingsError('');
+                      setEditing((current) =>
+                        current?.id === variable.id
+                          ? null
+                          : { id: variable.id, value: settingsOf(variable) },
+                      );
+                    }}
+                    disabled={removing !== null || savingSettings}
+                    style={{ width: 30, height: 30, borderColor: 'transparent' }}
+                  >
+                    <Icon name="sliders" size={15} />
+                  </button>
+                )}
+
                 {/* One at a time: each removal starts its own container, and
                     two at once would have them racing over the same tree. */}
                 {!locked && (
@@ -722,6 +808,57 @@ export function DataScreen() {
                   </button>
                 )}
               </div>
+
+              {/* Fill and absent, edited in place under the row they belong
+                  to. Saved per variable; the next run uses them. */}
+              {editing?.id === variable.id && (
+                <div className="variable-settings-editor">
+                  <VariableSettingsFields
+                    idPrefix={`edit-${variable.id.replace(/[^A-Za-z0-9]/g, '-')}`}
+                    value={editing.value}
+                    disabled={savingSettings}
+                    onChange={(value) => setEditing({ id: variable.id, value })}
+                  />
+                  <div className="variable-settings-actions">
+                    {!variable.settingsDefault && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={savingSettings}
+                        onClick={() => saveSettings(variable, null)}
+                      >
+                        Default values
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={savingSettings}
+                      onClick={() => {
+                        setEditing(null);
+                        setSettingsError('');
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={savingSettings}
+                      onClick={() => saveSettings(variable, editing.value)}
+                    >
+                      {savingSettings ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                  {settingsError && <div className="path-add-error">{settingsError}</div>}
+                  <div className="muted-55" style={{ fontSize: 11.5 }}>
+                    Used from the next run. What is already processed keeps the fill it was
+                    made with; the model's own file says each leaf's <code>absent</code>, and
+                    a new model file starts from these.
+                  </div>
+                </div>
+              )}
+            </div>
   );
 
   return (
@@ -945,6 +1082,16 @@ export function DataScreen() {
                 </button>
               </div>
 
+              {/* A single variable: its fill and absent, suggested for its
+                  kind of file and editable before it is added. */}
+              {batch.length === 0 && plan && !plan.problem && (
+                <VariableSettingsFields
+                  idPrefix="single"
+                  value={singleSettings ?? settingsOf(plan)}
+                  onChange={setSingleSettings}
+                />
+              )}
+
               {/* One row per variable: what it came from, what it will be
                   called, and a tick to leave it out. The codes are suggested
                   across the whole batch at once, so they miss both what is
@@ -1008,6 +1155,17 @@ export function DataScreen() {
                               }
                             />
                           </>
+                        )}
+                        {!candidate.problem && (
+                          <VariableSettingsFields
+                            compact
+                            idPrefix={`batch-${key.replace(/[^A-Za-z0-9]/g, '-')}`}
+                            value={batchSettings[key] ?? settingsOf(candidate)}
+                            disabled={skipped}
+                            onChange={(next) =>
+                              setBatchSettings((current) => ({ ...current, [key]: next }))
+                            }
+                          />
                         )}
                       </div>
                     );
@@ -1212,6 +1370,7 @@ export function DataScreen() {
             )}
 
             {run.error && <pre className="process-error">{run.error}</pre>}
+            {!running && <RunReportLine run={run} />}
 
             <button
               type="button"

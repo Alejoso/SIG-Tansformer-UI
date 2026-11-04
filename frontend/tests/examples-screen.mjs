@@ -8,7 +8,7 @@ import { captureFailure, goToScreen, open, openProject, suite, typeAtTop } from 
 export const name = 'Examples screen';
 
 /** Keys the screen has to explain, because these are the ones people ask about. */
-const DOCUMENTED = ['key', 'nombre', 'code', 'column', 'site', 'type', 'weight', 'bins', 'map'];
+const DOCUMENTED = ['key', 'name', 'code', 'column', 'site', 'type', 'weight', 'bins', 'map'];
 
 export async function run({ project }) {
   const { check, results } = suite(name);

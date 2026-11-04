@@ -10,6 +10,7 @@ being pretend.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -30,6 +31,7 @@ from . import (
     runs,
     settings as project_settings,
     store,
+    variable_settings,
 )
 from .models import (
     AbortResult,
@@ -57,11 +59,14 @@ from .models import (
     Removal,
     PipelineReadiness,
     PipelineRun,
+    RunReport,
     PipelineStageState,
     Project,
     SaveModelPayload,
     SaveSettingsPayload,
+    RunFile,
     VariableProblem,
+    VariableSettingsPayload,
 )
 
 app = FastAPI(title="Maphex", version="0.1.0")
@@ -171,6 +176,7 @@ def delete_project(project_id: str) -> None:
     """
     if not store.delete_project(project_id):
         raise HTTPException(status_code=404, detail=f"No project {project_id}")
+    variable_settings.forget_project(project_id)
 
 
 # ── the rendered layers ───────────────────────────────────────────────────
@@ -315,6 +321,7 @@ def _to_run(state: runs.RunState) -> PipelineRun:
         resetReason=state.resetReason,
         rebuildEverything=state.rebuildEverything,
         logTail=state.logTail,
+        report=RunReport(**state.report) if state.report else None,
     )
 
 
@@ -428,6 +435,11 @@ def start_processing(project_id: str, payload: ProcessPayload | None = None) -> 
                 ),
             )
 
+    # How each variable's gaps are filled is set per variable on the Data
+    # screen; the engine reads it from a transform.yaml in the project folder
+    # (step 13.5), which is rewritten here so it always matches the screen.
+    variable_settings.write_transform(project, inputs.scan(project))
+
     # One database serves every project, and nothing in it is scoped to one —
     # so a run clears the per-project tables when it must, and reuses the H3
     # master, which belongs to the boundaries rather than to any project.
@@ -500,7 +512,42 @@ def list_inputs(project_id: str) -> list[InputVariable]:
     should show what will actually run, not what we remember adding.
     """
     project = _require_project(project_id)
-    return [InputVariable(**vars(variable)) for variable in inputs.scan(project)]
+    rows = variable_settings.stored(project.id)
+    return [_input(project, variable, rows) for variable in inputs.scan(project)]
+
+
+def _input(project, variable, rows=None) -> InputVariable:
+    """A variable from the input tree, with its fill and absent attached."""
+    settings = variable_settings.settings_for(project.id, variable.id, variable.format, rows)
+    return InputVariable(
+        **vars(variable),
+        fill=settings.fill,
+        fillDomain=settings.fillDomain,
+        absent=settings.absent,
+        settingsDefault=settings.isDefault,
+    )
+
+
+def _defaults(file_format: str) -> dict[str, object]:
+    """The suggested fill and absent for a file that is about to be added."""
+    suggested = variable_settings.defaults_for(file_format)
+    return {"fill": suggested.fill, "fillDomain": suggested.fillDomain, "absent": suggested.absent}
+
+
+def _wanted_settings(item) -> tuple[str, str, float] | None:
+    """
+    What a request row asked for, checked, or None for the defaults.
+
+    Raises `variable_settings.SettingsError` when a value would not be
+    accepted, so it is refused before anything is copied.
+    """
+    if item.fill is None and item.fillDomain is None and item.absent is None:
+        return None
+    return variable_settings.check(
+        item.fill if item.fill is not None else variable_settings.NO_FILL,
+        item.fillDomain or variable_settings.DEFAULT_FILL_DOMAIN,
+        item.absent if item.absent is not None else variable_settings.DEFAULT_ABSENT,
+    )
 
 
 @app.get("/api/projects/{project_id}/inputs/dimensions")
@@ -541,7 +588,10 @@ def plan_import(project_id: str, payload: PlanImportPayload) -> ImportPlan:
     # and Pydantic would refuse them.
     return ImportPlan(
         **{key: value for key, value in vars(found).items() if key != "variables"},
-        variables=[ImportCandidate(**vars(item)) for item in found.variables],
+        **(_defaults(found.format) if found.format else {}),
+        variables=[
+            ImportCandidate(**vars(item), **_defaults(item.format)) for item in found.variables
+        ],
     )
 
 
@@ -556,10 +606,16 @@ def add_input(project_id: str, payload: ImportPayload) -> InputVariable:
     """
     project = _require_project(project_id)
     try:
+        wanted = _wanted_settings(payload)
+    except variable_settings.SettingsError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    try:
         variable = inputs.import_folder(project, payload.path, payload.dimension, payload.code)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return InputVariable(**vars(variable))
+    if wanted is not None:
+        variable_settings.save(project.id, variable.id, *wanted, file_format=variable.format)
+    return _input(project, variable)
 
 
 @app.post("/api/projects/{project_id}/inputs/batch", status_code=201)
@@ -577,15 +633,64 @@ def add_inputs(project_id: str, payload: ImportManyPayload) -> ImportOutcome:
     would be worse than useless.
     """
     project = _require_project(project_id)
-    outcome = inputs.import_many(
-        project,
-        payload.dimension,
-        [vars(item) for item in payload.variables],
-    )
+    # A row whose fill or absent would not be accepted is refused before its
+    # copy, like any other row that cannot be added; the rest go ahead.
+    refused, accepted, wanted = [], [], []
+    for item in payload.variables:
+        try:
+            settings = _wanted_settings(item)
+        except variable_settings.SettingsError as error:
+            refused.append({"source": item.source, "code": item.code, "problem": str(error)})
+            continue
+        accepted.append(vars(item))
+        wanted.append(settings)
+    outcome = inputs.import_many(project, payload.dimension, accepted)
+    by_row = {id(row): settings for row, settings in zip(accepted, wanted)}
+    for variable, row in zip(outcome.added, outcome.added_items):
+        settings = by_row.get(id(row))
+        if settings is not None:
+            variable_settings.save(project.id, variable.id, *settings, file_format=variable.format)
+    rows = variable_settings.stored(project.id)
     return ImportOutcome(
-        added=[InputVariable(**vars(variable)) for variable in outcome.added],
-        failed=outcome.failed,
+        added=[_input(project, variable, rows) for variable in outcome.added],
+        failed=refused + outcome.failed,
     )
+
+
+@app.put("/api/projects/{project_id}/inputs/{dimension}/{code}/settings")
+def save_input_settings(
+    project_id: str, dimension: str, code: str, payload: VariableSettingsPayload
+) -> InputVariable:
+    """
+    Set how a variable's gaps are filled while processing, and what the model
+    scores where one is left. Takes effect on the next run; already
+    processed results keep the fill they were made with.
+    """
+    project = _require_project(project_id)
+    variable = _find_input(project, dimension, code)
+    try:
+        variable_settings.save(project.id, variable.id, payload.fill, payload.fillDomain,
+                               payload.absent, file_format=variable.format)
+    except variable_settings.SettingsError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _input(project, variable)
+
+
+@app.delete("/api/projects/{project_id}/inputs/{dimension}/{code}/settings")
+def reset_input_settings(project_id: str, dimension: str, code: str) -> InputVariable:
+    """Back to the defaults for the variable's kind of file."""
+    project = _require_project(project_id)
+    variable = _find_input(project, dimension, code)
+    variable_settings.reset(project.id, variable.id)
+    return _input(project, variable)
+
+
+def _find_input(project, dimension: str, code: str):
+    identifier = f"{dimension}/{code}"
+    for variable in inputs.scan(project):
+        if variable.id == identifier:
+            return variable
+    raise HTTPException(status_code=404, detail=f"No variable {identifier} in this project.")
 
 
 @app.delete("/api/projects/{project_id}/inputs/{dimension}/{code}")
@@ -604,6 +709,7 @@ def remove_input(project_id: str, dimension: str, code: str) -> Removal:
         removal = inputs.remove(project, dimension, code)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    variable_settings.reset(project.id, f"{dimension}/{code}")
     return Removal(**vars(removal))
 
 
@@ -656,24 +762,27 @@ def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> 
             status_code=503, detail=detail or "Could not start the engine's containers."
         )
 
-    # The MCDA's preprocesses refuse to run with more than one master export,
-    # and the pipeline writes one per run. Keep the newest; the rest go where
-    # the pipeline puts superseded results.
-    archived, problem = pipeline.archive_extra_masters(folder)
-    if problem:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "There is more than one master export in this project and they could "
-                f"not be tidied up: {problem}"
-            ),
-        )
+    # Every pipeline run exports another master table. The engine's model
+    # runner takes the newest one and hands it to every step, so the older
+    # exports can stay where they are.
 
     # The id is ours, not the script's: `--out` has to name the folder, and
     # the script only announces its own id once it is running. It honours an
     # EXECUTION_ID from the environment, so both agree.
+    # The engine has no model of its own to fall back on: its models live in
+    # its projects, and this run deliberately loads none of them (see
+    # `pipeline.NO_ENGINE_PROJECT`). So the project's model file is the only
+    # config there is.
+    if not options.useProjectModel:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The engine has no default model to score with. The project's own "
+                "model file is the one that runs."
+            ),
+        )
     execution_id = pipeline.new_execution_id()
-    config = model_store.container_model_path(project) if options.useProjectModel else None
+    config = model_store.container_model_path(project)
     arguments = pipeline.model_arguments(
         config=config,
         site=options.site,
@@ -724,6 +833,62 @@ def list_model_runs(project_id: str) -> list[ModelRun]:
     """
     project = _require_project(project_id)
     return [ModelRun(**vars(run)) for run in outputs.model_runs(project)]
+
+
+@app.get("/api/projects/{project_id}/model/runs/{run_id}/files")
+def list_model_run_files(project_id: str, run_id: str) -> list[RunFile]:
+    """
+    What one run wrote: its report and record (`run_report.yaml`,
+    `run.yaml`), the tables (`aggregate/mcda_aggregate.h3.parquet`,
+    `criteria/criteria.csv`...), the zip and the maps. Reports first.
+    """
+    project = _require_project(project_id)
+    files = outputs.model_run_files(project, run_id)
+    if files is None:
+        raise HTTPException(status_code=404, detail=f"No model run {run_id}.")
+    return [RunFile(**vars(entry)) for entry in files]
+
+
+@app.get("/api/projects/{project_id}/model/runs/{run_id}/files/{relative:path}")
+def get_model_run_file(project_id: str, run_id: str, relative: str, download: bool = False):
+    """
+    One file of a run, to open or to download (`?download=true`). Text
+    files (reports, CSV) open as text in the browser; the rest download.
+    """
+    project = _require_project(project_id)
+    path = outputs.model_run_file(project, run_id, relative)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"No file {relative} in run {run_id}.")
+    return _file_response(path, download)
+
+
+#: Files the browser can show as they are, as plain text.
+_TEXT_SUFFIXES = {".yaml", ".yml", ".txt", ".csv", ".json", ".jsonl", ".env"}
+
+
+def _file_response(path: Path, download: bool) -> FileResponse:
+    if path.suffix.lower() in _TEXT_SUFFIXES and not download:
+        return FileResponse(path, media_type="text/plain; charset=utf-8")
+    return FileResponse(path, filename=path.name)
+
+
+@app.get("/api/runs/{execution_id}/report")
+def get_run_report(execution_id: str, download: bool = False):
+    """
+    The engine's final report of a run, by its id: stage times, results,
+    errors, warnings and the parameters it ran with. Every run writes one,
+    the processing and the model alike, even when it fails.
+    """
+    if not _EXECUTION_ID.fullmatch(execution_id):
+        raise HTTPException(status_code=400, detail="Not a run id.")
+    path = pipeline.report_path(execution_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"Run {execution_id} has no report.")
+    return _file_response(path, download)
+
+
+#: The engine's run ids: `2026-11-03_09-48_mcda_475`, `..._rf_473`.
+_EXECUTION_ID = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}_[a-z0-9]+_[0-9]+")
 
 
 @app.post("/api/projects/{project_id}/model/runs/prune")
@@ -788,7 +953,9 @@ def get_model(project_id: str) -> ModelFile:
     parser would quietly rewrite what someone typed.
     """
     project = _require_project(project_id)
-    text, created = model_store.read_model(project)
+    text, created = model_store.read_model(
+        project, variable_settings.absent_by_column(project, inputs.scan(project))
+    )
     return _describe_model(project, text, created)
 
 

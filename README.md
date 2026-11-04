@@ -69,26 +69,15 @@ you say so:
 MAPHEX_PIPELINE_DIR=/path/to/SIG-Transformer ./run.sh   # in backend/
 ```
 
-**Use a branch with the fixes on it.** The engine's `main` is missing four
-commits this app depends on. They are pushed as one branch, named after what
-it is for:
-
-```bash
-cd SIG-Transformer && git checkout fix/compatibilidad-maphex
-```
-
-That branch carries, oldest first: the lint no longer renaming the pipeline's
-own outputs (without it, **every run after the first fails at step 10.6**),
-pyarrow held below 26 so it keeps working with the NumPy the image has,
-`run_full.sh` honouring the `DATA_DIR` it advertises (without it every
-project would read and write the engine's own folder — see
-[A project folder is the pipeline's DATA_DIR](#a-project-folder-is-the-pipelines-data_dir)),
-and an exact dependency lock. Merging it into `main` makes this step go away.
-
-The same four commits also exist as two stacked branches,
-`fix/lint-no-renombrar-salidas` and `chore/fijar-dependencias`, from when
-they were meant to be reviewed separately. Same tree, same history — nothing
-is lost by merging the one above and deleting the other two.
+**Use the engine's `main`, from 2026-11-03 on.** It carries what this app
+needs: the lint leaves the pipeline's own outputs alone, `pyarrow` is held
+below 26, `run_full.sh` honours the `DATA_DIR` it is given, step 13.5 fills
+each variable's gaps from a `transform.yaml`, and every run writes a
+`run_report.yaml`. Its outputs and settings are in English since then (the
+model's maps are under `criteria/`, `RESET_FILES` replaced `RESET_ARCHIVOS`);
+see [Working with the current engine](#working-with-the-current-engine). The
+old `fix/compatibilidad-maphex` branch is no longer needed, except for its
+dependency lock.
 
 Then its configuration and its data:
 
@@ -157,13 +146,16 @@ Worth knowing before pointing it at an engine you care about:
 - **the engine's `.env`** — `H3_RES` and `RENDER_H3_RES`, set from the
   project's settings before a run, and the app container recreated when they
   change. See [Settings reach the engine](#settings-reach-the-engine-through-its-env).
-- **the project's folder** — `in/`, `out/`, `model/model.yaml`, `MCDA/runs/`.
-  All of it the engine's doing except the model file.
-- **`out/maestro/`** — all but the newest master export is moved to
-  `out/bck/` before a model run, because the MCDA refuses to choose between
-  several.
-- **`data/*.csv` here** — the project list, and where each variable was
-  copied from.
+- **the project's folder**: `in/`, `out/`, `model/model.yaml`,
+  `config/transform.yaml`, `MCDA/runs/`. All of it the engine's doing except
+  the model file and `config/transform.yaml`, which is rewritten from each
+  variable's fill before every run.
+- **`data/*.csv` here**: the project list, where each variable was copied
+  from, and each variable's fill and absent when changed from the defaults
+  (`variable_settings.csv`).
+
+Every pipeline run exports another master table into `out/maestro/`; the
+engine's model runner takes the newest one itself, so nothing is moved.
 
 Nothing is written to the folders variables were imported *from*. Those are
 read and copied, never moved or changed.
@@ -582,36 +574,39 @@ the master table:
 
 ```yaml
 criteria:
-  - key: economia             # its name in the results
-    nombre: Economia          # optional, readable
+  - key: economy              # its name in the results
+    name: Economy             # optional, readable
     weight: 0.5               # criteria add to 1
     subgroups:
-      - key: dist_interes
+      - key: interest_distance
         weight: 1.0           # subgroups of one criterion add to 1
         leaves:
-          # The column is the master table's own column name — the variable's
+          # The column is the master table's own column name: the variable's
           # folder, uppercased. out/maestro/<run>/*.variables.csv lists them.
-          - {code: SOE-002, column: SOE_002, site: both, type: minmax}
+          # absent: the 1-5 score of a hexagon still without a value.
+          - {code: SOE-002, column: SOE_002, site: both, type: minmax, absent: 1}
 
-  - key: recurso_eolico
+  - key: wind_resource
     weight: 0.5
     subgroups:
-      - key: densidad_wpd
+      - key: wpd_density
         weight: 1.0
+        agg: wmean            # wmean | min | max | gmean | sum
         leaves:
           - code: TEC-004
             column: TEC_004_sv003
             site: both        # both | onshore | offshore
             type: range
+            absent: 1
             bins:             # [from, to, score]; null is unbounded
-              - [null, 300, 1]   # ranges are (from, to] — exclusive lower
+              - [null, 300, 1]   # ranges are (from, to]: exclusive lower
               - [300, 400, 2]
               - [400, null, 5]
 
-# Zoning. Present at all, and the engine treats this file as self-contained
-# rather than falling back to its own MCDA/config/zoning.yaml.
-exclude_columns: []           # any value in these columns excludes the hexagon
+# Zoning, read from this same file.
+exclude_columns: []           # any value in these columns excludes the hexagon (-1)
 exclude_thresholds: []        # or a cut on a continuous one
+alert_columns: []             # marks the hexagon (-2) without changing its score
 prioritized: []               # codes kept whatever else is dropped
 ```
 
@@ -635,8 +630,9 @@ The server reports two kinds of finding, because the engine does:
   `weight` and a non-empty `subgroups`; each subgroup a `key`, a `weight` and
   non-empty `leaves`.
 - A leaf needs a `column` and a `type` the engine scores. `range` needs
-  `bins`, `map` needs `map`. `site` must be `both`, `onshore` or `offshore` —
-  anything else never applies, so the leaf would be skipped in silence.
+  `bins`, `map` needs `map`. `agg` and `on_missing` take only the values the
+  engine knows. `site` must be `both`, `onshore` or `offshore`: anything
+  else never applies, so the leaf would be skipped in silence.
 - Each bin is `[from, to, score]` with numeric or null bounds, and a bounded
   lower below its upper.
 
@@ -644,11 +640,17 @@ The server reports two kinds of finding, because the engine does:
 
 - A key the engine does not read, at any level. This is the one worth having:
   a mistyped `binz:` leaves a leaf with no cuts and the run still finishes.
-- Weights that do not add to 1, at any level — with the engine's own
-  exemptions, so a subgroup that normalizes or combines with `min` is not
-  counted, and onshore and offshore leaves are summed separately. These
-  messages match `validate_weights` in the engine, checked against its four
-  shipped configs.
+- Weights that do not add to 1, at any level, with the engine's own
+  exemptions: a subgroup that normalizes or aggregates with `min` or `max` is
+  not counted, and onshore and offshore leaves are summed separately. These
+  messages match `validate_weights` in the engine.
+- A leaf with no `absent`: a hexagon without a value there gets no score,
+  and the engine's run report flags it as an error.
+- A key an older engine read and this one does not, said by name: `nombre`
+  is `name`, `combine` is `agg`, and `fill`/`impute` moved out of the model
+  (see below).
+- A fixed score outside 1-5, and a subgroup key repeated under two criteria
+  (their outputs would overwrite each other).
 
 Only YAML that does not parse stops Apply. The engine has the final word on
 its own config, so neither finding blocks a run.
@@ -657,9 +659,10 @@ its own config, so neither finding blocks a run.
 
 A project's model file is written the first time the screen is opened, from
 the variables that project actually holds — one criterion per dimension, one
-leaf per variable, `type: minmax` throughout. `minmax` because it is the one
-type that needs no numbers chosen in advance: it reads the range out of the
-column. So the file you open with is a model the engine can score, not an
+leaf per variable, `type: minmax` throughout, and each leaf's `absent` taken
+from that variable's setting on the Data screen. `minmax` because it is the
+one type that needs no numbers chosen in advance: it reads the range out of
+the column. So the file you open with is a model the engine can score, not an
 example about somewhere else.
 
 The columns come from `out/maestro/<run>/*.variables.csv`, which every run
@@ -734,6 +737,51 @@ The request blocks for as long as the dialog is open, so the button shows it
 is waiting. If nothing can be opened, the result says so and pasting a path
 still works.
 
+## Working with the current engine
+
+**Each variable's fill and absent.** The engine splits missing data in two:
+while processing, step 13.5 fills each master-table column's empty hexagons
+with a chain of methods (`spatial` the neighbours' mean, `region` the
+municipality's, `nearest` the closest value, `idw`, `mean`, `median`, a fixed
+number, or `none`), inside a domain (`all`, `land` = hexagons in a
+municipality, `sea` = the rest); then the model scores whatever is still
+empty with each leaf's `absent`, 1 to 5. So every variable has both, shown
+when it is added (one row per file in a batch) and editable afterwards from
+its row on the Data screen.
+
+The defaults depend on the kind of file: a raster or a table is a measurement
+that should exist everywhere, so its gaps are filled with `spatial, median`; a
+vector is usually a layer of where something is, and a hexagon outside it is
+an answer rather than a gap, so it is not filled. `absent` starts at 1, the
+cautious choice; 5 is for variables where no data means no restriction. Only
+values changed from the defaults are stored (`data/variable_settings.csv`),
+and "Default values" puts a variable back.
+
+Before every run the backend writes the project's `config/transform.yaml` in
+the engine's own format and passes it as `PROJECT_TRANSFORM`; what was filled,
+and how, is in `out/maestro/<run>/*.fill.yaml`.
+
+**No engine project.** The engine keeps projects of its own in `projects/`,
+and its `.env` may name a default one. This app's runs set `PROJECT` empty, so
+none of them is loaded: everything comes from `.env` and from what is passed
+here, `DATA_DIR` first. A `POSTGRES_DB` set where the backend runs is a
+database of its own (the engine creates it next to the main one and never
+rewrites `admin/out` from it), which is how to try the app without touching
+the main database.
+
+**Reports.** Every run of either kind writes `logs/<id>/run_report.yaml`:
+stage times, results, every error and warning, and the parameters it ran
+with. Its verdict reaches the run's state as `report` (ok, failed, or
+`with_errors` for a run that finished but whose results the engine flags),
+the Data screen and the model's result dialog link to the file, and the
+model's past runs list every file a run wrote (report, `run.yaml`, the
+aggregated table `aggregate/mcda_aggregate.h3.parquet`, the zip, the maps) to
+open or download.
+
+**Nested variables.** The engine's own data groups a variable's versions as
+`TEC_001_t/TEC_001_sv003/x.tif`. Adding a dimension folder offers each of
+those inner folders as a variable, as adding `TEC_001_t` itself does.
+
 ## Screens
 
 | Screen | File | What it does |
@@ -795,7 +843,12 @@ No component changes.
 | `listExamples` | `GET /api/model/examples` | mocked; the examples are UI copy |
 | `addInputs` | `POST /api/projects/{id}/inputs/batch` | a folder of variables; reports per variable |
 | `listProblems` | `GET /api/projects/{id}/problems` | which variables did not finish, and the engine's reason |
-| `listModelRuns` | `GET /api/projects/{id}/model/runs` | newest first; only the first is ever drawn |
+| `listModelRuns` | `GET /api/projects/{id}/model/runs` | newest first; only the first is ever drawn; each with the engine's verdict |
+| `listModelRunFiles` | `GET /api/projects/{id}/model/runs/{runId}/files` | what a run wrote, reports first |
+| `modelRunFileUrl` | `GET /api/projects/{id}/model/runs/{runId}/files/{path}` | text opens in the browser, the rest downloads (`?download=true` forces it) |
+| `runReportUrl` | `GET /api/runs/{executionId}/report` | the engine's `run_report.yaml` for any run |
+| `saveVariableSettings` | `PUT /api/projects/{id}/inputs/{dimension}/{code}/settings` | a variable's fill and absent |
+| `resetVariableSettings` | `DELETE /api/projects/{id}/inputs/{dimension}/{code}/settings` | back to the defaults for its kind of file |
 | `pruneModelRuns` | `POST /api/projects/{id}/model/runs/prune` | keep the newest N, in one container |
 | `removeModelRun` | `DELETE /api/projects/{id}/model/runs/{runId}` | |
 | `getEngineSettings` | `GET /api/settings` | the engine's own numbers, with no project to ask about |
