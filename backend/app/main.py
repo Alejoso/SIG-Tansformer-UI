@@ -25,12 +25,14 @@ from . import (
     fsutil,
     inputs,
     model_runs as model_run_store,
+    model_status,
     model_store,
     outputs,
     pipeline,
     runs,
     settings as project_settings,
     store,
+    value_columns,
     variable_settings,
 )
 from .models import (
@@ -48,6 +50,9 @@ from .models import (
     ModelRun,
     ModelRunsRemoval,
     ModelIssue,
+    ModelChangedColumn,
+    ModelStatus,
+    ProjectOptions,
     ProjectSettings,
     NewProjectPayload,
     PickFolderPayload,
@@ -65,6 +70,9 @@ from .models import (
     SaveModelPayload,
     SaveSettingsPayload,
     RunFile,
+    ValueColumnChoice,
+    ValueColumnPayload,
+    ValueColumnsState,
     VariableProblem,
     VariableSettingsPayload,
 )
@@ -177,6 +185,7 @@ def delete_project(project_id: str) -> None:
     if not store.delete_project(project_id):
         raise HTTPException(status_code=404, detail=f"No project {project_id}")
     variable_settings.forget_project(project_id)
+    value_columns.forget_project(project_id)
 
 
 # ── the rendered layers ───────────────────────────────────────────────────
@@ -190,8 +199,9 @@ def list_layers(project_id: str) -> LayerTree:
     Read off disk, not from a database — the pipeline writes its results as
     files and this is the same view a person would get listing the folder.
 
-    Variables come back flat because that is how the pipeline writes them: a
-    mirror of the input tree, one folder per code. The model side is a tree
+    Variables come back grouped by dimension, each named by its code: the
+    pipeline writes them as a mirror of the input tree, one folder per code,
+    a nested one inside its group (`tec/TEC_001_t/TEC_001_sv003`). The model side is a tree
     because its output nests by criterion, and it is empty until a model run
     exists.
     """
@@ -452,10 +462,21 @@ def start_processing(project_id: str, payload: ProcessPayload | None = None) -> 
             reset=reset,
             reset_reason=reason,
             rebuild_everything=payload.rebuildEverything if payload else False,
+            extra_env=_engine_env(project),
         )
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return _to_run(run.snapshot())
+
+
+def _engine_env(project: store.ProjectRow) -> dict[str, str]:
+    """
+    What every run of this project passes to the engine besides its data
+    folder: the project's switches (CSVs, keeping the machine awake), and
+    where its model and model runs are, so the engine's model status at the
+    end of a run checks this project's model.
+    """
+    return {**project_settings.option_env(project), **model_status.env(project)}
 
 
 @app.get("/api/projects/{project_id}/process")
@@ -655,7 +676,11 @@ def add_inputs(project_id: str, payload: ImportManyPayload) -> ImportOutcome:
     )
 
 
-@app.put("/api/projects/{project_id}/inputs/{dimension}/{code}/settings")
+# `{code:path}`: a nested variable's code is the rest of its path under the
+# dimension (`TEC_001_t/TEC_001_sv003`), separators and all.
+
+
+@app.put("/api/projects/{project_id}/inputs/{dimension}/{code:path}/settings")
 def save_input_settings(
     project_id: str, dimension: str, code: str, payload: VariableSettingsPayload
 ) -> InputVariable:
@@ -675,13 +700,61 @@ def save_input_settings(
     return _input(project, variable)
 
 
-@app.delete("/api/projects/{project_id}/inputs/{dimension}/{code}/settings")
+@app.delete("/api/projects/{project_id}/inputs/{dimension}/{code:path}/settings")
 def reset_input_settings(project_id: str, dimension: str, code: str) -> InputVariable:
     """Back to the default fill for the variable's kind of file."""
     project = _require_project(project_id)
     variable = _find_input(project, dimension, code)
     variable_settings.reset(project.id, variable.id)
     return _input(project, variable)
+
+
+@app.get("/api/projects/{project_id}/inputs/value-columns")
+def get_value_columns(project_id: str) -> ValueColumnsState:
+    """
+    Files the engine will not transform until someone says which of their
+    columns is the value, and the ones that already have a column chosen.
+
+    Asked of the engine itself (its read-only `value_columns.py`, run in its
+    image), so the candidates and the first value of each are what the
+    ingest sees. Takes a second or a few, and is cached until the input tree
+    or a choice changes. When the engine cannot be asked, `available` is
+    false and `error` says why, rather than failing the screen.
+    """
+    project = _require_project(project_id)
+    return ValueColumnsState(**value_columns.state(project).as_dict())
+
+
+@app.put("/api/projects/{project_id}/inputs/{dimension}/{code:path}/value-column")
+def choose_value_column(
+    project_id: str, dimension: str, code: str, payload: ValueColumnPayload
+) -> ValueColumnChoice:
+    """
+    Say which column is a variable's value (or one file's, for a folder of
+    several). Checked against the engine's candidates; written into the
+    project's `transform.yaml` as `value_columns`, and the engine reprocesses
+    that file on the next run.
+    """
+    project = _require_project(project_id)
+    variable = _find_input(project, dimension, code)
+    try:
+        value_columns.choose(project, variable.id, payload.column, payload.file)
+    except value_columns.ChoiceError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except value_columns.Unavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return ValueColumnChoice(variableId=variable.id, file=payload.file, column=payload.column.strip())
+
+
+@app.delete("/api/projects/{project_id}/inputs/{dimension}/{code:path}/value-column")
+def clear_value_column(
+    project_id: str, dimension: str, code: str, file: str | None = None
+) -> ValueColumnChoice:
+    """Forget a variable's value column (one file's with `?file=`). It is left out again."""
+    project = _require_project(project_id)
+    variable = _find_input(project, dimension, code)
+    value_columns.clear(project.id, variable.id, file or None)
+    return ValueColumnChoice(variableId=variable.id, file=file or "", column=None)
 
 
 def _find_input(project, dimension: str, code: str):
@@ -692,7 +765,7 @@ def _find_input(project, dimension: str, code: str):
     raise HTTPException(status_code=404, detail=f"No variable {identifier} in this project.")
 
 
-@app.delete("/api/projects/{project_id}/inputs/{dimension}/{code}")
+@app.delete("/api/projects/{project_id}/inputs/{dimension}/{code:path}")
 def remove_input(project_id: str, dimension: str, code: str) -> Removal:
     """
     Take a variable out of the project, input and results together.
@@ -705,10 +778,11 @@ def remove_input(project_id: str, dimension: str, code: str) -> Removal:
     """
     project = _require_project(project_id)
     try:
-        removal = inputs.remove(project, dimension, code)
+        removal = inputs.remove(project, f"{dimension}/{code}")
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     variable_settings.reset(project.id, f"{dimension}/{code}")
+    value_columns.clear(project.id, f"{dimension}/{code}")
     return Removal(**vars(removal))
 
 
@@ -780,6 +854,10 @@ def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> 
                 "model file is the one that runs."
             ),
         )
+    # Applied before the Model screen was ever opened (the Map's notice can do
+    # that), the file does not exist yet: it is written from the project's data
+    # first, as opening the screen would.
+    model_store.read_model(project)
     execution_id = pipeline.new_execution_id()
     config = model_store.container_model_path(project)
     arguments = pipeline.model_arguments(
@@ -795,6 +873,7 @@ def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> 
             arguments=arguments,
             skip_preprocesses=options.skipPreprocesses,
             execution_id=execution_id,
+            extra_env=_engine_env(project),
         )
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -817,6 +896,20 @@ def abort_model_run(project_id: str) -> AbortResult:
     if run is None:
         raise HTTPException(status_code=404, detail="No model run for this project.")
     return AbortResult(detail=run.abort())
+
+
+@app.get("/api/projects/{project_id}/model/status")
+def get_model_status(project_id: str) -> ModelStatus:
+    """
+    Whether the model's last run still describes the data: the engine's own
+    check (`out/model_status.json`, written after processing and after each
+    model run) and whether the model file changed since the last Apply.
+    """
+    found = model_status.status(_require_project(project_id))
+    return ModelStatus(
+        **{key: value for key, value in vars(found).items() if key != "changed"},
+        changed=[ModelChangedColumn(**vars(item)) for item in found.changed],
+    )
 
 
 # ── past model runs ───────────────────────────────────────────────────────
@@ -999,6 +1092,7 @@ def _describe_settings(project: store.ProjectRow) -> ProjectSettings:
         # and the screen can say so rather than implying someone picked them.
         followingEngine=not (project.h3_res or project.render_h3_res),
         hasResults=bool(outputs.scan_variables(project)),
+        options=ProjectOptions(**vars(project_settings.options_of(project))),
     )
 
 
@@ -1068,10 +1162,25 @@ def save_settings(project_id: str, payload: SaveSettingsPayload) -> ProjectSetti
     return _describe_settings(saved)
 
 
+@app.put("/api/projects/{project_id}/settings/options")
+def save_options(project_id: str, payload: ProjectOptions) -> ProjectSettings:
+    """
+    Store the project's switches. Apart from the resolutions, so that turning
+    one on does not pin the resolutions to whatever the engine says today.
+    They reach the engine with the next run.
+    """
+    project = _require_project(project_id)
+    saved = project_settings.save_options(
+        project, project_settings.Options(**payload.model_dump())
+    )
+    return _describe_settings(saved)
+
+
 @app.delete("/api/projects/{project_id}/settings")
 def clear_settings(project_id: str) -> ProjectSettings:
     """
-    Back to the engine's own configuration, rather than a pinned number.
+    Back to the engine's own configuration, rather than a pinned number, and
+    every switch off.
 
     "Default values" in the settings dialog.
     """

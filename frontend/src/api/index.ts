@@ -22,14 +22,17 @@ import type {
   ModelFile,
   ModelRun,
   ModelRunsRemoval,
+  ModelStatus,
   NewProjectPayload,
   PipelineReadiness,
   PipelineRun,
   PickedFolder,
   Project,
+  ProjectOptions,
   ProjectSettings,
   Resolutions,
   RunFile,
+  ValueColumnsState,
   VariableProblem,
   VariableSettings,
 } from '../types';
@@ -133,7 +136,12 @@ export const planImport = (
 export const addInputs = (
   projectId: string,
   dimension: string,
-  variables: ({ source: string; code: string; filename?: string } & Partial<VariableSettings>)[],
+  variables: ({
+    source: string;
+    code: string;
+    filename?: string;
+    group?: string;
+  } & Partial<VariableSettings>)[],
 ): Promise<ImportOutcome> =>
   request(`/projects/${projectId}/inputs/batch`, {
     method: 'POST',
@@ -153,44 +161,79 @@ export const addInput = (
   });
 
 /**
- * LIVE: PUT /api/projects/{id}/inputs/{dimension}/{code}/settings
+ * A variable's id as a URL path: `tec/TEC_001_t/TEC_001_sv003` stays three
+ * segments, each one escaped. The server reads everything after the
+ * dimension as the code's path, so a nested variable needs no special route.
+ */
+const inputPath = (projectId: string, variableId: string) =>
+  `/projects/${projectId}/inputs/${variableId.split('/').map(encodeURIComponent).join('/')}`;
+
+/**
+ * LIVE: PUT /api/projects/{id}/inputs/{dimension}/{code...}/settings
  *
  * How a variable's gaps are filled while processing, and what the model
  * scores where one is left. Takes effect on the next run.
  */
 export const saveVariableSettings = (
   projectId: string,
-  dimension: string,
-  code: string,
+  variableId: string,
   settings: VariableSettings,
 ): Promise<InputVariable> =>
-  request(`/projects/${projectId}/inputs/${dimension}/${code}/settings`, {
+  request(`${inputPath(projectId, variableId)}/settings`, {
     method: 'PUT',
     body: JSON.stringify(settings),
   });
 
-/** LIVE: DELETE /api/projects/{id}/inputs/{dimension}/{code}/settings: back to the defaults. */
+/** LIVE: DELETE /api/projects/{id}/inputs/{dimension}/{code...}/settings: back to the defaults. */
 export const resetVariableSettings = (
   projectId: string,
-  dimension: string,
-  code: string,
+  variableId: string,
 ): Promise<InputVariable> =>
-  request(`/projects/${projectId}/inputs/${dimension}/${code}/settings`, { method: 'DELETE' });
+  request(`${inputPath(projectId, variableId)}/settings`, { method: 'DELETE' });
 
 /**
- * ENDPOINT: DELETE /api/projects/{id}/inputs/{dimension}/{code}
+ * LIVE: GET /api/projects/{id}/inputs/value-columns
+ *
+ * Files the engine will not transform until one of their columns is chosen
+ * as the value, and those that have one, each with its candidates and their
+ * first value. Asked of the engine itself, so it takes a second or a few.
+ */
+export const getValueColumns = (projectId: string): Promise<ValueColumnsState> =>
+  request(`/projects/${projectId}/inputs/value-columns`);
+
+/** LIVE: PUT /api/projects/{id}/inputs/{dimension}/{code...}/value-column */
+export const chooseValueColumn = (
+  projectId: string,
+  variableId: string,
+  column: string,
+  file = '',
+): Promise<{ variableId: string; file: string; column: string | null }> =>
+  request(`${inputPath(projectId, variableId)}/value-column`, {
+    method: 'PUT',
+    body: JSON.stringify({ column, file }),
+  });
+
+/** LIVE: DELETE /api/projects/{id}/inputs/{dimension}/{code...}/value-column */
+export const clearValueColumn = (
+  projectId: string,
+  variableId: string,
+  file = '',
+): Promise<{ variableId: string; file: string; column: string | null }> =>
+  request(
+    `${inputPath(projectId, variableId)}/value-column${file ? `?file=${encodeURIComponent(file)}` : ''}`,
+    { method: 'DELETE' },
+  );
+
+/**
+ * ENDPOINT: DELETE /api/projects/{id}/inputs/{dimension}/{code...}
  *
  * Removes the project's copy *and* what the pipeline made from it. Both,
  * because the engine rebuilds its database from `out/` — a variable whose
  * output survived would be loaded straight back on the next run. The folder
  * it was copied from is untouched.
  */
-export const removeInput = (
-  projectId: string,
-  dimension: string,
-  code: string,
-): Promise<Removal> =>
-  request(`/projects/${projectId}/inputs/${dimension}/${code}`, { method: 'DELETE' });
+export const removeInput = (projectId: string, variableId: string): Promise<Removal> =>
+  request(inputPath(projectId, variableId), { method: 'DELETE' });
 
 /* ── processing ────────────────────────────────────────────────────────── */
 
@@ -417,6 +460,16 @@ export const listExamples = (): Promise<ModelExample[]> => mock.listExamples();
 /* ── past model runs ───────────────────────────────────────────────────── */
 
 /**
+ * LIVE: GET /api/projects/{id}/model/status
+ *
+ * Whether the model's last run still describes the data: the engine's own
+ * check of the master after processing, and whether the model file changed
+ * since the last Apply.
+ */
+export const getModelStatus = (projectId: string): Promise<ModelStatus> =>
+  request(`/projects/${projectId}/model/status`);
+
+/**
  * LIVE: GET /api/projects/{id}/model/runs
  *
  * Newest first. Only the first is ever drawn, which is the reason this list
@@ -511,6 +564,21 @@ export const saveSettings = (
       processingResolution: settings.processingResolution,
       mapResolution: settings.mapResolution,
     }),
+  });
+
+/**
+ * LIVE: PUT /api/projects/{id}/settings/options
+ *
+ * The project's switches, apart from the resolutions so that turning one on
+ * does not pin them. Passed to the engine with the next run.
+ */
+export const saveOptions = (
+  projectId: string,
+  options: ProjectOptions,
+): Promise<ProjectSettings> =>
+  request(`/projects/${projectId}/settings/options`, {
+    method: 'PUT',
+    body: JSON.stringify(options),
   });
 
 /**

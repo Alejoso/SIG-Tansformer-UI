@@ -1,9 +1,15 @@
 """
 A project's settings, and how they reach the engine.
 
-Two of them do something: the resolution the data is computed at, and the one
-the maps are drawn at. They are kept per project in `projects.csv` and applied
-to the engine before a run.
+Two of them do something to the data: the resolution it is computed at, and
+the one the maps are drawn at. They are kept per project in `projects.csv`
+and applied to the engine before a run.
+
+Three more are switches the engine reads from its environment, kept beside
+them and off unless turned on (`Options`): a CSV of the master table, CSVs of
+the model's tables, and keeping the machine awake while a run is going.
+Those are passed with each run rather than written into `.env`: both
+runners read them from the environment they are started with.
 
 Applied, not merely passed. The engine has one database and one `.env`, so
 these are really properties of *the engine as it is configured right now*;
@@ -42,6 +48,67 @@ COORDINATE_SYSTEM = "EPSG:4326"
 class Resolutions:
     processing: int
     render: int
+
+
+@dataclass(frozen=True)
+class Options:
+    """
+    The switches a project passes to the engine with every run. All off by
+    default: each costs disk or time, and none changes a result.
+    """
+
+    #: The master table as CSV beside its parquet (`EXPORT_CSV`). Gigabytes
+    #: on a real project, and only for opening it outside the engine.
+    masterCsv: bool = False
+    #: The model's criteria and subcriteria tables as CSV beside their parquet
+    #: (`MCDA_TABLES_CSV`). Hundreds of megabytes, and seconds per run.
+    modelTablesCsv: bool = False
+    #: Hold off sleep while a run is going (`KEEP_AWAKE`): the runner puts
+    #: itself under `systemd-inhibit` where there is one. A laptop that
+    #: suspends halfway through a load leaves it stopped until it wakes.
+    keepAwake: bool = False
+
+
+#: Each option, its column in `projects.csv` and the variable the engine reads.
+OPTION_FIELDS = (
+    ("masterCsv", "export_csv", "EXPORT_CSV"),
+    ("modelTablesCsv", "mcda_tables_csv", "MCDA_TABLES_CSV"),
+    ("keepAwake", "keep_awake", "KEEP_AWAKE"),
+)
+
+
+def options_of(project: store.ProjectRow) -> Options:
+    """This project's switches. Anything but `1` in the store is off."""
+    return Options(**{
+        name: getattr(project, column).strip() == "1" for name, column, _ in OPTION_FIELDS
+    })
+
+
+def save_options(project: store.ProjectRow, options: Options) -> store.ProjectRow:
+    """Store them. They reach the engine with the next run."""
+    rows = store.read_projects()
+    for row in rows:
+        if row.id == project.id:
+            for name, column, _ in OPTION_FIELDS:
+                setattr(row, column, "1" if getattr(options, name) else "")
+            row.updated_at = store.now()
+    store.write_projects(rows)
+    saved = store.find_project(project.id)
+    return saved if saved else project
+
+
+def option_env(project: store.ProjectRow) -> dict[str, str]:
+    """
+    The variables to run the engine with: `1` or `0` for each switch.
+
+    `0` rather than leaving it out, because the engine's `.env` may set one
+    of them, and a value in the environment the runner starts with wins over
+    the file (its `OVERRIDE_VARS`). Off here means off.
+    """
+    options = options_of(project)
+    return {
+        variable: "1" if getattr(options, name) else "0" for name, _, variable in OPTION_FIELDS
+    }
 
 
 def _as_resolution(raw: str, fallback: int) -> int:
@@ -120,6 +187,10 @@ def clear(project: store.ProjectRow) -> store.ProjectRow:
         if row.id == project.id:
             row.h3_res = ""
             row.render_h3_res = ""
+            # The switches go back to off with them: "Default values" is the
+            # whole dialog.
+            for _, column, _ in OPTION_FIELDS:
+                setattr(row, column, "")
             row.updated_at = store.now()
     store.write_projects(rows)
 

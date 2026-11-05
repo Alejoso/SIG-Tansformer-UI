@@ -46,8 +46,10 @@ export async function run({ project }) {
     const codes = await Promise.all(
       (await page.locator('.batch-code').all()).map((input) => input.inputValue()),
     );
+    // As the engine's lint leaves a folder name: the identity in capitals,
+    // the tail in lower case. Anything else is renamed by the first run.
     check('a folder with a code is taken at its word',
-      codes.includes('BCD_001_POBLACION_RURAL'), JSON.stringify(codes));
+      codes.includes('BCD_001_poblacion_rural'), JSON.stringify(codes));
     check('including one that is only a code', codes.includes('BCD_002'));
     check('and a folder without one still gets a code',
       codes.length === 3 && codes.every((code) => /^[A-Z]{3}_\d{3}/.test(code)),
@@ -66,7 +68,7 @@ export async function run({ project }) {
     const mine = inputs.filter((v) => v.dimension === DIMENSION);
     added.push(...mine.map((v) => v.code));
     check('the long code reaches the project',
-      mine.some((v) => v.code === 'BCD_001_POBLACION_RURAL'),
+      mine.some((v) => v.code === 'BCD_001_poblacion_rural'),
       mine.map((v) => v.code).join(' '));
 
     /* ── the map names variables by code ────────────────────────────── */
@@ -88,7 +90,9 @@ export async function run({ project }) {
 
       // The folders start shut, so open one and check what it reveals.
       const folder = layers.inputs.find((node) => (node.children ?? []).length > 0);
-      await page.locator('.layer-row.is-folder .layer-label').first().click();
+      // A project with one folder opens it already; clicking would shut it.
+      const firstFolder = page.locator('.layer-row.is-folder .layer-label').first();
+      if ((await firstFolder.getAttribute('aria-expanded')) !== 'true') await firstFolder.click();
       await page.waitForTimeout(500);
       const shown = await page.locator('.layer-list .layer-name').allInnerTexts();
       check('the sidebar names each variable by its code',

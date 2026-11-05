@@ -314,6 +314,7 @@ def compose_up(
     """
     prepare_host_folders(data_dir)
     env = run_full_env(extra={"DATA_DIR": str(data_dir)} if data_dir else None)
+    env.update(machine_fit(env))
     command = ["docker", "compose", "up", "-d"]
     if recreate:
         command.append("--force-recreate")
@@ -748,6 +749,44 @@ def reload_env(*, reset: bool, rebuild_everything: bool = False) -> dict[str, st
 #: project" (`run_mcda.sh` also has `--no-project`), and then everything
 #: comes from `.env` and from what is passed here, `DATA_DIR` first.
 NO_ENGINE_PROJECT = {"PROJECT": ""}
+
+
+#: The engine's own fit of the container sizes to this machine. `run_full.sh`
+#: and `run_mcda.sh` apply it themselves; `compose_up` is the one place that
+#: starts the containers without them, so it asks the same script.
+MACHINE_FIT_SCRIPT = Path("app") / "tools" / "machine_resources.py"
+#: What it may hand back: the sizes compose reads, and nothing else.
+MACHINE_FIT_KEYS = frozenset({
+    "APP_CPUS", "APP_MEM_LIMIT", "DB_CPUS", "DB_MEM_LIMIT", "PG_SHARED_BUFFERS",
+    "MAX_APP_CPUS", "MAX_APP_MEMORY", "MAX_WORKERS",
+})
+
+
+def machine_fit(env: dict[str, str]) -> dict[str, str]:
+    """
+    The container sizes the engine lowers to what Docker has here
+    (`FIT_TO_MACHINE`, on unless `.env` says 0), as `KEY: value` for the
+    environment of `docker compose up`. Empty when nothing needs lowering,
+    the engine is older than the script, or it fails: then compose uses
+    `.env` as written, which is what it did before.
+    """
+    script = PIPELINE_DIR / MACHINE_FIT_SCRIPT
+    python = shutil.which("python3") or shutil.which("python")
+    if not script.is_file() or python is None:
+        return {}
+    try:
+        result = subprocess.run([python, str(script), "--env", "--quiet"], cwd=PIPELINE_DIR,
+                                env=env, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if result.returncode != 0:
+        return {}
+    fitted: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.strip() in MACHINE_FIT_KEYS and value.strip():
+            fitted[key.strip()] = value.strip()
+    return fitted
 
 
 def run_full_env(*, skip_build: bool = True, extra: dict[str, str] | None = None) -> dict[str, str]:

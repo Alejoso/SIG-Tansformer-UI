@@ -427,6 +427,14 @@
   font-size: 11px;
   font-weight: 600;
 }
+/* The group a nested variable sits in (`TEC_001_t/`), ahead of its code. */
+.variable-group {
+  margin-right: 2px;
+  font-size: 11px;
+}
+.variable-note {
+  font-style: italic;
+}
 
 /* ── a run's steps ──────────────────────────────────────────────────────── */
 
@@ -611,6 +619,32 @@
 }
 .settings-source.is-engine { background: var(--color-neutral-200); color: var(--color-neutral-800); }
 
+/* The switches passed with every run: a box each, its cost under its name. */
+.settings-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--color-neutral-200);
+  border-radius: var(--radius-md);
+}
+.settings-options legend {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.settings-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.settings-option input { margin-top: 3px; flex: none; }
+.settings-option > span { display: flex; flex-direction: column; gap: 2px; }
+.settings-option .field-hint { margin: 0; }
+.settings-option-label { font-size: 13px; }
+
 
 /* ── a folder that holds several variables ──────────────────────────────── */
 
@@ -656,6 +690,11 @@
   height: 28px;
   padding: 2px 10px;
   font-size: 12.5px;
+}
+.batch-group {
+  flex: none;
+  font-size: 12px;
+  margin-right: -6px;
 }
 
 /* What is still to do after a resolution is saved. */
@@ -749,3 +788,37 @@
 
 /* The engine's report of a run: its errors, when it failed. */
 .run-report-errors { margin: 6px 0 0; padding-left: 18px; font-size: 11.5px; }
+
+/* Which column is the value, for a file with several. The engine leaves such
+   a file out until one is chosen, so a missing choice reads as a warning. */
+.variable-value-column { font-size: 11.5px; }
+.variable-value-column.is-missing { color: var(--color-accent-800); }
+.value-column-tag { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
+.value-column-tag:hover { background: var(--color-accent-300); }
+.value-column-editor { display: flex; flex-direction: column; gap: 6px; }
+.value-column-head { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.value-column-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.value-column-file { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.value-column-select { height: 30px; min-width: 240px; max-width: 100%; padding: 2px 10px; font-size: 12.5px; }
+.value-column-error { flex-basis: 100%; font-size: 11.5px; color: var(--color-accent-800); }
+.value-column-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 50vh;
+  overflow: auto;
+}
+.value-column-list li { display: flex; flex-direction: column; gap: 5px; }
+.value-column-where { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; min-width: 0; }
+.value-column-list .value-column-select { width: 100%; }
+.value-column-later { font-size: 12px; }
+.problem-fix { flex: none; height: 26px; padding-inline: 12px; font-size: 12px; }

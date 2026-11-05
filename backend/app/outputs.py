@@ -2,14 +2,17 @@
 Discovering what the pipeline actually produced.
 
 A project's folder is the pipeline's `DATA_DIR`: inputs under `in/`, results
-under `out/`. Variables come out as a flat mirror of how they went in —
+under `out/`. Variables come out as a mirror of how they went in, at any
+depth:
 
     <DATA_DIR>/in/<dimension>/<CODE>/<name>.shp
     <DATA_DIR>/out/<dimension>/<CODE>/<name>.h3.parquet
                                       <name>.h3.html
                                       <name>.pipeline.jsonl
+    <DATA_DIR>/out/tec/TEC_001_t/TEC_001_sv003/<name>.h3.parquet
 
-— which is why the input side of the sidebar is a flat list, while the model,
+The variable is the folder holding the files, and its code is that folder's
+name. The input side of the sidebar is a list per dimension, while the model,
 which comes out nested by criterion and subcriterion, is a tree.
 
 Nothing here runs the pipeline. It reads what is on disk, so it works whether
@@ -82,6 +85,57 @@ def is_variable_folder(name: str) -> bool:
 
 #: Kept for the places that read it as a set. Prefer `is_variable_folder`.
 NOT_DIMENSIONS = ENGINE_FOLDERS
+
+#: How deep `result_folders` looks under `out/`, as `inputs.MAX_DEPTH` does
+#: under `in/`: the results mirror the inputs.
+MAX_DEPTH = 6
+
+
+#: What the engine writes per variable, and what makes a folder under
+#: `out/` one variable's results rather than something else's: the loader's
+#: input, the stage log, ingest's note, the rendered map.
+RESULT_SUFFIXES = (".h3.parquet", *LOG_SUFFIXES, ".error.txt", *HTML_SUFFIXES)
+#: What the loader actually loads (`load_h3_values.fetch_h3_outputs`).
+LOADED_SUFFIXES = (".h3.parquet",)
+
+
+def result_folders(
+    root: Path, suffixes: tuple[str, ...] = RESULT_SUFFIXES
+) -> list[tuple[str, ...]]:
+    """
+    Every folder under `out/` holding a variable's results, as its parts
+    relative to `out/` (`("tec", "TEC_001_t", "TEC_001_sv003")`), in order.
+    A result is a file ending in one of `suffixes`; `LOADED_SUFFIXES` asks
+    for the folders the loader would load.
+
+    The engine writes each dataset's results into the mirror of the folder
+    it came from, at whatever depth (`ingest_to_geoparquet.ensure_out_dir`,
+    `raster_to_h3.get_relative_out_path`), and the loader picks up every
+    `.h3.parquet` under `out/` except in its own folders, at any level. So a
+    variable's results are a folder holding files, two levels down or more:
+    `out/<dimension>/.../<CODE>/`. A folder that only holds folders
+    (`TEC_001_t`) is not one, and neither is anything inside a folder that is
+    not a variable folder (`is_variable_folder`), however deep.
+    """
+    found: list[tuple[str, ...]] = []
+
+    def walk(folder: Path, parts: tuple[str, ...]) -> None:
+        try:
+            entries = sorted(folder.iterdir())
+        except OSError:
+            return
+        if len(parts) >= 2 and any(
+            entry.name.endswith(suffixes) and entry.is_file() for entry in entries
+        ):
+            found.append(parts)
+        if len(parts) >= MAX_DEPTH:
+            return
+        for entry in entries:
+            if entry.is_dir() and not entry.is_symlink() and is_variable_folder(entry.name):
+                walk(entry, (*parts, entry.name))
+
+    walk(root, ())
+    return found
 
 
 def data_dir(project: store.ProjectRow) -> Path | None:
@@ -346,34 +400,35 @@ def scan_problems(project: store.ProjectRow) -> list[VariableProblem]:
         return []
 
     found: list[VariableProblem] = []
-    for dimension_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-        if not is_variable_folder(dimension_dir.name):
+    # At any depth, as the engine writes them: `tec/TEC_001_t/TEC_001_sv003`
+    # is a variable, and `tec/TEC_001_t`, which only holds it, is not one
+    # that never finished.
+    for parts in result_folders(root):
+        code_dir = root.joinpath(*parts)
+        logs = sorted(code_dir.glob("*.pipeline.jsonl")) or sorted(code_dir.glob("*_pipeline.jsonl"))
+        status, stage, reason, source, execution_id = (
+            _problem_from_log(logs[0]) if logs else ("unfinished", "", "", "", "")
+        )
+        if status == "ok":
             continue
-        for code_dir in sorted(p for p in dimension_dir.iterdir() if p.is_dir()):
-            logs = sorted(code_dir.glob("*.pipeline.jsonl"))
-            status, stage, reason, source, execution_id = (
-                _problem_from_log(logs[0]) if logs else ("unfinished", "", "", "", "")
+        if not reason:
+            reason, note_source = _reject_note(code_dir)
+            source = source or note_source
+            if reason and status == "unfinished":
+                status, stage = "error", stage or "INGESTA"
+        found.append(
+            VariableProblem(
+                id="/".join(parts),
+                dimension=parts[0],
+                code=parts[-1],
+                status=status,
+                stage=stage,
+                stageLabel=STAGE_LABELS.get(stage, stage.lower().replace("_", " ")),
+                reason=reason,
+                source=source,
+                executionId=execution_id,
             )
-            if status == "ok":
-                continue
-            if not reason:
-                reason, note_source = _reject_note(code_dir)
-                source = source or note_source
-                if reason and status == "unfinished":
-                    status, stage = "error", stage or "INGESTA"
-            found.append(
-                VariableProblem(
-                    id=f"{dimension_dir.name}/{code_dir.name}",
-                    dimension=dimension_dir.name,
-                    code=code_dir.name,
-                    status=status,
-                    stage=stage,
-                    stageLabel=STAGE_LABELS.get(stage, stage.lower().replace("_", " ")),
-                    reason=reason,
-                    source=source,
-                    executionId=execution_id,
-                )
-            )
+        )
     return found
 
 
@@ -408,12 +463,16 @@ def scan_variables(project: store.ProjectRow) -> list[VariableLayer]:
     for html in _documents(root):
         relative = html.relative_to(root)
         parts = relative.parts
-        # Expect <dimension>/<CODE>/<name>.h3.html; anything shallower is
-        # bookkeeping rather than a variable.
-        if len(parts) < 3 or not is_variable_folder(parts[0]):
+        # Expect <dimension>/<CODE>/<name>.h3.html, or deeper for a nested
+        # variable (<dimension>/TEC_001_t/TEC_001_sv003/<name>.h3.html);
+        # anything shallower is bookkeeping rather than a variable, and so is
+        # anything inside one of the engine's own folders, at any level.
+        if len(parts) < 3 or not all(is_variable_folder(part) for part in parts[:-1]):
             continue
 
-        dimension, code = parts[0], parts[1]
+        # The code is the folder holding the document, which is the folder
+        # the loader names the column after.
+        dimension, code = parts[0], parts[-2]
         stem = _strip_suffix(html.name, HTML_SUFFIXES)
         stages, ok, execution_id = _read_variable_log(_sibling_log(html, stem))
 

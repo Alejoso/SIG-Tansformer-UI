@@ -6,6 +6,11 @@ reads each dataset's dimension and code straight out of the path:
 
     in/<dimension>/<CODE>/<one data file>
     in/09_regulatorio/REG_001/pct_exito_mw_onshore.csv
+    in/tec/TEC_001_t/TEC_001_sv003/velocidad_100m.tif
+
+at any depth: the dimension is the first folder, and the code is the folder
+holding the file, which the loader names the master-table column after.
+`TEC_001_t` there is only a group of a variable's versions.
 
 `ingest_to_geoparquet` mirrors that structure into `out/`, and everything
 downstream — the master table, the MCDA, the layer sidebar — identifies a
@@ -25,7 +30,7 @@ import os
 import re
 import unicodedata
 import shutil
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import engine_state, fsutil, outputs, pipeline, store
@@ -78,9 +83,12 @@ DIMENSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 class InputVariable:
     """One variable sitting in the engine's input tree, ready to process."""
 
-    #: `<dimension>/<CODE>`, which is also where it lives.
+    #: Where it lives, relative to `in/`: `<dimension>/<CODE>`, or deeper for
+    #: a nested one, `tec/TEC_001_t/TEC_001_sv003`.
     id: str
     dimension: str
+    #: The folder holding the dataset, which is what the engine names the
+    #: master-table column after (`leaf_var_name`): `TEC_001_sv003`.
     code: str
     #: The dataset itself. Companion files are counted, not named.
     filename: str
@@ -95,8 +103,15 @@ class InputVariable:
     #: True when the source folder is no longer where it was. Informational:
     #: the data is already in the tree, so nothing is broken by it.
     sourceMissing: bool = False
-    #: Set when the folder does not hold exactly one readable dataset.
+    #: Set when the folder holds nothing the engine can read.
     problem: str = ""
+    #: Something the engine does that is worth knowing and is not a failure:
+    #: several datasets in one folder become a column each, named after the
+    #: folder and the file.
+    note: str = ""
+    #: The folders between the dimension and this one, `TEC_001_t` for
+    #: `tec/TEC_001_t/TEC_001_sv003`. Empty for the usual flat variable.
+    group: str = ""
     #: Results with no input left. The pipeline loads whatever `.h3.parquet`
     #: it finds under `out/`, so one of these is still a variable in the
     #: master table and in the model — it just has nothing behind it. Listed
@@ -147,6 +162,10 @@ class ImportCandidate:
     code: str = ""
     #: Why this one cannot be added. The others still can.
     problem: str = ""
+    #: The folders it is filed under between the dimension and its code,
+    #: kept from the folder it came from: `TEC_001_t` for
+    #: `TEC_001_t/TEC_001_sv003`. Empty for a flat variable.
+    group: str = ""
 
 
 def data_in(project: store.ProjectRow) -> Path | None:
@@ -187,11 +206,10 @@ def _format_of(path: Path) -> str:
 
 def _datasets_in(folder: Path) -> list[Path]:
     """
-    The data files in a folder, companions excluded.
+    The data files directly in a folder, companions excluded.
 
-    Only the top level: the engine reads one dataset per code folder, so
-    anything nested is a different arrangement than the one it expects and is
-    better reported than silently flattened.
+    One folder's worth: `_dataset_folders` is what walks the levels below,
+    the way the engine does.
     """
     try:
         entries = sorted(folder.iterdir())
@@ -241,6 +259,63 @@ def _measure(paths: list[Path]) -> int:
 # ── reading the tree ──────────────────────────────────────────────────────
 
 
+#: How far below a folder the walk goes. The engine has no limit (it uses
+#: `rglob`), but its own data is never more than three folders deep under a
+#: dimension, and a walk with no limit over a folder picked by mistake (a
+#: home directory) would not come back.
+MAX_DEPTH = 6
+#: And how many folders it looks at before giving up, for the same reason.
+MAX_FOLDERS = 5000
+
+#: First-level folders under `in/` the engine does not read
+#: (`IGNORE_DIRS` in `ingest_to_geoparquet.py`).
+ENGINE_INPUT_IGNORED = frozenset({"admin"})
+
+
+def _subfolders(folder: Path) -> list[Path]:
+    """
+    The folders under one to walk into: not hidden, not a `.gdb` (which is a
+    dataset), and not a link, which could lead back up the tree.
+    """
+    try:
+        return [
+            entry for entry in sorted(folder.iterdir())
+            if entry.is_dir()
+            and not entry.is_symlink()
+            and not entry.name.startswith(".")
+            and entry.suffix.lower() != ".gdb"
+        ]
+    except OSError:
+        return []
+
+
+def _dataset_folders(root: Path) -> tuple[list[tuple[Path, list[Path]]], bool]:
+    """
+    Every folder at or under `root` holding a dataset itself, with them,
+    top-down and in order; and whether the walk stopped at `MAX_FOLDERS`.
+
+    This is the engine's view of a tree: ingest and the raster step `rglob`
+    the whole of `in/`, and every dataset at any depth is processed into the
+    mirror of its folder under `out/`. So `tec/TEC_001_t/TEC_001_sv003/x.tif`
+    is a variable just like `soc/SOC_001/x.csv`, and `TEC_001_t`, which only
+    holds folders, is not one.
+    """
+    found: list[tuple[Path, list[Path]]] = []
+    pending = [(root, 0)]
+    visited = 0
+    while pending:
+        folder, depth = pending.pop(0)
+        visited += 1
+        if visited > MAX_FOLDERS:
+            return found, True
+        datasets = _datasets_in(folder)
+        if datasets:
+            found.append((folder, datasets))
+        if depth < MAX_DEPTH:
+            pending[0:0] = [(child, depth + 1) for child in _subfolders(folder)]
+    return found, False
+
+
 def scan(project: store.ProjectRow) -> list[InputVariable]:
     """
     Every variable in the input tree, as the pipeline will see it.
@@ -248,6 +323,14 @@ def scan(project: store.ProjectRow) -> list[InputVariable]:
     Listed from disk rather than from our own records, because the pipeline
     reads disk. Data dropped in by hand shows up here too, which is the point:
     the screen should show what will actually be processed.
+
+    At any depth, as the engine reads it: a variable is a folder holding a
+    dataset, wherever it sits under its dimension, and its code is that
+    folder's name (the column the loader makes of it). The folders above it
+    are its `group`. A folder straight under a dimension with nothing
+    readable anywhere inside is listed with that problem, since it was
+    clearly meant to be a variable; one that only holds variable folders
+    (`TEC_001_t`) is not a variable at all.
     """
     root = data_in(project)
     if root is None or not root.is_dir():
@@ -256,45 +339,69 @@ def scan(project: store.ProjectRow) -> list[InputVariable]:
     sources = {row.name: row for row in store.folders_of(project.id)}
     found: list[InputVariable] = []
 
-    for dimension_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-        for code_dir in sorted(p for p in dimension_dir.iterdir() if p.is_dir()):
-            identifier = f"{dimension_dir.name}/{code_dir.name}"
-            datasets = _datasets_in(code_dir)
+    for dimension_dir in _subfolders(root):
+        if dimension_dir.name in ENGINE_INPUT_IGNORED:
+            continue
+        folders, _ = _dataset_folders(dimension_dir)
+        holding = {folder for folder, _ in folders}
+        for folder, datasets in folders:
+            if folder == dimension_dir:
+                # A file straight in the dimension folder. The engine reads
+                # it and names its column after the dimension; nothing here
+                # writes one, and it has no code to list it by.
+                continue
+            found.append(_input_variable(root, folder, datasets, sources))
 
-            problem = ""
-            if not datasets:
-                problem = "No file here the pipeline can read"
-            elif len(datasets) > 1:
-                problem = (
-                    f"{len(datasets)} datasets in one folder — the pipeline expects one, "
-                    "and names the variable after it"
-                )
-
-            dataset = datasets[0] if datasets else None
-            row = sources.get(identifier)
-            try:
-                file_count = sum(1 for entry in code_dir.iterdir() if entry.is_file())
-            except OSError:
-                file_count = 0
-
-            found.append(
-                InputVariable(
-                    id=identifier,
-                    dimension=dimension_dir.name,
-                    code=code_dir.name,
-                    filename=dataset.name if dataset else "",
-                    format=_format_of(dataset) if dataset else "",
-                    sizeBytes=_measure([dataset]) if dataset else 0,
-                    fileCount=file_count,
-                    source=row.path if row else "",
-                    sourceMissing=bool(row) and not Path(row.path).is_dir(),
-                    problem=problem,
-                )
-            )
+        # A code folder with nothing readable in it or under it.
+        for code_dir in _subfolders(dimension_dir):
+            if any(folder == code_dir or code_dir in folder.parents for folder in holding):
+                continue
+            found.append(_input_variable(root, code_dir, [], sources))
 
     found += _results_without_input(project, {variable.id for variable in found})
     found.sort(key=lambda variable: variable.id)
     return found
+
+
+def _input_variable(
+    root: Path, folder: Path, datasets: list[Path], sources: dict[str, store.FolderRow]
+) -> InputVariable:
+    """One folder of the input tree as a variable."""
+    relative = folder.relative_to(root)
+    identifier = relative.as_posix()
+    problem = note = ""
+    if not datasets:
+        problem = "No file here the pipeline can read"
+    elif len(datasets) > 1:
+        # The engine processes every one of them, and the loader tells them
+        # apart by adding the file's name to the folder's (`build_variable_key`).
+        note = (
+            f"{len(datasets)} datasets in one folder. The engine makes a column of each, "
+            f"named {format_code(folder.name)}_<file>; one per folder keeps the column "
+            "named after the folder"
+        )
+
+    dataset = datasets[0] if datasets else None
+    row = sources.get(identifier)
+    try:
+        file_count = sum(1 for entry in folder.iterdir() if entry.is_file())
+    except OSError:
+        file_count = 0
+
+    return InputVariable(
+        id=identifier,
+        dimension=relative.parts[0],
+        code=folder.name,
+        filename=dataset.name if dataset else "",
+        format=_format_of(dataset) if dataset else "",
+        sizeBytes=_measure([dataset]) if dataset else 0,
+        fileCount=file_count,
+        source=row.path if row else "",
+        sourceMissing=bool(row) and not Path(row.path).is_dir(),
+        problem=problem,
+        note=note,
+        group="/".join(relative.parts[1:-1]),
+    )
 
 
 def _results_without_input(
@@ -304,46 +411,46 @@ def _results_without_input(
     Variables that exist only as results.
 
     The pipeline loads every `.h3.parquet` under `out/`, so one of these is a
-    column in the master table and a leaf the model can score — with no input
+    column in the master table and a leaf the model can score, with no input
     behind it and, until now, no way to see or remove it from here.
 
     They come from an input removed outside this app, or from the window
     where removing a variable deleted its input and left its results.
+    Nested ones too: the results mirror the input tree at any depth.
     """
     root = outputs.out_dir(project)
     if root is None or not root.is_dir():
         return []
 
     orphans: list[InputVariable] = []
-    for dimension_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-        if not outputs.is_variable_folder(dimension_dir.name):
+    for parts in outputs.result_folders(root, outputs.LOADED_SUFFIXES):
+        identifier = "/".join(parts)
+        if identifier in known:
             continue
-        for code_dir in sorted(p for p in dimension_dir.iterdir() if p.is_dir()):
-            identifier = f"{dimension_dir.name}/{code_dir.name}"
-            if identifier in known:
-                continue
-            try:
-                files = [entry for entry in code_dir.iterdir() if entry.is_file()]
-            except OSError:
-                continue
-            if not files:
-                continue
-            orphans.append(
-                InputVariable(
-                    id=identifier,
-                    dimension=dimension_dir.name,
-                    code=code_dir.name,
-                    filename=min((f.name for f in files), key=len),
-                    format="",
-                    sizeBytes=sum(f.stat().st_size for f in files),
-                    fileCount=len(files),
-                    processedOnly=True,
-                    problem=(
-                        "Results with no input — still loaded into the master table "
-                        "and the model"
-                    ),
-                )
+        folder = root.joinpath(*parts)
+        try:
+            files = [entry for entry in folder.iterdir() if entry.is_file()]
+        except OSError:
+            continue
+        if not files:
+            continue
+        orphans.append(
+            InputVariable(
+                id=identifier,
+                dimension=parts[0],
+                code=parts[-1],
+                filename=min((f.name for f in files), key=len),
+                format="",
+                sizeBytes=sum(f.stat().st_size for f in files),
+                fileCount=len(files),
+                processedOnly=True,
+                group="/".join(parts[1:-1]),
+                problem=(
+                    "Results with no input: still loaded into the master table "
+                    "and the model"
+                ),
             )
+        )
     return orphans
 
 
@@ -352,7 +459,9 @@ def dimensions(project: store.ProjectRow) -> list[str]:
     root = data_in(project)
     if root is None or not root.is_dir():
         return []
-    return sorted(p.name for p in root.iterdir() if p.is_dir())
+    return [
+        p.name for p in _subfolders(root) if p.name not in ENGINE_INPUT_IGNORED
+    ]
 
 
 def _strip_accents(text: str) -> str:
@@ -369,6 +478,71 @@ def _strip_accents(text: str) -> str:
     )
 
 
+#: What the engine's lint spells out rather than drops (`READABLE_REPLACEMENTS`
+#: in `app/tools/lint_filenames.py`).
+_READABLE_REPLACEMENTS = {"&": " y ", "@": " at "}
+
+#: The suffix the lint keeps whole on a file, as it has it.
+_LINT_SPECIAL_SUFFIXES = (".h3.parquet",)
+
+
+def engine_name(name: str, is_dir: bool) -> str:
+    """
+    A file or folder name as the engine's lint leaves it.
+
+    A copy of `sanitize_name` in the engine's `app/tools/lint_filenames.py`,
+    which renames everything under `data/in` on every run: the part before
+    the last dot is lowercased, stripped of accents, `&` and `@` spelled out,
+    anything but a letter or digit turned into one underscore; the extension
+    is lowercased; and on a folder, `format_code` puts a leading `abc_123`
+    back into capitals. Anything written into the input tree under another
+    name is renamed under the app on the next run, which is how a variable
+    used to lose its own record of where it came from.
+
+    Kept a copy rather than imported: the engine runs in a container and this
+    does not. Worth re-reading against the engine's when it changes.
+    """
+    lower = name.lower()
+    special = next((suffix for suffix in _LINT_SPECIAL_SUFFIXES if lower.endswith(suffix)), None)
+    if special:
+        base, ext = name[: -len(special)], special
+    elif "." in name and not name.startswith("."):
+        base, ext = name.rsplit(".", 1)
+        ext = "." + ext.lower()
+    else:
+        base, ext = name, ""
+
+    base = _strip_accents(base).lower()
+    for key, value in _READABLE_REPLACEMENTS.items():
+        base = base.replace(key, value)
+    base = re.sub(r"[^A-Za-z0-9]+", "_", base).strip("_") or "unnamed"
+    if is_dir:
+        base = format_code(base)
+    return base + ext
+
+
+def format_code(name: str) -> str:
+    """The engine's `shared.format_code`: a leading `abc_123` in capitals, the rest as it is."""
+    return re.sub(
+        r"^[a-z]{3}_[0-9]{3}(?=_|$)", lambda m: m.group(0).upper(), name, flags=re.IGNORECASE
+    )
+
+
+def _folder_name(raw: str) -> str:
+    """
+    A folder name the lint will leave alone, from anything typed.
+
+    The lint reads a dot in a folder's name as the start of an extension and
+    keeps what follows it as it is, so `SOC_024.6-s` survives it untouched.
+    This app never writes one: a dot is an underscore here, which gives a name
+    that is the same before and after the lint.
+    """
+    cleaned = _strip_accents(raw).strip().replace(".", "_")
+    if not re.search(r"[A-Za-z0-9]", cleaned):
+        return ""
+    return engine_name(cleaned, is_dir=True)
+
+
 def normalise_dimension(name: str) -> str:
     """
     A dimension name as the engine will end up storing it.
@@ -377,13 +551,11 @@ def normalise_dimension(name: str) -> str:
     lowercased, anything but a letter or digit turned into an underscore, and
     then `format_code` puts a leading `abc_123` back into capitals. So a
     folder typed as `10-Socioeconomico` is renamed to `10_socioeconomico` on
-    the first run, and one typed `soe-001` comes back as `SOE_001` — either
+    the first run, and one typed `soe-001` comes back as `SOE_001`; either
     way every variable under it changes id. Normalising here means what the
     screen shows is what the engine will end up with.
     """
-    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", _strip_accents(name).strip()).strip("_").lower()
-    # The engine's `format_code`, which applies to folders only.
-    return re.sub(r"^[a-z]{3}_[0-9]{3}(?=_|$)", lambda m: m.group(0).upper(), cleaned)
+    return _folder_name(name)
 
 
 def normalise_code(raw: str) -> str:
@@ -391,22 +563,31 @@ def normalise_code(raw: str) -> str:
     A code in the engine's own shape: three letters, underscore, three digits,
     and whatever the folder called itself after that.
 
+    Exactly what the engine's lint makes of the folder (`engine_name`): the
+    identity in capitals and the tail in lower case, so `TEC_001_SV003` is
+    `TEC_001_sv003`. Anything else would be renamed by the first run, and the
+    variable would stop matching what was recorded about it here.
+
     Typed codes copy the folder or file they came from, and those are named
     `SOE-001` as often as `SOE_001`. The engine's `DIM_CODE_RE` only
     recognises the underscore form, and a code it does not recognise stops
-    being a code — it becomes part of the name and the variable loses its
-    identity. So a hyphen is corrected rather than rejected.
-
-    A tail is kept as it is: `SOE-001-poblacion` is `SOE_001_POBLACION`, and
-    the engine reads the identity off the front and leaves the rest alone.
+    being a code: it becomes part of the name and the variable loses its
+    identity. So a hyphen is corrected rather than rejected, as are a missing
+    underscore and missing zeros (`SOE1` is `SOE_001`). Every result is a name
+    the lint leaves as it is.
     """
-    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", _strip_accents(raw).strip()).strip("_").upper()
+    cleaned = _folder_name(raw)
     # `SOE001` is unambiguous too, and is what you get from a tidy filename.
     match = re.fullmatch(r"([A-Za-z]{3})_?([0-9]{1,3})(?:_(.+))?", cleaned)
     if match:
         base = f"{match.group(1).upper()}_{int(match.group(2)):03d}"
-        return f"{base}_{match.group(3)}" if match.group(3) else base
+        return f"{base}_{match.group(3).lower()}" if match.group(3) else base
     return cleaned
+
+
+def is_code(name: str) -> bool:
+    """Whether a folder name starts with an identity the engine reads (`abc_123`)."""
+    return bool(CODE_PREFIX.match(normalise_code(name)))
 
 
 def _code_from_name(name: str) -> str:
@@ -423,7 +604,7 @@ def _code_from_name(name: str) -> str:
     # `soe_001_SOE-001.gpkg` is a file saying its code twice — the folder's
     # and its own. Once is enough.
     prefix = CODE_PREFIX.match(candidate)
-    if prefix and candidate == f"{prefix.group(0)}_{prefix.group(0)}":
+    if prefix and candidate.lower() == f"{prefix.group(0)}_{prefix.group(0)}".lower():
         candidate = prefix.group(0)
     if len(candidate) > MAX_CODE_LENGTH:
         # Too long to keep whole. The identity is still worth having.
@@ -450,12 +631,24 @@ def suggest_dimension(project: store.ProjectRow, source: Path) -> str:
     return guess if len(guess) > 3 else ""
 
 
-def _taken_codes(project: store.ProjectRow, dimension: str) -> list[str]:
-    """Codes already used in a dimension, in the order they were found."""
-    return [
-        variable.code for variable in scan(project)
+def _taken_codes(project: store.ProjectRow, dimension: str) -> tuple[list[str], set[str]]:
+    """
+    Codes already used in a dimension, in the order they were found, and
+    every code in the project.
+
+    Both, because they answer different questions. The dimension's own codes
+    say which prefix it uses. But a code taken anywhere is taken: the loader
+    names a column after the folder alone, whatever dimension or group it is
+    in, and two folders with one name are both renamed (`build_variable_key`
+    adds the file's name to each), so neither column is called what the
+    model expects.
+    """
+    variables = scan(project)
+    existing = [
+        variable.code for variable in variables
         if variable.dimension == dimension and CODE_PATTERN.match(variable.code)
     ]
+    return existing, {variable.code for variable in variables}
 
 
 def _numbers_under(codes, prefix: str) -> set[int]:
@@ -515,133 +708,96 @@ def suggest_code(project: store.ProjectRow, dimension: str, filename: str = "") 
     One variable's worth. A batch allocates several against one set it keeps
     itself; both go through `_next_code`, so they cannot drift apart.
     """
-    existing = _taken_codes(project, dimension)
-    return _next_code(existing, set(existing), dimension, filename)
+    existing, taken = _taken_codes(project, dimension)
+    return _next_code(existing, taken, dimension, filename)
 
 
 # ── adding to it ──────────────────────────────────────────────────────────
 
 
-def _batch_candidates(source: Path) -> list[ImportCandidate]:
+def _candidate(source: Path, dataset: Path, label: str) -> ImportCandidate:
+    companions = _companions(dataset)
+    return ImportCandidate(
+        source=str(source),
+        label=label,
+        filename=dataset.name,
+        format=_format_of(dataset),
+        sizeBytes=_measure([dataset, *companions]),
+        files=[dataset.name] + [c.name for c in companions],
+    )
+
+
+def _batch_candidates(
+    folders: list[tuple[Path, list[Path]]], source: Path
+) -> list[tuple[ImportCandidate, str]]:
     """
-    The variables a folder holds, when it holds several rather than being one.
+    The variables a folder holds, when it holds several rather than being one,
+    each with the name its code is suggested from.
 
-    Two arrangements turn up, and both are what someone means by "a folder of
-    variables":
+    Found at any depth, the way the engine finds them (`_dataset_folders`):
+    every folder holding one dataset is a variable, and every dataset in a
+    folder holding several is one too. So all of these are a folder of
+    variables:
 
-    * subfolders with one dataset each — `socioeconomico/SOE_001/x.gpkg`;
-    * several datasets side by side — `socioeconomico/SOE-001.gpkg,
+    * subfolders with one dataset each: `socioeconomico/SOE_001/x.gpkg`;
+    * several datasets side by side: `socioeconomico/SOE-001.gpkg,
       SOE-002.gpkg`. That one used to be refused outright, with a message
-      saying to add them one folder at a time.
+      saying to add them one folder at a time;
+    * the engine's own arrangement of a variable's versions,
+      `TEC_001_t/TEC_001_sv003/x.tif`, whether the folder picked is the
+      dimension above it or `TEC_001_t` itself.
 
-    A folder holding exactly one dataset is one variable, not a batch, which
-    is why this is only consulted when that is not the case.
+    Each variable is copied into a folder named after its code, and that
+    code is the master-table column, as the loader names it. The folders
+    above it are kept when they are named like a code and hold no data of
+    their own (`TEC_001_t`, a group), and dropped otherwise: a `shp/` or a
+    `data/` says nothing, and keeping it would leave the variable's column
+    named `shp`. A folder like that, alone under a code (`SOC_025_sr/shp/`),
+    is the code's own variable.
 
-    A subfolder with nothing readable is left out entirely rather than listed
-    as a problem: a folder of variables usually has a `docs` or a `.git` in
-    it, and those are not failures to report. A subfolder with *several*
-    datasets is listed, because it was clearly meant to be a variable and the
-    reason it cannot be one is worth seeing.
+    A subfolder with nothing readable is left out: a folder of variables
+    usually has a `docs` or a `.git` in it, and those are not failures.
     """
-    datasets = _datasets_in(source)
-    if len(datasets) > 1:
-        found = []
+    holding = {folder for folder, _ in folders}
+    entries: list[dict] = []
+    for folder, datasets in folders:
+        relative = folder.relative_to(source)
+        chain = [source] + [
+            source.joinpath(*relative.parts[: index + 1]) for index in range(len(relative.parts))
+        ]
+        own = len(datasets) == 1
         for dataset in datasets:
-            companions = _companions(dataset)
-            found.append(
-                ImportCandidate(
-                    source=str(source),
-                    label=dataset.name,
-                    filename=dataset.name,
-                    format=_format_of(dataset),
-                    sizeBytes=_measure([dataset, *companions]),
-                    files=[dataset.name] + [c.name for c in companions],
-                )
-            )
-        return found
+            above = chain[:-1] if own else chain
+            if own:
+                label = relative.as_posix() if folder != source else dataset.name
+            else:
+                label = (relative / dataset.name).as_posix()
+            entries.append({
+                "candidate": _candidate(folder, dataset, label),
+                "group": [a for a in above if a not in holding and is_code(a.name)],
+                "folder": folder,
+                "name": folder.name if own else dataset.name,
+                "own": own,
+                "dataset": dataset,
+            })
 
-    if datasets:
-        return []
-
-    try:
-        # A `.gdb` is a directory but it is also a dataset, and if we are
-        # here `_datasets_in` has already said there is not one.
-        subfolders = [
-            entry for entry in sorted(source.iterdir())
-            if entry.is_dir() and entry.suffix.lower() != ".gdb" and not entry.name.startswith(".")
-        ]
-    except OSError:
-        return []
+    def under(group_folder: Path) -> int:
+        return sum(
+            1 for entry in entries
+            if entry["folder"] == group_folder or group_folder in entry["folder"].parents
+        )
 
     found = []
-    for folder in subfolders:
-        inner = _datasets_in(folder)
-        if not inner:
-            # One level further: the engine's own data groups a variable's
-            # versions as `TEC_001_t/TEC_001_sv003/x.tif`, a folder of
-            # folders with one dataset each. Each of those is a variable, the
-            # same ones pointing at `TEC_001_t` itself would offer.
-            found += [
-                replace(candidate, label=f"{folder.name}/{candidate.label}")
-                for candidate in _nested_candidates(folder)
-            ]
-            continue
-        if len(inner) > 1:
-            found.append(
-                ImportCandidate(
-                    source=str(folder),
-                    label=folder.name,
-                    filename="",
-                    format="",
-                    sizeBytes=0,
-                    problem=(
-                        f"{len(inner)} datasets in here — the pipeline takes one per "
-                        "variable. Add this folder on its own to choose."
-                    ),
-                )
-            )
-            continue
-        dataset = inner[0]
-        companions = _companions(dataset)
-        found.append(
-            ImportCandidate(
-                source=str(folder),
-                label=folder.name,
-                filename=dataset.name,
-                format=_format_of(dataset),
-                sizeBytes=_measure([dataset, *companions]),
-                files=[dataset.name] + [c.name for c in companions],
-            )
-        )
-    return found
-
-
-def _nested_candidates(folder: Path) -> list[ImportCandidate]:
-    """The subfolders of `folder` holding exactly one dataset each, as candidates."""
-    try:
-        inner_folders = [
-            entry for entry in sorted(folder.iterdir())
-            if entry.is_dir() and entry.suffix.lower() != ".gdb" and not entry.name.startswith(".")
-        ]
-    except OSError:
-        return []
-    found = []
-    for inner_folder in inner_folders:
-        datasets = _datasets_in(inner_folder)
-        if len(datasets) != 1:
-            continue
-        dataset = datasets[0]
-        companions = _companions(dataset)
-        found.append(
-            ImportCandidate(
-                source=str(inner_folder),
-                label=inner_folder.name,
-                filename=dataset.name,
-                format=_format_of(dataset),
-                sizeBytes=_measure([dataset, *companions]),
-                files=[dataset.name] + [c.name for c in companions],
-            )
-        )
+    for entry in entries:
+        group, name = entry["group"], entry["name"]
+        if entry["own"] and not is_code(name) and group and under(group[-1]) == 1:
+            # `SOC_025_sr/shp/x.shp`: the code is the folder above.
+            name, group = group[-1].name, group[:-1]
+        if not _code_from_name(name):
+            # A folder called `descargas` says nothing; the file may.
+            name = entry["dataset"].name
+        entry["candidate"].group = "/".join(normalise_code(g.name) for g in group)
+        found.append((entry["candidate"], name))
     return found
 
 
@@ -669,15 +825,21 @@ def plan(project: store.ProjectRow, raw_source: str, dimension: str = "") -> Imp
         result.problem = "That folder is not readable"
         return result
 
-    datasets = _datasets_in(source)
+    folders, truncated = _dataset_folders(source)
+    if truncated:
+        result.problem = (
+            f"More than {MAX_FOLDERS} folders under here. Point at the folder that holds "
+            "the variables."
+        )
+        return result
 
     # With no dimension chosen yet, the folder's own name is the best guess —
     # these arrive as `10-Socioeconomico/SOE-001.gpkg`, which says both.
     chosen = normalise_dimension(dimension) if dimension else suggest_dimension(project, source)
     result.dimension = chosen
 
-    if len(datasets) == 1:
-        dataset = datasets[0]
+    if len(folders) == 1 and folders[0][0] == source and len(folders[0][1]) == 1:
+        dataset = folders[0][1][0]
         companions = _companions(dataset)
         result.filename = dataset.name
         result.format = _format_of(dataset)
@@ -686,14 +848,14 @@ def plan(project: store.ProjectRow, raw_source: str, dimension: str = "") -> Imp
         # The folder first: that is what the engine makes the variable's
         # name out of, and it is the one usually called `SOE_001_algo`. The
         # file is the fallback, for a folder called `descargas`.
-        result.code = suggest_code(project, chosen, source.name) or suggest_code(
-            project, chosen, dataset.name
+        result.code = suggest_code(
+            project, chosen, source.name if _code_from_name(source.name) else dataset.name
         )
         return result
 
-    # Not one variable. Either several datasets side by side, or subfolders
-    # with one each — both are what someone means by a folder of variables.
-    candidates = _batch_candidates(source)
+    # Not one variable: several datasets side by side, or folders with one
+    # each, at any depth. All are what someone means by a folder of variables.
+    candidates = _batch_candidates(folders, source)
     if not candidates:
         readable = ", ".join(sorted(s.lstrip(".") for s in DATASET_SUFFIXES))
         result.problem = f"Nothing here the pipeline can read. It takes: {readable}"
@@ -701,19 +863,12 @@ def plan(project: store.ProjectRow, raw_source: str, dimension: str = "") -> Imp
 
     # Codes are allocated across the whole batch at once: each has to miss
     # what is on disk *and* what the rows above it were given.
-    existing = _taken_codes(project, chosen)
-    taken = set(existing)
-    for candidate in candidates:
-        if candidate.problem:
-            continue
-        # `label` is the folder for a folder of folders, and the file when
-        # several datasets share one — which is the right source either way.
-        # A nested one is labelled `TEC_001_t/TEC_001_sv003`; its code comes
-        # from the inner folder, the one that holds the data.
-        candidate.code = _next_code(existing, taken, chosen, candidate.label.rsplit("/", 1)[-1])
+    existing, taken = _taken_codes(project, chosen)
+    for candidate, name in candidates:
+        candidate.code = _next_code(existing, taken, chosen, name)
         taken.add(candidate.code)
 
-    result.variables = candidates
+    result.variables = [candidate for candidate, _ in candidates]
     return result
 
 
@@ -771,14 +926,20 @@ def _explain_permission(path: Path) -> str:
     )
 
 
-def _destination(project: store.ProjectRow, dimension: str, code: str) -> Path:
+#: How many folders a group may hold between the dimension and the code.
+MAX_GROUP_DEPTH = 3
+
+
+def _destination(
+    project: store.ProjectRow, dimension: str, code: str, group: str = ""
+) -> Path:
     """
     Where a variable goes, checked.
 
-    The dimension and code arrive from the browser, and they are used to build
-    a path — so they are matched against a pattern that cannot express `..` or
-    a separator, and the result is confirmed to sit inside the tree before
-    anything is written to it.
+    The dimension, group and code arrive from the browser, and they are used
+    to build a path, so they are matched against a pattern that cannot
+    express `..` or a separator, and the result is confirmed to sit inside
+    the tree before anything is written to it.
     """
     root = data_in(project)
     if root is None:
@@ -790,12 +951,17 @@ def _destination(project: store.ProjectRow, dimension: str, code: str) -> Path:
     # anyway. Normalising here means the path never changes under the user.
     folder = normalise_dimension(dimension)
     identifier = normalise_code(code)
+    groups = [normalise_code(part) for part in group.split("/") if part.strip()]
 
     if not folder or not DIMENSION_PATTERN.match(folder):
         raise ValueError(
             "A dimension is a folder name — letters, digits and underscores, "
             "like 10_socioeconomico."
         )
+    if folder in ENGINE_INPUT_IGNORED:
+        raise ValueError(f"The engine does not read in/{folder}/. Use another dimension.")
+    if len(groups) > MAX_GROUP_DEPTH or not all(DIMENSION_PATTERN.match(part) for part in groups):
+        raise ValueError(f"{group!r} is not a folder the variable can be filed under.")
     if not CODE_PATTERN.match(identifier):
         raise ValueError(
             f"{code!r} is not a code the engine can read. It wants three letters "
@@ -809,10 +975,18 @@ def _destination(project: store.ProjectRow, dimension: str, code: str) -> Path:
             "on the map."
         )
 
-    target = (root / folder / identifier).resolve()
+    target = root.joinpath(folder, *groups, identifier).resolve()
     if root.resolve() not in target.parents:
         raise ValueError("That is not a place inside this project's input folder.")
     return target
+
+
+def _copy_name(item: Path) -> str:
+    """
+    The name a file or `.gdb` gets in the copy: the one the engine's lint
+    would give it on the first run, so nothing is renamed under the app.
+    """
+    return engine_name(item.name, is_dir=item.is_dir())
 
 
 def import_folder(
@@ -821,6 +995,7 @@ def import_folder(
     dimension: str,
     code: str,
     dataset_name: str = "",
+    group: str = "",
 ) -> InputVariable:
     """
     Copy a folder's dataset into the input tree as one variable.
@@ -833,6 +1008,12 @@ def import_folder(
     which is how a batch imports `SOE-001.gpkg` and `SOE-002.gpkg` out of one
     directory as two variables. Left empty, the folder must hold exactly one,
     which is the single-variable case and what `plan` checks.
+
+    `group` is the folders it is filed under between the dimension and its
+    code, `TEC_001_t` for `in/tec/TEC_001_t/TEC_001_sv003/`, as `plan`
+    found them. The engine reads it at any depth and names the column after
+    the code alone, so the group is kept only for the tree to look like the
+    one it came from.
     """
     if not dataset_name:
         prepared = plan(project, raw_source, dimension)
@@ -844,11 +1025,26 @@ def import_folder(
                 "of them."
             )
 
-    target = _destination(project, dimension, code)
-    identifier = f"{target.parent.name}/{target.name}"
+    target = _destination(project, dimension, code, group)
+    identifier = target.relative_to(data_in(project).resolve()).as_posix()
     if target.exists() and any(target.iterdir()):
         raise ValueError(
             f"{identifier} already has data. Remove it first, or use another code."
+        )
+    # The loader names a column after the folder alone, so the same code in
+    # another dimension or group would rename both columns.
+    clash = next(
+        (
+            v for v in scan(project)
+            if format_code(v.code) == format_code(target.name) and v.id != identifier
+        ),
+        None,
+    )
+    if clash is not None:
+        raise ValueError(
+            f"{target.name} is already a variable, at {clash.id}. The engine names the "
+            "column after the folder alone, so two of them would both be renamed. "
+            "Use another code."
         )
 
     # Checked up front rather than discovered mid-copy: the useful answer is
@@ -876,9 +1072,9 @@ def import_folder(
         staging.mkdir(parents=True)
         for item in wanted:
             if item.is_dir():  # a .gdb
-                shutil.copytree(item, staging / item.name)
+                shutil.copytree(item, staging / _copy_name(item))
             else:
-                shutil.copy2(item, staging / item.name)
+                shutil.copy2(item, staging / _copy_name(item))
         if target.exists():
             target.rmdir()  # empty, checked above
         staging.rename(target)
@@ -928,9 +1124,9 @@ def import_many(
     """
     Add several variables from one folder, in the order they were listed.
 
-    Each entry is `{source, code, filename}` — the folder to copy from, the
-    code to file it under, and which dataset when the folder holds more than
-    one.
+    Each entry is `{source, code, filename, group}`: the folder to copy from,
+    the code to file it under, which dataset when the folder holds more than
+    one, and the folders between the dimension and the code, if any.
 
     Sequential rather than parallel: these are large copies onto one disk, so
     doing them at once would not be faster, and a failure halfway through a
@@ -942,7 +1138,10 @@ def import_many(
         source = (item.get("source") or "").strip()
         try:
             outcome.added.append(
-                import_folder(project, source, dimension, code, item.get("filename", ""))
+                import_folder(
+                    project, source, dimension, code, item.get("filename", ""),
+                    item.get("group", "") or "",
+                )
             )
             outcome.added_items.append(item)
         except ValueError as error:
@@ -985,7 +1184,13 @@ def _removable(folder: Path) -> bool:
     return parent.is_dir() and os.access(parent, os.W_OK | os.X_OK)
 
 
-def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
+def _inside(base: Path, identifier: str) -> Path | None:
+    """`base/identifier`, if that resolves to somewhere inside `base`."""
+    candidate = (base / identifier).resolve()
+    return candidate if base.resolve() in candidate.parents else None
+
+
+def remove(project: store.ProjectRow, identifier: str) -> Removal:
     """
     Take a variable out of the project, input and results together.
 
@@ -994,6 +1199,12 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
     rebuild and repopulates them from whatever `.h3.parquet` files it finds
     under `out/`, skipping any whose file has gone. So the output *is* the
     variable as far as everything downstream is concerned.
+
+    `identifier` is the variable's id as `scan` lists it, at whatever depth
+    (`soc/SOC_001`, `tec/TEC_001_t/TEC_001_sv003`), and it has to be one it
+    lists: the id comes from a URL, and "one of the variables just found on
+    disk" is a stronger check than any pattern. Its results are the mirror
+    folder under `out/`.
 
     The results usually cannot be deleted from here: the pipeline runs as
     root, so everything it wrote under `out/` belongs to root and no amount
@@ -1008,15 +1219,19 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
 
     The folder it was copied from is still never touched.
     """
-    target = _destination(project, dimension, code)
-    identifier = f"{target.parent.name}/{target.name}"
+    if identifier not in {variable.id for variable in scan(project)}:
+        raise ValueError(f"No {identifier} in this project.")
+    in_root = data_in(project)
+    results_root = outputs.out_dir(project)
+    target = _inside(in_root, identifier) if in_root is not None else None
+    if target is None:
+        raise ValueError(f"No {identifier} in this project.")
     has_input = target.is_dir()
 
-    results_root = outputs.out_dir(project)
     results: Path | None = None
     if results_root is not None and results_root.is_dir():
-        candidate = (results_root / target.parent.name / target.name).resolve()
-        if results_root.resolve() in candidate.parents and candidate.is_dir():
+        candidate = _inside(results_root, identifier)
+        if candidate is not None and candidate.is_dir():
             results = candidate
 
     # Decided before anything goes, so a half-removed variable is not a state
@@ -1048,8 +1263,7 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
         if by_hand["results"]:
             shutil.rmtree(results)
         else:
-            relative = f"out/{target.parent.name}/{target.name}"
-            problem = pipeline.remove_as_root(outputs.data_dir(project), relative)
+            problem = pipeline.remove_as_root(outputs.data_dir(project), f"out/{identifier}")
             if problem:
                 raise ValueError(f"Could not remove the results for {identifier}: {problem}")
 
@@ -1058,24 +1272,30 @@ def remove(project: store.ProjectRow, dimension: str, code: str) -> Removal:
     elif by_hand["input"]:
         shutil.rmtree(target)
     else:
-        problem = pipeline.remove_as_root(
-            outputs.data_dir(project), f"in/{target.parent.name}/{target.name}"
-        )
+        problem = pipeline.remove_as_root(outputs.data_dir(project), f"in/{identifier}")
         if problem:
             raise ValueError(f"Removed the results, but not the input for {identifier}: {problem}")
 
-    # A dimension with nothing left in it would still be offered in the
-    # picker, which reads the folders. Drop it rather than leave a choice
-    # that means nothing. Best effort: a root-owned empty folder is untidy,
-    # not broken.
-    for parent in (target.parent if has_input else None,
-                   results.parent if results is not None else None):
-        if parent is not None and parent.is_dir():
+    # A dimension (or a group, like `TEC_001_t`) with nothing left in it
+    # would still be offered in the picker, which reads the folders. Drop
+    # them rather than leave a choice that means nothing, from the variable's
+    # parent up to the dimension. Best effort: a root-owned empty folder is
+    # untidy, not broken.
+    for base, removed in ((in_root, has_input), (results_root, results is not None)):
+        if not removed or base is None:
+            continue
+        dimension_folder = base / identifier.split("/")[0]
+        parent = (base / identifier).parent
+        while True:
             try:
-                if not any(parent.iterdir()):
-                    parent.rmdir()
+                if not parent.is_dir() or any(parent.iterdir()):
+                    break
+                parent.rmdir()
             except OSError:
-                pass
+                break
+            if parent == dimension_folder:
+                break
+            parent = parent.parent
 
     rows = [row for row in store.folders_of(project.id) if row.name != identifier]
     store.replace_folders(project.id, rows)

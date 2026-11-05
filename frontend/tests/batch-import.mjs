@@ -23,8 +23,8 @@ async function fixtures() {
     await mkdir(join(nested, code), { recursive: true });
     await writeFile(join(nested, code, `${code.toLowerCase()}.gpkg`), 'x'.repeat(512));
   }
-  // One that cannot be a variable on its own, to check it is shown and not
-  // silently dropped.
+  // A subfolder holding two datasets: a variable each, as two side by side
+  // at the top are, rather than dropped or refused.
   await mkdir(join(nested, 'two_datasets'), { recursive: true });
   await writeFile(join(nested, 'two_datasets', 'a.gpkg'), 'x'.repeat(128));
   await writeFile(join(nested, 'two_datasets', 'b.geojson'), 'x'.repeat(128));
@@ -50,19 +50,20 @@ export async function run({ project }) {
 
     const rows = page.locator('.batch-row');
     check('a folder of folders is read as several variables',
-      (await rows.count()) === 4, `${await rows.count()} rows`);
+      (await rows.count()) === 5, `${await rows.count()} rows`);
     check('a subfolder with nothing readable is not listed',
       !(await rows.allInnerTexts()).some((r) => /notes/.test(r)));
-    const blocked = page.locator('.batch-row.is-blocked');
-    check('and one that cannot be a variable says why',
-      (await blocked.count()) === 1 && /2 datasets/.test(await blocked.innerText()),
-      JSON.stringify((await blocked.innerText()).replace(/\n/g, ' ')));
+    const labels = await page.locator('.batch-label').allInnerTexts();
+    check('and one holding two datasets gives a row for each',
+      labels.filter((label) => label.startsWith('two_datasets/')).length === 2 &&
+        (await page.locator('.batch-row.is-blocked').count()) === 0,
+      JSON.stringify(labels));
 
     const codes = await Promise.all(
       (await page.locator('.batch-code').all()).map((input) => input.inputValue()),
     );
     check('every one is offered its own code',
-      new Set(codes).size === codes.length && codes.length === 3, JSON.stringify(codes));
+      new Set(codes).size === codes.length && codes.length === 5, JSON.stringify(codes));
 
     // Point them at a dimension of the suite's own, so nothing existing moves.
     await page.locator('#variable-dimension').selectOption({ label: 'New dimension…' });
@@ -84,7 +85,7 @@ export async function run({ project }) {
     await rows.nth(2).locator('input[type="checkbox"]').uncheck();
     await page.waitForTimeout(300);
     check('unticking one changes what the button says',
-      (await page.getByRole('button', { name: /^add \d+$/i }).innerText()).includes('2'));
+      (await page.getByRole('button', { name: /^add \d+$/i }).innerText()).includes('4'));
     await rows.nth(2).locator('input[type="checkbox"]').check();
     await page.waitForTimeout(300);
 
@@ -94,7 +95,7 @@ export async function run({ project }) {
     const inputs = await api(`/projects/${project.id}/inputs`);
     const mine = inputs.filter((v) => v.dimension === DIMENSION);
     added.push(...mine.map((v) => v.code));
-    check('all three land in the project', mine.length === 3,
+    check('all five land in the project', mine.length === 5,
       mine.map((v) => v.id).join(' '));
 
     /* ── and the list groups them under their dimension ─────────────── */
@@ -110,7 +111,7 @@ export async function run({ project }) {
       has: page.locator('.dimension-name', { hasText: DIMENSION }),
     });
     const showing = await group.locator('.folder-row').count();
-    check('and the one just added to is open', showing === 3, `${showing} rows showing`);
+    check('and the one just added to is open', showing === 5, `${showing} rows showing`);
 
     await group.locator('.dimension-row').click();
     await page.waitForTimeout(300);
@@ -118,9 +119,9 @@ export async function run({ project }) {
       (await group.locator('.folder-row').count()) === 0);
     await group.locator('.dimension-row').click();
     await page.waitForTimeout(300);
-    check('and opens it again', (await group.locator('.folder-row').count()) === 3);
+    check('and opens it again', (await group.locator('.folder-row').count()) === 5);
     check('each in its own folder under the one dimension',
-      new Set(mine.map((v) => v.code)).size === 3, mine.map((v) => v.code).join(' '));
+      new Set(mine.map((v) => v.code)).size === 5, mine.map((v) => v.code).join(' '));
 
     check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));
   } finally {

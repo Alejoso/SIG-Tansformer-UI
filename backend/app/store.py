@@ -46,6 +46,11 @@ PROJECT_FIELDS = [
     # exactly the right answer for a project nobody has set them on.
     "h3_res",
     "render_h3_res",
+    # Three switches passed to the engine with every run, `1` when on and
+    # blank when off, which is the default. See `settings.Options`.
+    "export_csv",
+    "mcda_tables_csv",
+    "keep_awake",
     "created_at",
     "updated_at",
 ]
@@ -64,6 +69,13 @@ class ProjectRow:
     h3_res: str = ""
     #: H3 resolution the engine draws its maps at.
     render_h3_res: str = ""
+    #: Write the master table as CSV too (`EXPORT_CSV`).
+    export_csv: str = ""
+    #: Write the model's criteria and subcriteria tables as CSV too
+    #: (`MCDA_TABLES_CSV`).
+    mcda_tables_csv: str = ""
+    #: Keep the machine awake while a run is going (`KEEP_AWAKE`).
+    keep_awake: str = ""
     created_at: str = ""
     updated_at: str = ""
 

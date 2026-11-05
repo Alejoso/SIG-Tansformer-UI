@@ -27,7 +27,7 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from . import model_store, outputs, store
+from . import model_store, outputs, store, value_columns
 
 SETTINGS_CSV = store.DATA_DIR / "variable_settings.csv"
 SETTINGS_FIELDS = ["project_id", "variable_id", "fill", "fill_domain", "updated_at"]
@@ -231,8 +231,9 @@ def _columns_by_folder(project: store.ProjectRow) -> dict[str, list[str]]:
     The master columns each input folder became, from the last run's own
     record (`out/maestro/<run>/<id>.variables.csv`).
 
-    Its `ruta_h3` is the result's path, `/data/out/<dimension>/<CODE>/...`,
-    which is the variable's id in this app. A folder can become several
+    Its `ruta_h3` is the result's path, `/data/out/<dimension>/<CODE>/...`
+    (or deeper, `/data/out/tec/TEC_001_t/TEC_001_sv003/...`), and the folder
+    holding it is the variable's id in this app. A folder can become several
     columns (one per sub-dataset), and then a fill applies to all of them.
     """
     root = outputs.out_dir(project)
@@ -258,8 +259,8 @@ def _columns_by_folder(project: store.ProjectRow) -> dict[str, list[str]]:
         if not column or "out" not in parts:
             continue
         rest = parts[parts.index("out") + 1:]
-        if len(rest) >= 2:
-            found.setdefault(f"{rest[0]}/{rest[1]}", []).append(column)
+        if len(rest) >= 3:
+            found.setdefault("/".join(rest[:-1]), []).append(column)
     return found
 
 
@@ -269,17 +270,24 @@ def master_columns(project: store.ProjectRow, variable,
     The master-table columns a variable becomes: what the last run recorded
     for its folder, or, before it has been processed, the folder's code with
     its dimension prefix uppercased, which is what the engine names a folder
-    holding one dataset.
+    holding one dataset. A folder holding several has no column of that name
+    (the loader adds each file's name), so it has none until it has run.
     """
     by_folder = _columns_by_folder(project) if by_folder is None else by_folder
-    return by_folder.get(variable.id) or [model_store._format_code(variable.code)]
+    recorded = by_folder.get(variable.id)
+    if recorded:
+        return recorded
+    if getattr(variable, "note", ""):
+        return []
+    return [model_store._format_code(variable.code)]
 
 
 def transform_document(project: store.ProjectRow, variables: list) -> str:
     """
     The `transform.yaml` the engine reads at step 13.5: one `fill` entry per
     variable that is filled. Variables with `none` are left out, which is how
-    the engine says "do not fill this one".
+    the engine says "do not fill this one". Nested variables are in it like
+    any other: their column is their own folder's name.
     """
     rows = stored(project.id)
     by_folder = _columns_by_folder(project)
@@ -304,6 +312,9 @@ def transform_document(project: store.ProjectRow, variables: list) -> str:
             entries += 1
     if not entries:
         lines[-1] = "fill: {}"
+    # Which column is the value, for files with several (see `value_columns`).
+    # Left out entirely when nothing has been chosen.
+    lines += value_columns.document_lines(project.id, {variable.id for variable in variables})
     return "\n".join(lines) + "\n"
 
 

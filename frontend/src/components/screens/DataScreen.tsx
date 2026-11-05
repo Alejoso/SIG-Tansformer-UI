@@ -5,6 +5,8 @@ import type {
   ImportCandidate,
   ImportPlan,
   InputVariable,
+  ValueColumnSource,
+  ValueColumnsState,
   VariableProblem,
   VariableSettings,
   PipelineRun,
@@ -13,6 +15,8 @@ import type {
 import { Dialog } from '../ui/Dialog';
 import { RunReportLine } from '../variables/RunReportLine';
 import { VariableSettingsFields } from '../variables/VariableSettingsFields';
+import { ValueColumnSelect } from '../variables/ValueColumnSelect';
+import { sourceLabel } from '../../lib/value-columns';
 import { describeSettings, settingsOf } from '../../lib/variable-settings';
 import { formatSize } from '../../lib/format';
 import * as modelRun from '../../lib/model-run';
@@ -37,29 +41,44 @@ const NEW_DIMENSION = '\u0000new';
  * `10_socioeconomico`, and silently landing somewhere other than what was
  * previewed is worse than not previewing at all.
  */
-const canonicalDimension = (name: string): string =>
-  name
+/**
+ * A folder name as the engine's lint leaves it, the same as `engine_name` on
+ * the server (a copy of `sanitize_name` in the engine's
+ * `app/tools/lint_filenames.py`): no accents, `&` and `@` spelled out,
+ * anything else that is not a letter or digit one underscore, all lower case,
+ * and then a leading `abc_123` back in capitals. A dot is an underscore here,
+ * as on the server, so the result is the same before and after the lint.
+ */
+const engineFolderName = (name: string): string => {
+  const base = name
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\./g, '_')
+    .toLowerCase()
+    .replace(/&/g, ' y ')
+    .replace(/@/g, ' at ')
     .replace(/[^A-Za-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toLowerCase();
+    .replace(/^_+|_+$/g, '');
+  return base.replace(/^[a-z]{3}_[0-9]{3}(?=_|$)/, (code) => code.toUpperCase());
+};
+
+const canonicalDimension = (name: string): string => engineFolderName(name);
 
 const canonicalCode = (raw: string): string => {
-  const cleaned = raw
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Za-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toUpperCase();
-  // The tail is kept: `SOE_001_poblacion` is a code the engine reads, and
-  // the server's `normalise_code` does the same. This only previews where
-  // the variable will land, so the two have to agree.
+  const cleaned = engineFolderName(raw);
+  // The tail is kept, in lower case as the lint leaves it: `SOE_001_poblacion`
+  // is a code the engine reads, and the server's `normalise_code` does the
+  // same. This only previews where the variable will land, so the two have
+  // to agree.
   const match = /^([A-Za-z]{3})_?([0-9]{1,3})(?:_(.+))?$/.exec(cleaned);
   if (!match) return cleaned;
-  const base = `${match[1]}_${match[2].padStart(3, '0')}`;
-  return match[3] ? `${base}_${match[3]}` : base;
+  const base = `${match[1].toUpperCase()}_${match[2].padStart(3, '0')}`;
+  return match[3] ? `${base}_${match[3].toLowerCase()}` : base;
 };
+
+/** Where a variable lands under its dimension: its group, if any, then its code. */
+const landing = (group: string, code: string): string =>
+  group ? `${group}/${canonicalCode(code)}` : canonicalCode(code);
 
 /**
  * What this run is doing differently, if anything.
@@ -149,6 +168,27 @@ export function DataScreen() {
    */
   const [problems, setProblems] = useState<VariableProblem[]>([]);
 
+  /**
+   * Files with several value columns, as the engine's own check sees them:
+   * the ones it will not transform until a column is chosen, and the ones
+   * that have one. Null until asked, or when the engine could not be.
+   */
+  const [valueColumns, setValueColumns] = useState<ValueColumnsState | null>(null);
+  /** Asking the engine which files need a value column, before a run. */
+  const [checkingColumns, setCheckingColumns] = useState(false);
+  /**
+   * The dialog before processing, when some files still need a value
+   * column: what each was given, by `sourceKey`.
+   */
+  const [columnPrompt, setColumnPrompt] = useState<{
+    sources: ValueColumnSource[];
+    picks: Record<string, string>;
+    error: string;
+    saving: boolean;
+  } | null>(null);
+  /** The value columns being edited under a variable's row, by file. */
+  const [columnDraft, setColumnDraft] = useState<Record<string, string>>({});
+
   /** The folder being added, and what the server would do with it. */
   const [draftPath, setDraftPath] = useState('');
   const [planned, setPlanned] = useState<{ path: string; result: ImportPlan } | null>(null);
@@ -227,6 +267,25 @@ export function DataScreen() {
   /** Bumped to reread the input tree after something changes it. */
   const [reloadToken, setReloadToken] = useState(0);
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
+
+  /** Ask the engine again which files need a value column. */
+  const refreshValueColumns = useCallback(async (): Promise<ValueColumnsState | null> => {
+    if (!projectId) return null;
+    try {
+      const found = await api.getValueColumns(projectId);
+      setValueColumns(found);
+      return found;
+    } catch {
+      setValueColumns(null);
+      return null;
+    }
+  }, [projectId]);
+
+  // Apart from the list: it runs the engine's check, which takes a second or
+  // a few, and the list should not wait for it.
+  useEffect(() => {
+    void refreshValueColumns();
+  }, [refreshValueColumns, reloadToken]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -375,6 +434,63 @@ export function DataScreen() {
   const toggleDimension = (name: string) =>
     setOpenDimensions((current) => ({ ...current, [name]: !isDimensionOpen(name) }));
 
+  /**
+   * Each variable's files with several value columns, one per file: the
+   * layers of one file share its choice, as the engine keys it by file.
+   */
+  const columnSources = useMemo(() => {
+    const byVariable = new Map<string, ValueColumnSource[]>();
+    for (const source of valueColumns?.sources ?? []) {
+      const list = byVariable.get(source.variableId) ?? [];
+      const same = list.findIndex((other) => other.file === source.file);
+      if (same < 0) list.push(source);
+      else if (source.needsChoice) list[same] = source;
+      byVariable.set(source.variableId, list);
+    }
+    return byVariable;
+  }, [valueColumns]);
+
+  /** True when the engine will leave one of the variable's files out until a column is chosen. */
+  const needsColumn = (variableId: string) =>
+    (columnSources.get(variableId) ?? []).some((source) => source.needsChoice);
+
+  /** `TEC_008_at` alone, or `vias.shp: tipo, datos.xlsx: total` for a folder of several. */
+  const chosenColumns = (variableId: string): string => {
+    const chosen = (columnSources.get(variableId) ?? []).filter((source) => source.chosen);
+    if (chosen.length === 0) return '';
+    if (chosen.length === 1 && (columnSources.get(variableId) ?? []).length === 1) {
+      return chosen[0].chosen ?? '';
+    }
+    return chosen.map((source) => `${source.file}: ${source.chosen}`).join(', ');
+  };
+
+  /** Open a variable's settings, its value columns as they are stored. */
+  const openEditor = (variable: InputVariable) => {
+    setSettingsError('');
+    setEditing({ id: variable.id, value: settingsOf(variable) });
+    setColumnDraft(
+      Object.fromEntries(
+        (columnSources.get(variable.id) ?? []).map((source) => [source.file, source.chosen ?? '']),
+      ),
+    );
+  };
+
+  /**
+   * From a problem to its fix: open the variable's dimension and its
+   * settings, where the value column is chosen, and bring them into view.
+   */
+  const openColumnFix = (variableId: string) => {
+    const variable = variables.find((v) => v.id === variableId);
+    if (!variable) return;
+    setOpenDimensions((current) => ({ ...current, [variable.dimension]: true }));
+    openEditor(variable);
+    window.setTimeout(() => {
+      document
+        .querySelector('.variable-settings-editor')
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 60);
+  };
+
   /** Variables whose folder is not one readable dataset — the engine will skip them. */
   const unreadable = variables.filter((v) => v.problem && !v.processedOnly);
   /** Results with no input: the engine still loads them, so they are worth seeing. */
@@ -432,6 +548,7 @@ export function DataScreen() {
           source: candidate.source,
           code: batchCodes[rowKey(candidate)] ?? candidate.code,
           filename: candidate.filename,
+          group: candidate.group,
           ...(batchSettings[rowKey(candidate)] ?? settingsOf(candidate)),
         })),
       );
@@ -527,7 +644,7 @@ export function DataScreen() {
     if (!sure) return;
     setRemoving(variable.id);
     try {
-      const gone = await api.removeInput(projectId, variable.dimension, variable.code);
+      const gone = await api.removeInput(projectId, variable.id);
       reload();
       showToast(
         gone.outputFiles > 0
@@ -556,9 +673,21 @@ export function DataScreen() {
     setSavingSettings(true);
     setSettingsError('');
     try {
+      // The value columns first: a column the engine would not take stops
+      // here, with its reason, before anything else is saved.
+      let columnsChanged = false;
+      for (const source of columnSources.get(variable.id) ?? []) {
+        if (source.fixedBy) continue;
+        const wanted = columnDraft[source.file] ?? '';
+        if (wanted === (source.chosen ?? '')) continue;
+        if (wanted) await api.chooseValueColumn(projectId, variable.id, wanted, source.file);
+        else await api.clearValueColumn(projectId, variable.id, source.file);
+        columnsChanged = true;
+      }
+      if (columnsChanged) void refreshValueColumns();
       const saved = value
-        ? await api.saveVariableSettings(projectId, variable.dimension, variable.code, value)
-        : await api.resetVariableSettings(projectId, variable.dimension, variable.code);
+        ? await api.saveVariableSettings(projectId, variable.id, value)
+        : await api.resetVariableSettings(projectId, variable.id);
       setVariables((current) => current.map((v) => (v.id === saved.id ? saved : v)));
       setEditing(null);
       showToast(
@@ -633,8 +762,71 @@ export function DataScreen() {
     };
   }, [projectId, follow]);
 
+  /** A source's identity in the dialog: a variable can hold several files. */
+  const sourceKey = (source: ValueColumnSource) => `${source.variableId}::${source.file}`;
+
+  /**
+   * Process, after a look at the files first.
+   *
+   * The engine rejects a file with several value columns until one is
+   * chosen, so before it transforms anything the engine's own check is asked
+   * which files those are. If there are any, the dialog offers each one's
+   * columns; the run starts from there, with or without a choice. When the
+   * check cannot be run, the run goes ahead: the engine still says which
+   * files it left out, in the problems panel.
+   */
   const startProcessing = async () => {
-    if (locked || starting || variables.length === 0) return;
+    if (locked || starting || checkingColumns || variables.length === 0) return;
+    setBlocked([]);
+    setCheckingColumns(true);
+    const found = await refreshValueColumns();
+    setCheckingColumns(false);
+    const pending: ValueColumnSource[] = [];
+    for (const source of found?.available ? found.sources : []) {
+      if (source.needsChoice && !pending.some((other) => sourceKey(other) === sourceKey(source))) {
+        pending.push(source);
+      }
+    }
+    if (pending.length > 0) {
+      setColumnPrompt({ sources: pending, picks: {}, error: '', saving: false });
+      return;
+    }
+    await launch();
+  };
+
+  /** The choices made in the dialog, saved; then the run. */
+  const processWithColumns = async () => {
+    if (!columnPrompt || columnPrompt.saving) return;
+    const { sources, picks } = columnPrompt;
+    setColumnPrompt({ ...columnPrompt, saving: true, error: '' });
+    try {
+      for (const source of sources) {
+        const column = picks[sourceKey(source)];
+        if (column) await api.chooseValueColumn(projectId, source.variableId, column, source.file);
+      }
+    } catch (error) {
+      // The server's reason, as it says it: a column it would not take, or
+      // the engine out of reach.
+      const message = error instanceof Error ? error.message : 'Could not save that';
+      setColumnPrompt((current) => current && { ...current, saving: false, error: message });
+      return;
+    }
+    setColumnPrompt(null);
+    // Shown at once rather than after another look at the engine, which is
+    // about to be busy; the next look after the run says what it made of them.
+    setValueColumns((current) =>
+      current && {
+        ...current,
+        sources: current.sources.map((source) => {
+          const column = picks[sourceKey(source)];
+          return column ? { ...source, chosen: column, needsChoice: false, error: null } : source;
+        }),
+      },
+    );
+    await launch();
+  };
+
+  const launch = async () => {
     setStarting(true);
     setBlocked([]);
     try {
@@ -714,6 +906,12 @@ export function DataScreen() {
                 />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="folder-name">
+                    {/* A nested variable's group (`TEC_001_t`), quieter than
+                        the code: the code is the column, the group only
+                        where it sits. */}
+                    {variable.group && (
+                      <span className="mono variable-group muted-50">{variable.group}/</span>
+                    )}
                     <span className="mono variable-code">{variable.code}</span>
                     {variable.filename || 'nothing readable'}
                   </div>
@@ -726,6 +924,20 @@ export function DataScreen() {
                       {variable.settingsDefault && ' (default)'}
                     </div>
                   )}
+                  {variable.note && (
+                    <div className="folder-meta muted-50 variable-note">{variable.note}</div>
+                  )}
+                  {/* Which column is the value, for a file with several:
+                      missing (the engine leaves the file out) or chosen. */}
+                  {needsColumn(variable.id) ? (
+                    <div className="folder-meta variable-value-column is-missing">
+                      Several value columns: not transformed until a value column is chosen.
+                    </div>
+                  ) : chosenColumns(variable.id) ? (
+                    <div className="folder-meta muted-50 variable-value-column">
+                      Value column: <span className="mono">{chosenColumns(variable.id)}</span>
+                    </div>
+                  ) : null}
                   {(variable.processedOnly || variable.source) && (
                     <div className="folder-meta muted-50">
                       {variable.processedOnly && 'results only'}
@@ -757,6 +969,17 @@ export function DataScreen() {
                   <span className="tag folder-missing-tag" title={variable.problem}>
                     Will be skipped
                   </span>
+                ) : needsColumn(variable.id) && !locked ? (
+                  <button
+                    type="button"
+                    className="tag folder-missing-tag value-column-tag"
+                    aria-label={`Choose value column for ${variable.id}`}
+                    onClick={() => openEditor(variable)}
+                  >
+                    Choose value column
+                  </button>
+                ) : needsColumn(variable.id) ? (
+                  <span className="tag folder-missing-tag">Needs a value column</span>
                 ) : (
                   <span className="muted-55" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
                     {variable.format} · {formatSize(variable.sizeBytes)}
@@ -771,12 +994,12 @@ export function DataScreen() {
                     aria-expanded={editing?.id === variable.id}
                     title="How its gaps are filled"
                     onClick={() => {
-                      setSettingsError('');
-                      setEditing((current) =>
-                        current?.id === variable.id
-                          ? null
-                          : { id: variable.id, value: settingsOf(variable) },
-                      );
+                      if (editing?.id === variable.id) {
+                        setSettingsError('');
+                        setEditing(null);
+                      } else {
+                        openEditor(variable);
+                      }
                     }}
                     disabled={removing !== null || savingSettings}
                     style={{ width: 30, height: 30, borderColor: 'transparent' }}
@@ -813,6 +1036,45 @@ export function DataScreen() {
                   to. Saved per variable; the next run uses them. */}
               {editing?.id === variable.id && (
                 <div className="variable-settings-editor">
+                  {(columnSources.get(variable.id) ?? []).length > 0 && (
+                    <div className="value-column-editor">
+                      <div className="value-column-head">
+                        <strong>Value column</strong>
+                        <span className="muted-55">
+                          {(columnSources.get(variable.id) ?? []).length === 1
+                            ? 'This file has'
+                            : 'These files have'}{' '}
+                          more than one column that could be the value. The engine makes one
+                          value per hexagon, so it needs to know which; until then the file is
+                          not transformed.
+                        </span>
+                      </div>
+                      {(columnSources.get(variable.id) ?? []).map((source) =>
+                        source.fixedBy ? (
+                          <div key={source.file} className="value-column-row muted-55">
+                            <span className="mono">{sourceLabel(source)}</span>
+                            handled by the engine ({source.fixedBy})
+                          </div>
+                        ) : (
+                          <div key={source.file} className="value-column-row">
+                            <span className="mono value-column-file">{sourceLabel(source)}</span>
+                            <ValueColumnSelect
+                              source={source}
+                              value={columnDraft[source.file] ?? ''}
+                              emptyLabel="Not chosen: not transformed"
+                              disabled={savingSettings}
+                              onChange={(column) =>
+                                setColumnDraft((current) => ({ ...current, [source.file]: column }))
+                              }
+                            />
+                            {source.error && (
+                              <span className="value-column-error">{source.error}</span>
+                            )}
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  )}
                   <VariableSettingsFields
                     idPrefix={`edit-${variable.id.replace(/[^A-Za-z0-9]/g, '-')}`}
                     value={editing.value}
@@ -1058,7 +1320,7 @@ export function DataScreen() {
                       className="input mono"
                       value={code}
                       placeholder="REG_007"
-                      onChange={(e) => setCode(e.target.value.toUpperCase())}
+                      onChange={(e) => setCode(e.target.value)}
                       // Not normalised while typing: deleting the hyphen out
                       // of "SOE-" as it is typed fights the user. The line
                       // below shows where it will land.
@@ -1141,6 +1403,14 @@ export function DataScreen() {
                                 +{candidate.files.length - 1}
                               </span>
                             )}
+                            {candidate.group && (
+                              <span
+                                className="mono muted-55 batch-group"
+                                title={`Filed under in/${canonicalDimension(chosenDimension)}/${landing(candidate.group, value)}/`}
+                              >
+                                {candidate.group}/
+                              </span>
+                            )}
                             <input
                               className={`input mono batch-code${clashes ? ' is-invalid' : ''}`}
                               value={value}
@@ -1150,7 +1420,7 @@ export function DataScreen() {
                               onChange={(e) =>
                                 setBatchCodes((current) => ({
                                   ...current,
-                                  [key]: e.target.value.toUpperCase(),
+                                  [key]: e.target.value,
                                 }))
                               }
                             />
@@ -1183,7 +1453,11 @@ export function DataScreen() {
                       ? 'Two of them have the same code. Each variable needs its own.'
                       : batchWanted.length === 0
                         ? 'Nothing ticked, so there is nothing to add.'
-                        : `Copied to in/${canonicalDimension(chosenDimension)}/ — one folder per code.`}
+                        : batch.some((candidate) => candidate.group)
+                          ? `Copied to in/${canonicalDimension(chosenDimension)}/, one folder per ` +
+                            'code, inside the group it came in (TEC_001_t/...) as the engine ' +
+                            'keeps its own. The column is the code either way.'
+                          : `Copied to in/${canonicalDimension(chosenDimension)}/, one folder per code.`}
                 </div>
               ) : !chosenDimension || !code ? (
                 <div className="muted-55" style={{ fontSize: 11.5 }}>
@@ -1253,7 +1527,10 @@ export function DataScreen() {
                     <Icon name="chevronRight" size={12} strokeWidth={3} />
                   </span>
                   <span className="dimension-name mono">{name}</span>
-                  {inside.some((variable) => variable.problem || variable.processedOnly) && (
+                  {inside.some(
+                    (variable) =>
+                      variable.problem || variable.processedOnly || needsColumn(variable.id),
+                  ) && (
                     <span className="tag folder-missing-tag">needs a look</span>
                   )}
                   <span className="layer-count">{inside.length}</span>
@@ -1355,7 +1632,7 @@ export function DataScreen() {
                 {run.erroredFiles > 0 && (
                   <>
                     {run.erroredFiles} {run.erroredFiles === 1 ? 'file' : 'files'} could not be
-                    processed — the engine carried on without{' '}
+                    processed; the engine carried on without{' '}
                     {run.erroredFiles === 1 ? 'it' : 'them'}
                     {problems.length > 0 ? ', and which ones is listed above.' : '.'}{' '}
                   </>
@@ -1412,7 +1689,7 @@ export function DataScreen() {
                     <span className="problem-code mono">{problem.code}</span>
                     {problem.status === 'unfinished' ? (
                       <span className="problem-why">
-                        stopped partway through, with nothing saying why — the run may have
+                        stopped partway through, with nothing saying why: the run may have
                         been interrupted. Processing again is the thing to try.
                       </span>
                     ) : (
@@ -1420,7 +1697,7 @@ export function DataScreen() {
                         failed while {problem.stageLabel}
                         {problem.reason && (
                           <>
-                            {' — '}
+                            {': '}
                             <span className="problem-reason">{problem.reason}</span>
                           </>
                         )}
@@ -1429,6 +1706,19 @@ export function DataScreen() {
                     {problem.source && (
                       <span className="problem-source mono muted-55">{problem.source}</span>
                     )}
+                    {/* The engine left it out for having several value
+                        columns: the fix is a choice, so offer it here. */}
+                    {(needsColumn(problem.id) || /value_columns/.test(problem.reason)) &&
+                      !locked &&
+                      variables.some((v) => v.id === problem.id) && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary problem-fix"
+                          onClick={() => openColumnFix(problem.id)}
+                        >
+                          Choose the value column
+                        </button>
+                      )}
                   </li>
                 ))}
               </ul>
@@ -1446,11 +1736,19 @@ export function DataScreen() {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={variables.length === 0 || locked}
+            disabled={variables.length === 0 || locked || checkingColumns}
             onClick={startProcessing}
             style={{ height: 44, paddingInline: 26, fontSize: 15 }}
           >
-            {starting ? 'Starting…' : phase === 'done' ? 'Process again' : running ? 'Processing…' : 'Process'}
+            {checkingColumns
+              ? 'Checking files…'
+              : starting
+                ? 'Starting…'
+                : phase === 'done'
+                  ? 'Process again'
+                  : running
+                    ? 'Processing…'
+                    : 'Process'}
           </button>
           {/* Beside the button that starts the run, because the resolution
               is a property of the run and this is the last moment it can be
@@ -1534,6 +1832,94 @@ export function DataScreen() {
               }}
             >
               View Map
+            </button>
+          </div>
+        </Dialog>
+      )}
+
+      {columnPrompt && (
+        <Dialog
+          onClose={() => {
+            if (!columnPrompt.saving) setColumnPrompt(null);
+          }}
+          width="min(640px, 100%)"
+          style={{ alignItems: 'stretch' }}
+          labelledBy="value-columns-title"
+          className="value-columns-dialog"
+        >
+          <div className="dialog-title" id="value-columns-title">
+            {columnPrompt.sources.length === 1
+              ? 'A file needs its value column'
+              : `${columnPrompt.sources.length} files need their value column`}
+          </div>
+          <p className="dialog-body" style={{ margin: 0 }}>
+            {columnPrompt.sources.length === 1 ? 'It has' : 'Each has'} more than one column that
+            could be the value, and the engine makes one value per hexagon. Choose the column, or
+            leave it for later: a file left without one is not transformed until a value column is
+            chosen. The other variables are processed as usual.
+          </p>
+          <ul className="value-column-list">
+            {columnPrompt.sources.map((source) => (
+              <li key={sourceKey(source)}>
+                <div className="value-column-where">
+                  <span className="problem-code mono">{source.code}</span>
+                  <span className="mono muted-55" title={source.path}>
+                    {sourceLabel(source)}
+                  </span>
+                </div>
+                <ValueColumnSelect
+                  source={source}
+                  value={columnPrompt.picks[sourceKey(source)] ?? ''}
+                  emptyLabel="Leave for later"
+                  disabled={columnPrompt.saving}
+                  onChange={(column) =>
+                    setColumnPrompt(
+                      (current) =>
+                        current && {
+                          ...current,
+                          picks: { ...current.picks, [sourceKey(source)]: column },
+                        },
+                    )
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+          {(() => {
+            const later = columnPrompt.sources.filter(
+              (source) => !columnPrompt.picks[sourceKey(source)],
+            ).length;
+            return later > 0 ? (
+              <div className="muted-55 value-column-later">
+                {later === columnPrompt.sources.length
+                  ? later === 1
+                    ? 'Left for later, it is not transformed until a value column is chosen.'
+                    : 'Left for later, they are not transformed until a value column is chosen.'
+                  : `${later} left for later: not transformed until a value column is chosen.`}
+              </div>
+            ) : null;
+          })()}
+          {columnPrompt.error && <div className="path-add-error">{columnPrompt.error}</div>}
+          <div className="dialog-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={columnPrompt.saving}
+              onClick={() => setColumnPrompt(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={columnPrompt.saving}
+              onClick={processWithColumns}
+            >
+              {columnPrompt.saving
+                ? 'Saving…'
+                : Object.values(columnPrompt.picks).some(Boolean)
+                  ? 'Save and process'
+                  : 'Process without them'}
             </button>
           </div>
         </Dialog>

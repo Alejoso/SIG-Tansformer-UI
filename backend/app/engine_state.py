@@ -52,7 +52,8 @@ class EngineState:
     lastExecutionId: str = ""
     #: Projects that have changed in a way an incremental load cannot express.
     stale: list[str] = field(default_factory=list)
-    #: The results the database was loaded from, as `<dimension>/<CODE>`.
+    #: The results the database was loaded from, as `<dimension>/<CODE>` (or
+    #: deeper, for a nested variable).
     #: Compared against what is on disk now: an incremental load adds what it
     #: finds and never deletes, so a result that has gone — removed outside
     #: this app, in a file manager or a terminal — would otherwise stay in
@@ -98,22 +99,13 @@ def output_set(project: store.ProjectRow) -> list[str]:
     The results currently on disk, as the engine would find them.
 
     Mirrors what `load_h3_values` picks up: a folder per variable under
-    `out/<dimension>/<CODE>`, skipping the pipeline's own products.
+    `out/<dimension>/`, at any depth (`tec/TEC_001_t/TEC_001_sv003`),
+    skipping the pipeline's own products.
     """
     root = outputs.out_dir(project)
     if root is None or not root.is_dir():
         return []
-    found = []
-    try:
-        for dimension_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-            if not outputs.is_variable_folder(dimension_dir.name):
-                continue
-            for code_dir in sorted(p for p in dimension_dir.iterdir() if p.is_dir()):
-                if any(entry.is_file() for entry in code_dir.iterdir()):
-                    found.append(f"{dimension_dir.name}/{code_dir.name}")
-    except OSError:
-        return []
-    return found
+    return ["/".join(parts) for parts in outputs.result_folders(root, outputs.LOADED_SUFFIXES)]
 
 
 def _newest_execution() -> str:

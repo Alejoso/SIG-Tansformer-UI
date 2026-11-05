@@ -170,6 +170,13 @@ export async function run({ project }) {
         }),
       });
     }
+    // "Default values" turns the switches off too; put them back as well.
+    if (before.options) {
+      await api(`/projects/${project.id}/settings/options`, {
+        method: 'PUT',
+        body: JSON.stringify(before.options),
+      });
+    }
     const restored = await api(`/projects/${project.id}/settings`);
     check('the settings are back as they were',
       restored.processingResolution === before.processingResolution &&

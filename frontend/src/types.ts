@@ -73,10 +73,16 @@ export interface PickedFolder {
  * someone added — it is what is actually there, and what will actually run.
  */
 export interface InputVariable {
-  /** `<dimension>/<CODE>`, which is both its identity and where it lives. */
+  /**
+   * `<dimension>/<CODE>`, or deeper for a nested one
+   * (`tec/TEC_001_t/TEC_001_sv003`): both its identity and where it lives.
+   */
   id: string;
   dimension: string;
+  /** The folder holding the dataset, which the master-table column is named after. */
   code: string;
+  /** The folders between the dimension and the code (`TEC_001_t`), if any. */
+  group: string;
   filename: string;
   /** GPKG, CSV, SHP… as the engine labels formats. */
   format: string;
@@ -86,8 +92,13 @@ export interface InputVariable {
   source: string;
   /** The source folder has moved. The copy still works, so this is a note. */
   sourceMissing: boolean;
-  /** Set when the folder is not one readable dataset — the engine will skip it. */
+  /** Set when the folder holds nothing the engine can read: it will be skipped. */
   problem: string;
+  /**
+   * Not a failure, but worth knowing: several datasets in one folder, which
+   * the engine makes a column of each, named after the folder and the file.
+   */
+  note: string;
   /**
    * Results with no input behind them.
    *
@@ -147,6 +158,11 @@ export interface ImportCandidate {
   code: string;
   /** Why this one cannot be added. The others still can. */
   problem: string;
+  /**
+   * The folders it is filed under between the dimension and its code, kept
+   * from where it came from (`TEC_001_t`). Empty for a flat one.
+   */
+  group: string;
   /** Suggested from the kind of file, and editable before it is added. */
   fill: string;
   fillDomain: FillDomain;
@@ -306,6 +322,43 @@ export interface PipelineReadiness {
  * variables in it, which is how they sit on disk and the only way sixty of
  * them are findable.
  */
+/** A column the engine could take as a file's value, with the first value it found. */
+export interface ValueColumnCandidate {
+  name: string;
+  dtype: string;
+  sample: string | number | boolean | null;
+}
+
+/**
+ * A file with several value columns, as the engine's own check sees it. The
+ * engine will not transform it until one is chosen (`needsChoice`).
+ */
+export interface ValueColumnSource {
+  /** The variable on the Data screen (`soc/SOC_028_s`). */
+  variableId: string;
+  /** The engine's key for it in `value_columns`. */
+  code: string;
+  /** Relative to the project's `in/`. */
+  path: string;
+  file: string;
+  layer: string | null;
+  geoColumns: string[];
+  candidates: ValueColumnCandidate[];
+  needsChoice: boolean;
+  chosen: string | null;
+  /** The engine's own reason (Spanish), when it has one. */
+  error: string | null;
+  /** Built by the engine itself, with a column chosen there: nothing to choose. */
+  fixedBy: string | null;
+}
+
+export interface ValueColumnsState {
+  /** False when the engine's check could not be run; `error` says why. */
+  available: boolean;
+  error: string;
+  sources: ValueColumnSource[];
+}
+
 /**
  * A variable the engine could not finish.
  *
@@ -577,6 +630,19 @@ export interface ModelExample {
 /** The pair a person actually chooses. The rest of the settings are readouts. */
 export type Resolutions = Pick<ProjectSettings, 'processingResolution' | 'mapResolution'>;
 
+/**
+ * Switches passed to the engine with every run of the project. Off unless
+ * turned on: each costs disk or time, and none changes a result.
+ */
+export interface ProjectOptions {
+  /** The master table as CSV too (`EXPORT_CSV`). Gigabytes on a real project. */
+  masterCsv: boolean;
+  /** The model's criteria and subcriteria tables as CSV too (`MCDA_TABLES_CSV`). */
+  modelTablesCsv: boolean;
+  /** Hold off sleep while a run is going (`KEEP_AWAKE`). */
+  keepAwake: boolean;
+}
+
 export interface ProjectSettings {
   /**
    * H3 resolution the engine converts the source data at. This is the
@@ -608,6 +674,52 @@ export interface ProjectSettings {
    * old one. On an empty project it is just a choice.
    */
   hasResults: boolean;
+  /**
+   * The switches. Apart from the resolutions: saving them does not pin the
+   * resolutions, which is what `followingEngine` is about.
+   */
+  options: ProjectOptions;
+}
+
+/**
+ * Whether the model's last run still describes the data, strongest first:
+ * `rerun` (a scored column changed, or the model file did), `remask` (only
+ * exclusions), `alerts_only`, `informative_only` (only leaves weighted zero),
+ * `up_to_date`. And `never_run`, and `unknown` when the engine has not
+ * checked yet.
+ */
+export type ModelStatusLevel =
+  | 'rerun'
+  | 'remask'
+  | 'alerts_only'
+  | 'informative_only'
+  | 'up_to_date'
+  | 'never_run'
+  | 'unknown';
+
+/** A master-table column that changed, and what it is to the model. */
+export interface ModelChangedColumn {
+  column: string;
+  /** score, exclusion, alert, informative or unused. */
+  role: string;
+  /** The leaves reading it, by code. */
+  leaves: string[];
+}
+
+export interface ModelStatus {
+  status: ModelStatusLevel;
+  /** What the engine's own check says, or empty without one. */
+  engineStatus: string;
+  /** The model file differs from the one the last run used. */
+  configChanged: boolean;
+  /** The newest run, which the map draws. */
+  lastRun: string;
+  /** When the engine last checked, and against which processing run's master. */
+  checkedAt: string;
+  masterRun: string;
+  changed: ModelChangedColumn[];
+  /** In a sentence. */
+  reason: string;
 }
 
 /** H3 defines resolutions 0 (coarsest) through 15 (finest). */

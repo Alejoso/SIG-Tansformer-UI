@@ -4,6 +4,7 @@ import { useApp } from '../../state/app-context';
 import type { LayerNode, LayerTree as LayerTreeData, MapMode } from '../../types';
 import { LayerFrame } from '../map/LayerFrame';
 import { LayerTree } from '../map/LayerTree';
+import { ModelStatusNotice } from '../ModelStatusNotice';
 import { Icon } from '../ui/Icon';
 import { SettingsDialog } from './SettingsDialog';
 
@@ -122,6 +123,11 @@ export function MapScreen() {
         {showHints && (
           <p className="mode-hint muted-55">{MODE_HINTS[mode]}</p>
         )}
+
+        {/* Whether the model's map still shows this data. Here because the
+            map is where an out-of-date score would be read as current; the
+            button runs the model file as it is saved. */}
+        <ModelStatusNotice projectId={projectId} compact />
 
         <div className="layer-tree-scroll">
           {tree ? (

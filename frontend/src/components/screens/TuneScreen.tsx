@@ -9,6 +9,7 @@ import type { ModelExample, ModelFile, ModelIssue, ModelRun } from '../../types'
 import { formatSize } from '../../lib/format';
 import { ModelRunsDialog } from '../tune/ModelRunsDialog';
 import { ModelDiagram } from '../tune/ModelDiagram';
+import { ModelStatusNotice } from '../ModelStatusNotice';
 import { YamlCodeEditor } from '../tune/YamlCodeEditor';
 import { Icon } from '../ui/Icon';
 
@@ -321,6 +322,11 @@ export function TuneScreen() {
           </button>
         </div>
       </div>
+
+      {/* Whether the last run still describes the data and this file. Asked
+          again after each save, since saving is what makes the file differ
+          from the one the last run used. */}
+      <ModelStatusNotice projectId={projectId} onApply={apply} refreshKey={savedText} />
 
       <div className="tune-panes">
         <section className="yaml-pane" aria-label="Model file">

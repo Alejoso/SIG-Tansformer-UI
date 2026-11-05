@@ -141,6 +141,7 @@ class Run:
         job: pipeline.Job | None = None,
         arguments: list[str] | None = None,
         env: dict[str, str] | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> None:
         self.project_id = project.id
         #: Which script this run drives — the pipeline or the model. They are
@@ -148,6 +149,10 @@ class Run:
         self.job = job or pipeline.PIPELINE_JOB
         self.arguments = arguments or []
         self.env_override = env
+        #: Passed to the script on top of what the run works out for itself:
+        #: the project's switches (`settings.option_env`) and where its model
+        #: is, for the engine's model status (`model_status_env`).
+        self.extra_env = extra_env or {}
         #: The folder this run processes. Passed as DATA_DIR when the script
         #: honours one; None means the engine's own default.
         self.data_dir = data_dir
@@ -444,6 +449,7 @@ class Run:
                 # `variable_settings`); the engine reads it at step 13.5.
                 if (self.data_dir / variable_settings.TRANSFORM_RELPATH).is_file():
                     extra["PROJECT_TRANSFORM"] = variable_settings.CONTAINER_TRANSFORM
+            extra.update(self.extra_env)
             env = pipeline.run_full_env(extra=extra)
         try:
             process = subprocess.Popen(
@@ -841,6 +847,7 @@ def start(
     reset: bool = True,
     reset_reason: str = "",
     rebuild_everything: bool = False,
+    extra_env: dict[str, str] | None = None,
 ) -> Run:
     """
     Begin a run for a project, unless one is already going.
@@ -874,6 +881,7 @@ def start(
             reset=reset,
             reset_reason=reset_reason,
             rebuild_everything=rebuild_everything,
+            extra_env=extra_env,
         )
         _runs[(project.id, "pipeline")] = run
     run.start()
@@ -887,6 +895,7 @@ def start_model(
     arguments: list[str],
     skip_preprocesses: bool = False,
     execution_id: str = "",
+    extra_env: dict[str, str] | None = None,
 ) -> Run:
     """
     Score the model for a project.
@@ -916,7 +925,10 @@ def start_model(
             env=pipeline.model_env(
                 data_dir,
                 skip_preprocesses=skip_preprocesses,
-                extra={"EXECUTION_ID": execution_id} if execution_id else None,
+                extra={
+                    **(extra_env or {}),
+                    **({"EXECUTION_ID": execution_id} if execution_id else {}),
+                },
             ),
         )
         # Known up front for a model run, so progress can be read from the

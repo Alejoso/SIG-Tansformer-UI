@@ -86,6 +86,15 @@ cp .env.example .env     # then set POSTGRES_USER / PASSWORD / DB
 docker compose up -d     # builds the image the first time; it is not quick
 ```
 
+The engine's `.env.example` is in sections and says what each value does and
+when a change takes effect. Keep its `COMPOSE_PROJECT_NAME` on an existing
+install: it names the database volume. The container sizes (`APP_*`, `DB_*`,
+`MAX_*`) are lowered to what Docker has on the machine (`FIT_TO_MACHINE=1`,
+the default). The engine's runners do it themselves, and so does this app
+when it brings the containers up (`pipeline.compose_up` asks the engine's
+`app/tools/machine_resources.py`). `FIT_TO_MACHINE=0` in the engine's `.env`
+uses the sizes as written.
+
 `admin/in/dane_mgn2024/` has to hold the DANE boundary shapefiles. They are
 ~108 MB and not in git — ask whoever has them. Without them there is nothing
 to build the hexagon master table from, and processing stops at the first
@@ -151,8 +160,9 @@ Worth knowing before pointing it at an engine you care about:
   the model file and `config/transform.yaml`, which is rewritten from each
   variable's fill before every run.
 - **`data/*.csv` here**: the project list, where each variable was copied
-  from, and each variable's fill when changed from the default
-  (`variable_settings.csv`).
+  from, each variable's fill when changed from the default
+  (`variable_settings.csv`), and the value column chosen for a file with
+  several (`value_columns.csv`).
 
 Every pipeline run exports another master table into `out/maestro/`; the
 engine's model runner takes the newest one itself, so nothing is moved.
@@ -281,6 +291,19 @@ The engine reads a variable's identity out of the folder it sits in:
 `abc_123`. So the folder name is what a suggested code is taken from — the
 file inside may be called anything, and often is.
 
+**A code is spelled the way the engine's lint leaves it.** Every run starts
+with `lint_filenames`, which renames everything under `in/`: the name in
+lower case, accents dropped, `&` and `@` spelled out, anything else that is
+not a letter or digit one underscore, and on a folder the leading `abc_123`
+back in capitals. So the folder `TEC_001_SV003` becomes `TEC_001_sv003` on
+the first run, and a variable recorded under the first name stops matching
+itself. `normalise_code` gives that spelling up front (the identity in
+capitals, the tail in lower case), and files are copied under the names the
+lint would give them (`Zonas.SHP` arrives as `zonas.shp`, its `.dbf` with
+it), so nothing in the tree is renamed under the app. `inputs.engine_name` is
+a copy of the lint's `sanitize_name`, checked against it; re-read the two
+side by side when the engine's changes.
+
 A code may carry a tail. `SOE_001_poblacion` is as good a folder name as
 `SOE_001`: the engine reads the identity off the front, keeps the rest, and
 makes a column out of the whole thing. `CODE_PATTERN` allows it up to
@@ -311,10 +334,15 @@ variable means pointing at a folder with one dataset in it. Pointing at the
 folder *above* — the one holding all of them — now works too, and `plan` works
 out which it is:
 
-* one dataset at the top level → one variable, exactly as before;
-* subfolders with one dataset each → a variable per subfolder;
+* one dataset at the top level, nothing below → one variable, exactly as before;
+* folders with one dataset each, at any depth → a variable per folder;
 * several datasets side by side → a variable per dataset. This one used to
   be refused outright, with a message saying to add them one folder at a time.
+
+At any depth because the engine reads at any depth (see
+[Nested variables](#nested-variables-read-at-any-depth)). The walk stops six
+folders down and after 5000 folders, so a home directory picked by mistake
+answers with a message instead of hanging the screen.
 
 Codes are suggested across the whole batch at once, so each misses both what
 is already on disk and what the rows above it were given — a rule one
@@ -323,8 +351,8 @@ they cannot drift apart.
 
 A subfolder with nothing readable is left out silently: a folder of variables
 usually has a `docs` or a `.git` beside them, and those are not failures. A
-subfolder with *several* datasets is listed with its reason, because it was
-clearly meant to be a variable, and dropping it quietly is how one goes
+subfolder with *several* datasets gives a row per dataset, the same as
+several datasets side by side at the top: dropping it quietly is how one goes
 missing.
 
 The import is one request, and it does not stop at the first failure. The
@@ -432,6 +460,24 @@ each time you switch. The engine notices and does it; `settings.save` marks
 the project stale so our own record of what the database holds is cleared
 with it.
 
+**Three switches go with every run**, stored per project beside the
+resolutions (`export_csv`, `mcda_tables_csv`, `keep_awake` in
+`projects.csv`) and shown under *With every run* in the same dialog. All off
+unless turned on: none changes a result, and each costs disk or time.
+
+| Switch | Passed as | What it does |
+|---|---|---|
+| Master table as CSV | `EXPORT_CSV` | Each processing run writes the master as a CSV beside its parquet. Gigabytes on a real project |
+| Model tables as CSV | `MCDA_TABLES_CSV` | Each model run writes its criteria and subcriteria tables as CSV |
+| Keep the computer awake during runs | `KEEP_AWAKE` | The runner holds off sleep (`systemd-inhibit`) while it works |
+
+They are passed in the environment of the run, as `1` or `0`, rather than
+written into `.env`: both runners take them from there, and a value given
+explicitly wins over the engine's `.env`, so off here means off. Saved on
+their own route (`PUT …/settings/options`) so that turning one on does not
+pin the resolutions to today's engine numbers; "Default values" turns them
+off along with unpinning the resolutions.
+
 The coordinate system is shown and not offered: the engine works in WGS 84
 throughout. There was also a *pipeline version* offering a choice between
 three invented version strings; the engine has no versioning, so it is gone.
@@ -463,6 +509,42 @@ is what reads best on screen, the field says what it actually means, which is
 that the project tracks the engine rather than holding a copy of today's
 numbers.
 
+## The model says when its map is out of date
+
+The model scores the master table, and every processing run builds a new
+one; a model run made before it is still what the map shows. Two things can
+make it stale, and the Map and the Model screen say so
+(`ModelStatusNotice`, from `GET /api/projects/{id}/model/status`):
+
+- **The data moved under it.** The engine checks that itself: at the end of
+  processing, and after each model run, its `model_status.py` compares the
+  columns of the master each model last ran on with the current one, weighs
+  each changed column by what it is to the model (a scored leaf, an
+  exclusion, an alert, a leaf weighted zero), and writes
+  `out/model_status.json`. For this app's projects, which load none of the
+  engine's own, every run is told where the model is
+  (`MCDA_STATUS_CONFIG=/data/model/model.yaml`) and where its runs are
+  (`MCDA_RUNS_DIR=/data/MCDA/runs`); without a model file nothing is passed.
+- **The model file moved.** Saved since the last Apply. Checked here, not by
+  the engine, because it changes the moment the file is saved: the file
+  against the copy the last run kept (`config_used.yaml`), compared parsed,
+  so a comment or spacing is not a change.
+
+How loudly it speaks follows how much it matters:
+
+| Status | Meaning | On screen |
+|---|---|---|
+| `rerun` | a scored column changed, or the model file did | a strong notice with Apply |
+| `remask` | only exclusions changed: every score holds | a quiet line |
+| `alerts_only` | only alerts changed | a quiet line |
+| `informative_only` | only leaves weighted zero changed | a note |
+| `up_to_date`, `never_run`, `unknown` | nothing to act on | nothing |
+
+The engine's file is only believed about the run it names: one written
+before the newest run, about another, says nothing about it (`unknown`).
+Apply on the Map runs the model file as it is saved; on the Model screen it
+is the screen's own Apply, which writes what is in the editor first.
+
 ## The project store
 
 Two CSV files, because the point is that you can open them, read them, and fix
@@ -487,9 +569,11 @@ project's folder *is* that directory:
 
 ```
 <project folder>/in/<dimension>/<CODE>/<file>     what the pipeline reads
+<project folder>/in/<dimension>/<GROUP>/<CODE>/<file>     the same, nested
 <project folder>/out/<dimension>/<CODE>/<file>.h3.html     what it rendered
                                         <file>.h3.parquet
                                         <file>.pipeline.jsonl
+<project folder>/out/model_status.json            the engine's check of the model
 <project folder>/model/model.yaml                 the model, edited here
 ```
 
@@ -499,9 +583,10 @@ and this is the same view a person would get listing the folder.
 
 Two things fall out of that shape:
 
-- **Input variables are a flat list** because the pipeline writes them as a
-  mirror of the input tree, one folder per code. The model nests by criterion,
-  which is why that side is a tree.
+- **Input variables are a list per dimension** because the pipeline writes
+  them as a mirror of the input tree, one folder per code (a nested one sits
+  in its group, and is listed by its code like any other). The model nests by
+  criterion, which is why that side is a tree.
 - **A rendered layer is not proof of success.** The pipeline carries on past a
   bad file rather than losing a long run, so each variable's
   `.pipeline.jsonl` is read for its per-stage status and a layer that logged a
@@ -782,9 +867,96 @@ model's past runs list every file a run wrote (report, `run.yaml`, the
 aggregated table `aggregate/mcda_aggregate.h3.parquet`, the zip, the maps) to
 open or download.
 
-**Nested variables.** The engine's own data groups a variable's versions as
-`TEC_001_t/TEC_001_sv003/x.tif`. Adding a dimension folder offers each of
-those inner folders as a variable, as adding `TEC_001_t` itself does.
+### A file with several value columns
+
+The engine makes one value per hexagon, so it reads a file as one geography
+and one value. A file with several candidate columns (a shapefile with
+`Tipo_Roca`, `cohesion_M`, `A_Friccion`) is rejected at ingest and not
+transformed until the project's `transform.yaml` says which column is the
+value:
+
+```yaml
+value_columns:
+  SOC_028_s: Total_Victimas_Caso                 # every file of the variable
+  TEC_032_t: {vias.shp: tipo, datos.xlsx: total} # per file, for a folder of several
+```
+
+The app never decides this, and never edits the file. Which files need a
+choice, and what their candidates are, is the engine's own detection, asked
+through its read-only helper (`app/tools/value_columns.py --json
+--transform ...`) inside its image: `exec` when the app container is mounted
+on the project, otherwise a one-off `compose run` with the project's folder
+as `DATA_DIR`, so it never answers for the wrong project. The answer is
+cached until the input tree or a choice changes. When the engine cannot be
+asked, the screen says nothing and processing goes ahead; the engine still
+reports what it left out.
+
+- **Before every run.** Process asks the engine first. If some files need a
+  column, a dialog lists each one with a dropdown of its columns, each shown
+  with its first value (`Total_Victimas_Caso: 9 (number)`), and "Leave for
+  later". Choose and continue, or continue without choosing: a file left
+  without a column is not transformed until a value column is chosen, and
+  the other variables are processed as usual.
+- **On the Data screen.** A variable that needs a choice says so on its row,
+  with a button to the same dropdown in its settings (where its fill is).
+  A chosen column is shown on the row and can be changed or cleared there.
+  When the engine has already rejected the file, its entry in the problems
+  panel offers the same fix.
+- **Stored** in `data/value_columns.csv`, a row per variable (per file for a
+  folder of several), checked against the engine's candidates, and written
+  into `config/transform.yaml` as `value_columns:` before every run. Left
+  out of the file when nothing is chosen. A choice that changes makes the
+  engine reprocess that file. Removing a variable or a project drops its
+  choices.
+- **Handled by the engine.** A source the engine builds itself in its own
+  step, with a column chosen there (`fixed_by` in the helper's answer), needs
+  nothing here, and its settings say so.
+
+### Nested variables, read at any depth
+
+The engine's own data groups a variable's versions as
+`tec/TEC_001_t/TEC_001_sv003/x.tif`, and the engine reads its input tree at
+any depth: ingest and the raster step `rglob` all of `in/`, every dataset is
+processed into the mirror of its folder under `out/`, the dimension is the
+first folder, and the loader names the master-table column after the folder
+holding the file (`leaf_var_name`): `TEC_001_sv003`. `TEC_001_t` is only a
+group. So everything here reads the tree the same way:
+
+- **The list** (`inputs.scan`) has a variable per folder holding a dataset,
+  wherever it sits. Its id is its path under `in/`
+  (`tec/TEC_001_t/TEC_001_sv003`), its code is that folder (the column), and
+  the folders between are its `group`, shown before the code on the Data
+  screen. `TEC_001_t` is not listed: a folder that only holds folders is not
+  a variable, and nothing is reported about it. A code folder straight under
+  a dimension with nothing readable anywhere inside it still is, with that
+  problem. A folder holding several datasets is not a problem either: the
+  engine makes a column of each (`<CODE>_<file>`), and the row says so.
+- **Results, problems, results with no input, what the database was loaded
+  from** (`outputs.result_folders`) are read at any depth too, skipping the
+  engine's own folders at every level. A result is a folder holding what the
+  engine writes per variable (`.h3.parquet`, the stage log, ingest's
+  `.error.txt`, the map), and "loaded" means an `.h3.parquet`, which is what
+  the loader picks up.
+- **The fill** (`config/transform.yaml`) is keyed by column, so a nested
+  variable's entry is its own code, from the last export's `variables.csv`
+  or, before one, from its folder.
+- **Adding.** Pointing at a dimension folder from the engine (`tec/`), or at
+  `TEC_001_t` itself, offers each inner folder as a variable, and the copy
+  **keeps the group**: it lands in `in/tec/TEC_001_t/TEC_001_sv003/`, the
+  same tree the engine's own data has. A group is a folder above the variable
+  that is named like a code and holds no data of its own; any other folder on
+  the way (a `shp/`, a `data/`) says nothing and is dropped, so
+  `SOC_025_sr/shp/x.shp` is the variable `SOC_025_sr`, not one called `shp`.
+  Flattening to `in/tec/TEC_001_sv003/` would give the same column, so the
+  group is kept only so the tree reads like the one it came from.
+- **A code is taken anywhere it is used.** The loader names a column after
+  the folder alone, and two folders with one name, in any dimension or
+  group, both get renamed (it adds each file's name), so neither column is
+  what the model expects. Suggested codes miss every code in the project,
+  and adding one that is already used elsewhere is refused, naming where.
+- **Fill and removal** go by the full id: the routes take the rest of the
+  path after the dimension (`/inputs/{dimension}/{code:path}`). Removing the
+  last variable of a group removes the group folder too, in `in/` and `out/`.
 
 ## Screens
 
@@ -851,8 +1023,13 @@ No component changes.
 | `listModelRunFiles` | `GET /api/projects/{id}/model/runs/{runId}/files` | what a run wrote, reports first |
 | `modelRunFileUrl` | `GET /api/projects/{id}/model/runs/{runId}/files/{path}` | text opens in the browser, the rest downloads (`?download=true` forces it) |
 | `runReportUrl` | `GET /api/runs/{executionId}/report` | the engine's `run_report.yaml` for any run |
-| `saveVariableSettings` | `PUT /api/projects/{id}/inputs/{dimension}/{code}/settings` | a variable's fill |
-| `resetVariableSettings` | `DELETE /api/projects/{id}/inputs/{dimension}/{code}/settings` | back to the default fill for its kind of file |
+| `saveVariableSettings` | `PUT /api/projects/{id}/inputs/{dimension}/{code...}/settings` | a variable's fill; `{code...}` is the rest of its id, so a nested one works |
+| `resetVariableSettings` | `DELETE /api/projects/{id}/inputs/{dimension}/{code...}/settings` | back to the default fill for its kind of file |
+| `getValueColumns` | `GET /api/projects/{id}/inputs/value-columns` | files with several value columns, from the engine's own check: candidates, first values, what is chosen |
+| `chooseValueColumn` | `PUT /api/projects/{id}/inputs/{dimension}/{code...}/value-column` | `{column, file?}`, checked against the engine's candidates |
+| `clearValueColumn` | `DELETE /api/projects/{id}/inputs/{dimension}/{code...}/value-column` | `?file=` for one file of a folder of several |
+| `getModelStatus` | `GET /api/projects/{id}/model/status` | whether the model map is out of date: the engine's check and a changed model file |
+| `saveOptions` | `PUT /api/projects/{id}/settings/options` | the three switches passed with every run |
 | `pruneModelRuns` | `POST /api/projects/{id}/model/runs/prune` | keep the newest N, in one container |
 | `removeModelRun` | `DELETE /api/projects/{id}/model/runs/{runId}` | |
 | `getEngineSettings` | `GET /api/settings` | the engine's own numbers, with no project to ask about |

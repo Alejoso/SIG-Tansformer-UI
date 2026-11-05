@@ -201,8 +201,9 @@ def _variables_from_inputs(project: store.ProjectRow) -> list[MasterVariable]:
 
     The column is the folder's code with its dimension prefix uppercased,
     which is what `leaf_var_name` produces for a folder holding one dataset —
-    the ordinary case. A folder with several would be disambiguated by the
-    loader, so the generated file says as much in a comment.
+    the ordinary case, at any depth (`tec/TEC_001_t/TEC_001_sv003` is the
+    column `TEC_001_sv003`). A folder with several would be disambiguated by
+    the loader, so it is left out until a run has said what its columns are.
     """
     return [
         MasterVariable(
@@ -211,7 +212,7 @@ def _variables_from_inputs(project: store.ProjectRow) -> list[MasterVariable]:
             dimension=variable.dimension,
         )
         for variable in inputs.scan(project)
-        if not variable.problem
+        if not variable.problem and not variable.note
     ]
 
 

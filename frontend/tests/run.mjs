@@ -30,10 +30,15 @@ import * as applyRun from './apply-run.mjs';
 import * as codes from './codes.mjs';
 import * as problems from './problems.mjs';
 import * as variableSettings from './variable-settings.mjs';
+import * as nested from './nested.mjs';
+import * as projectOptions from './project-options.mjs';
+import * as modelStatus from './model-status.mjs';
+import * as valueColumns from './value-columns.mjs';
 
 const SUITES = [
   modelScreen, examplesScreen, layerOpacity, mapScreen, settings, modelRuns, batchImport,
-  applyRun, codes, problems, variableSettings,
+  applyRun, codes, problems, variableSettings, nested, projectOptions, modelStatus,
+  valueColumns,
 ];
 
 const only = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));

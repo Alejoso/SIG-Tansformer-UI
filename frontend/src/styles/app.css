@@ -249,3 +249,34 @@ body { margin: 0; background: var(--color-bg); }
 /* Both want `margin-left: auto`. With the chip there it is the one that
    pushes the pair right, and the breadcrumb just sits after it. */
 .header-run + .breadcrumb { margin-left: 0; }
+
+
+/* ── whether the model map still shows the data ─────────────────────────── */
+
+/* Loud for `rerun`, quiet for exclusions and alerts, a line for the rest.
+   See `ModelStatusNotice`. */
+.model-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.model-status > svg { flex: none; margin-top: 3px; }
+.model-status-body { flex: 1; min-width: 0; }
+.model-status-text { flex: 1; min-width: 0; }
+.model-status-title { font-weight: 600; margin-bottom: 2px; }
+.model-status.is-strong {
+  background: var(--color-accent-200);
+  color: var(--color-accent-900);
+}
+.model-status.is-soft {
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-800);
+}
+.model-status.is-note { padding: 4px 2px; font-size: 12px; }
+.model-status-apply { flex: none; height: 34px; padding-inline: 16px; font-size: 13.5px; }
+.model-status.is-compact { flex-wrap: wrap; font-size: 12.5px; padding: 9px 11px; }
+.model-status.is-compact .model-status-apply { width: 100%; }

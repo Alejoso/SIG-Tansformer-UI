@@ -3,6 +3,7 @@ import * as api from '../../api';
 import {
   MAX_H3_RESOLUTION,
   MIN_H3_RESOLUTION,
+  type ProjectOptions,
   type ProjectSettings,
   type Resolutions,
 } from '../../types';
@@ -26,6 +27,40 @@ interface SettingsDialogProps {
 
 const inRange = (value: number) =>
   Number.isInteger(value) && value >= MIN_H3_RESOLUTION && value <= MAX_H3_RESOLUTION;
+
+/**
+ * The project's switches, each with what it costs. Off unless turned on:
+ * none of them changes a result, and each costs disk or time.
+ */
+const OPTIONS: { key: keyof ProjectOptions; label: string; hint: string }[] = [
+  {
+    key: 'masterCsv',
+    label: 'Master table as CSV',
+    hint:
+      'Each processing run also writes the master table as a CSV beside its parquet. ' +
+      'Gigabytes on a large project; only for opening it outside the engine.',
+  },
+  {
+    key: 'modelTablesCsv',
+    label: 'Model tables as CSV',
+    hint:
+      'Each model run also writes its criteria and subcriteria tables as CSV. Hundreds of ' +
+      'megabytes and some seconds per run.',
+  },
+  {
+    key: 'keepAwake',
+    label: 'Keep the computer awake during runs',
+    hint:
+      'Holds off sleep while processing or applying the model, so a long run is not ' +
+      'paused halfway by the screen locking.',
+  },
+];
+
+const anyOption = (options: ProjectOptions | undefined) =>
+  !!options && OPTIONS.some(({ key }) => options[key]);
+
+const sameOptions = (a: ProjectOptions | undefined, b: ProjectOptions | undefined) =>
+  OPTIONS.every(({ key }) => Boolean(a?.[key]) === Boolean(b?.[key]));
 
 /**
  * The two resolutions the engine actually reads.
@@ -102,6 +137,11 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
   /** Only worth warning about when there is something at the old resolution. */
   const affectsResults = (reprocesses || redraws) && !!settings?.hasResults;
   const canSave = !!settings && processingValid && mapValid && !saving;
+  /**
+   * Whether anything here is this project's own rather than the defaults:
+   * pinned resolutions, or a switch turned on. "Default values" undoes both.
+   */
+  const ownSettings = !!settings && (!settings.followingEngine || anyOption(saved?.options));
 
   const save = async () => {
     if (!canSave || !settings) return;
@@ -119,12 +159,20 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
     setSaving(true);
     setError(null);
     try {
-      await api.saveSettings(projectId, pair);
+      // The switches on their own, so turning one on does not pin the
+      // resolutions to today's engine numbers. Those are only written when
+      // they were moved, or were already this project's own.
+      if (!sameOptions(settings.options, saved?.options)) {
+        await api.saveOptions(projectId, settings.options);
+      }
+      if (reprocesses || redraws || !saved?.followingEngine) {
+        await api.saveSettings(projectId, pair);
+      }
       if (affectsResults) {
         // Stay open and say what is still to do. The numbers are stored;
         // nothing that has already been computed has moved.
         setJustSaved({ processing: reprocesses, map: redraws });
-        setSaved({ ...settings, ...pair, followingEngine: false });
+        setSaved({ ...settings, ...pair, followingEngine: false, options: settings.options });
         setSaving(false);
         return;
       }
@@ -170,8 +218,8 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
             "Default values" button is simply absent with no way to tell why,
             which is exactly how it reads when nobody has set anything. */}
         {settings && (
-          <span className={`settings-source${settings.followingEngine ? ' is-engine' : ''}`}>
-            {settings.followingEngine ? 'Default values' : 'Set for this project'}
+          <span className={`settings-source${ownSettings ? '' : ' is-engine'}`}>
+            {ownSettings ? 'Set for this project' : 'Default values'}
           </span>
         )}
       </div>
@@ -302,6 +350,38 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
                 The engine works in WGS 84 throughout, so there is nothing to choose.
               </p>
             </div>
+
+            {/* Per project, and passed to the engine with every run. Only once
+                the project exists: before that there is no run to pass them
+                to, and the dialog is only choosing resolutions. */}
+            {projectId && (
+              <fieldset className="settings-options">
+                <legend>With every run</legend>
+                {OPTIONS.map(({ key, label, hint }) => (
+                  <label key={key} className="settings-option" htmlFor={`option-${key}`}>
+                    <input
+                      id={`option-${key}`}
+                      type="checkbox"
+                      checked={Boolean(settings.options?.[key])}
+                      onChange={(e) =>
+                        setSettings((current) =>
+                          current
+                            ? { ...current, options: { ...current.options, [key]: e.target.checked } }
+                            : current,
+                        )
+                      }
+                    />
+                    <span>
+                      <span className="settings-option-label">{label}</span>
+                      <span className="field-hint muted-55">{hint}</span>
+                    </span>
+                  </label>
+                ))}
+                <p className="field-hint muted-55" style={{ margin: 0 }}>
+                  Off unless turned on. They change no result, and take effect from the next run.
+                </p>
+              </fieldset>
+            )}
           </div>
         </>
       )}
@@ -329,7 +409,7 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
             from. Typing the numbers the engine currently reports is not the
             same thing: that pins them, and they would stay put when the
             engine moves. */}
-        {settings && !settings.followingEngine && (
+        {ownSettings && (
           <button
             type="button"
             className="btn btn-ghost"

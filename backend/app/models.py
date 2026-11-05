@@ -170,13 +170,27 @@ class PruneRunsPayload(BaseModel):
     keep: int = 1
 
 
+class ProjectOptions(BaseModel):
+    """
+    Switches passed to the engine with every run. Off unless turned on: each
+    costs disk or time and none changes a result. See `settings.Options`.
+    """
+
+    #: The master table as CSV too (`EXPORT_CSV`).
+    masterCsv: bool = False
+    #: The model's criteria and subcriteria tables as CSV too (`MCDA_TABLES_CSV`).
+    modelTablesCsv: bool = False
+    #: Keep the machine awake while a run is going (`KEEP_AWAKE`).
+    keepAwake: bool = False
+
+
 class ProjectSettings(BaseModel):
     """
     The engine knobs a project carries.
 
-    Only two are settings — the rest of what the dialog used to show was
-    either decoration or, in the case of a pipeline version, a list of names
-    for a thing the engine does not have.
+    Two resolutions, and the switches in `options`. The rest of what the
+    dialog used to show was either decoration or, in the case of a pipeline
+    version, a list of names for a thing the engine does not have.
     """
 
     #: H3 resolution the values are computed and stored at. Changing it means
@@ -195,11 +209,42 @@ class ProjectSettings(BaseModel):
     #: project it is just a choice, and saying "you must reprocess" would be
     #: telling someone to redo work they have not done.
     hasResults: bool = False
+    #: The switches. Kept apart from the resolutions because saving them must
+    #: not pin the resolutions, which `followingEngine` is about.
+    options: ProjectOptions = Field(default_factory=ProjectOptions)
 
 
 class SaveSettingsPayload(BaseModel):
     processingResolution: int
     mapResolution: int
+
+
+class ModelChangedColumn(BaseModel):
+    """A master-table column that changed, and what it is to the model."""
+
+    column: str
+    #: score, exclusion, alert, informative or unused.
+    role: str = ""
+    leaves: list[str] = Field(default_factory=list)
+
+
+class ModelStatus(BaseModel):
+    """
+    Whether the model's last run still describes the data. See
+    `model_status`: the engine's own check of the master, and whether the
+    model file changed since the last Apply.
+    """
+
+    #: rerun, remask, alerts_only, informative_only, up_to_date, never_run or
+    #: unknown.
+    status: str
+    engineStatus: str = ""
+    configChanged: bool = False
+    lastRun: str = ""
+    checkedAt: str = ""
+    masterRun: str = ""
+    changed: list[ModelChangedColumn] = Field(default_factory=list)
+    reason: str = ""
 
 
 class ModelIssue(BaseModel):
@@ -332,9 +377,12 @@ class AbortResult(BaseModel):
 class InputVariable(BaseModel):
     """One variable in the engine's input tree, as the pipeline will see it."""
 
-    #: `<dimension>/<CODE>` — both its identity and where it lives.
+    #: `<dimension>/<CODE>`, or deeper for a nested variable
+    #: (`tec/TEC_001_t/TEC_001_sv003`): both its identity and where it lives.
     id: str
     dimension: str
+    #: The folder holding the dataset, which the master-table column is
+    #: named after.
     code: str
     filename: str = ""
     format: str = ""
@@ -345,8 +393,13 @@ class InputVariable(BaseModel):
     #: The source folder has moved. Informational — the data is already in
     #: the project, so nothing is broken.
     sourceMissing: bool = False
-    #: Set when the folder is not one readable dataset.
+    #: Set when the folder holds nothing the engine can read.
     problem: str = ""
+    #: Not a failure, but worth knowing: several datasets in one folder,
+    #: which the engine makes a column of each.
+    note: str = ""
+    #: The folders between the dimension and the code (`TEC_001_t`), if any.
+    group: str = ""
     #: Results with no input behind them. Still a column in the master table
     #: and a leaf the model can score, so worth seeing and removing.
     processedOnly: bool = False
@@ -374,6 +427,9 @@ class ImportCandidate(BaseModel):
     code: str = ""
     #: Why this one cannot be added. The others still can.
     problem: str = ""
+    #: The folders it is filed under between the dimension and its code,
+    #: kept from where it came from (`TEC_001_t`). Empty for a flat one.
+    group: str = ""
     #: Suggested from the kind of file, and editable before it is added.
     fill: str = "none"
     #: Where the fill applies: `all`, `land` (hexagons in a municipality) or
@@ -458,6 +514,58 @@ class VariableSettingsPayload(BaseModel):
     fillDomain: str = "all"
 
 
+class ValueColumnCandidate(BaseModel):
+    """A column the engine could take as a file's value, with its first value."""
+
+    name: str
+    dtype: str = ""
+    sample: object = None
+
+
+class ValueColumnSource(BaseModel):
+    """A file with several value columns, as the engine's own check sees it."""
+
+    variableId: str
+    #: The engine's key for the variable in `value_columns`.
+    code: str
+    #: Relative to the project's `in/`.
+    path: str
+    file: str
+    layer: str | None = None
+    geoColumns: list[str] = Field(default_factory=list)
+    candidates: list[ValueColumnCandidate] = Field(default_factory=list)
+    #: The engine will not transform it until a column is chosen.
+    needsChoice: bool = False
+    chosen: str | None = None
+    #: The engine's own reason (Spanish), when it has one.
+    error: str | None = None
+    #: The engine builds this one itself, with a column chosen there.
+    fixedBy: str | None = None
+
+
+class ValueColumnsState(BaseModel):
+    """Which files need a value column chosen, and which have one."""
+
+    #: False when the engine's check could not be run; `error` says why.
+    available: bool
+    error: str = ""
+    sources: list[ValueColumnSource] = Field(default_factory=list)
+
+
+class ValueColumnPayload(BaseModel):
+    """The value column of a variable, or of one of its files."""
+
+    column: str
+    #: Which file, when the variable's folder holds several. Left out for one.
+    file: str = ""
+
+
+class ValueColumnChoice(BaseModel):
+    variableId: str
+    file: str = ""
+    column: str | None = None
+
+
 class ImportItem(BaseModel):
     """One row of a batch: where to copy from, and what to file it under."""
 
@@ -465,6 +573,8 @@ class ImportItem(BaseModel):
     code: str
     #: Which dataset, when the folder holds more than one. Empty otherwise.
     filename: str = ""
+    #: The folders between the dimension and the code, as `plan` found them.
+    group: str = ""
     #: Left out, the defaults for the kind of file.
     fill: str | None = None
     fillDomain: str | None = None

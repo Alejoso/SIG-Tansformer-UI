@@ -71,6 +71,9 @@ async function fixture() {
     line('INGESTA', 'ok') + line('CONVERSION_H3', 'ok') + line('CARGA_DB', 'ok') +
       line('RENDER_HTML', 'ok'),
   );
+  // A finished variable leaves its hexagons behind, which is what makes it a
+  // variable of the project (and what Process has to work with).
+  await writeFile(join(out, 'AMB_053', 'poblacion.h3.parquet'), 'x'.repeat(64));
 
   return root;
 }
@@ -171,6 +174,9 @@ export async function run() {
     // one takes minutes and an engine. What is checked is the dressing.
     let started = false;
     await page.route('**/api/projects/*/process', (route) => {
+      // Until the click, the screen reads the real state; a stubbed "running"
+      // before it would lock the Process button it is about to press.
+      if (route.request().method() !== 'POST' && !started) return route.continue();
       if (route.request().method() === 'POST') started = true;
       return route.fulfill({
         status: route.request().method() === 'POST' ? 202 : 200,
