@@ -22,6 +22,7 @@ import { APP, findProject } from './harness.mjs';
 import * as modelScreen from './model-screen.mjs';
 import * as examplesScreen from './examples-screen.mjs';
 import * as layerOpacity from './layer-opacity.mjs';
+import * as layerLegend from './legend.mjs';
 import * as mapScreen from './map-screen.mjs';
 import * as settings from './settings.mjs';
 import * as modelRuns from './model-runs.mjs';
@@ -36,8 +37,8 @@ import * as modelStatus from './model-status.mjs';
 import * as valueColumns from './value-columns.mjs';
 
 const SUITES = [
-  modelScreen, examplesScreen, layerOpacity, mapScreen, settings, modelRuns, batchImport,
-  applyRun, codes, problems, variableSettings, nested, projectOptions, modelStatus,
+  modelScreen, examplesScreen, layerOpacity, layerLegend, mapScreen, settings, modelRuns,
+  batchImport, applyRun, codes, problems, variableSettings, nested, projectOptions, modelStatus,
   valueColumns,
 ];
 

@@ -278,12 +278,12 @@ def _to_layer_node(layer: outputs.ModelLayer) -> LayerNode:
 @app.api_route("/api/projects/{project_id}/layers/{node_id}/document", methods=["GET", "HEAD"])
 def get_layer_document(project_id: str, node_id: str, request: Request) -> Response:
     """
-    The rendered HTML for one layer, with the opacity control added.
+    The rendered HTML for one layer, with the opacity control and legend added.
 
     Streamed from disk: these are megabytes of pydeck document and the
     browser displays them in an iframe, so there is nothing to be gained by
     reading one into memory first. `document` holds back only the last few
-    kilobytes, which is where the control goes.
+    kilobytes, which is where that chrome goes.
 
     HEAD is declared alongside GET because the UI asks that way before
     pointing an iframe at it — an iframe loads an error page as readily as a
@@ -302,7 +302,7 @@ def get_layer_document(project_id: str, node_id: str, request: Request) -> Respo
     if request.method == "HEAD":
         return Response(media_type="text/html")
     return StreamingResponse(
-        document.with_opacity_control(path),
+        document.with_controls(path),
         media_type="text/html",
         # No content-length: the body is longer than the file by the control
         # added to it, and announcing the file's size would truncate it.

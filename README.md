@@ -45,9 +45,9 @@ An iframe rather than injected markup, because each document:
 It runs under `sandbox="allow-scripts"`, so the document cannot read
 `window.parent` and storage access throws — pydeck runs fine under that.
 
-Because the document owns its own pan, zoom, tooltip and opacity control, the
-app adds no map chrome of its own. Anything drawn on top would duplicate or
-contradict what is inside it.
+Because the document owns its own pan, zoom, tooltip, legend and opacity
+control, the app adds no map chrome of its own. Anything drawn on top would
+duplicate or contradict what is inside it.
 
 ## A clean start
 
@@ -618,6 +618,41 @@ sandboxed in an iframe, so a slider outside it would have nothing to talk to.
 Only the last few kilobytes of the file are ever held in memory — the control
 goes in before `</html>`, which is the only anchor reliably after pydeck's own
 script, since it closes `</body>` before it.
+
+### The legend is read out of the data
+
+The same injection adds a legend, top right. The engine writes no key: it
+bakes an RGBA into every cell (`_color`) and names the column the map is of
+in the tooltip. pydeck has nothing to turn on here — `@deck.gl/widgets` ships
+a distance scale bar, not a colour legend — and a widget could not help
+anyway, because the document carries colours per cell rather than the scale
+they came from. So the legend is derived from the hexagons themselves, which
+means every swatch is a colour that is actually on screen and a layer
+rendered months ago gets a legend as well.
+
+What it draws follows the shape of the column, which is the engine's own rule
+(`render_html` treats an integer column with more than twelve distinct values
+as continuous) applied to the data rather than to a dtype we can no longer
+see:
+
+- up to twelve distinct values, or any text at all: one swatch per value, in
+  the colour that value is painted in. On a classified layer the tooltip
+  points at the label column, so the legend reads `3C` rather than `11`;
+- more than that: a ramp, with the lowest and highest values printed under
+  it. The colours along it are sampled from the cells nearest each stop, so
+  the ends are the colours of the cells the numbers name;
+- cells the engine took out of the measurement — solid black, alpha 220 —
+  get their own `Excluded` swatch and are kept out of the range, so a `-1`
+  does not drag the low end of an MCDA score down with it;
+- the ring the combined MCDA map draws over a flagged cell gets a row too.
+
+A layer it cannot describe gets no legend rather than a made-up one: a column
+that is entirely null reaches the render as NaN cast to int, every channel
+`-2^63`, and there is nothing honest to say about that.
+
+Colours carry their own alpha (180 of 255 on a ramp), so every swatch is
+drawn over white — the same compositing as over the basemap. On the panel's
+own background it would be the wrong colour.
 
 ## The model file
 
