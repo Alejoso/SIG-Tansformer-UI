@@ -30,10 +30,10 @@ import { lintYaml } from '../../lib/yaml-lint';
  */
 const highlightStyle = HighlightStyle.define([
   { tag: tags.comment, color: 'var(--color-neutral-600)', fontStyle: 'italic' },
-  { tag: [tags.definitionKeyword, tags.keyword], color: 'var(--color-accent-700)' },
-  { tag: [tags.propertyName, tags.definition(tags.propertyName)], color: 'var(--color-accent-700)', fontWeight: '600' },
-  { tag: tags.string, color: 'var(--color-accent-2-700)' },
-  { tag: tags.number, color: 'var(--color-accent-2-800)', fontWeight: '600' },
+  { tag: [tags.definitionKeyword, tags.keyword], color: 'var(--color-accent-2-800)' },
+  { tag: [tags.propertyName, tags.definition(tags.propertyName)], color: 'var(--color-accent-2-800)', fontWeight: '600' },
+  { tag: tags.string, color: 'var(--color-neutral-800)' },
+  { tag: tags.number, color: 'var(--color-accent-700)', fontWeight: '600' },
   { tag: [tags.bool, tags.null, tags.atom], color: 'var(--color-accent-600)', fontWeight: '600' },
   { tag: [tags.punctuation, tags.separator], color: 'var(--color-neutral-500)' },
   { tag: tags.invalid, color: 'var(--color-accent)', textDecoration: 'underline wavy' },
@@ -56,16 +56,16 @@ const editorTheme = EditorView.theme({
     border: 'none',
     color: 'var(--color-neutral-400)',
   },
-  '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--color-accent) 7%, transparent)' },
+  '.cm-activeLine': { backgroundColor: 'var(--color-neutral-200)' },
   '.cm-activeLineGutter': {
-    backgroundColor: 'color-mix(in srgb, var(--color-accent) 10%, transparent)',
-    color: 'var(--color-accent-800)',
+    backgroundColor: 'var(--color-neutral-200)',
+    color: 'var(--color-text)',
   },
-  '.cm-cursor': { borderLeftColor: 'var(--color-accent)', borderLeftWidth: '2px' },
+  '.cm-cursor': { borderLeftColor: 'var(--color-text)', borderLeftWidth: '2px' },
   '&.cm-focused': { outline: 'none' },
-  // The default selection is invisible on a cream ground.
+  // The default selection is invisible on the paper ground.
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': {
-    backgroundColor: 'color-mix(in srgb, var(--color-accent) 24%, transparent)',
+    backgroundColor: 'var(--color-accent-2-200)',
   },
   '.cm-lintRange-error': {
     backgroundImage: 'none',

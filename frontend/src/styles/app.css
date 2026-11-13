@@ -4,9 +4,10 @@ body { margin: 0; background: var(--color-bg); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-neutral-300);
+  background: var(--color-neutral-400);
   border-radius: 999px;
-  border: 3px solid var(--color-bg);
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 
 #root { height: 100vh; }
@@ -41,62 +42,86 @@ body { margin: 0; background: var(--color-bg); }
 
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-/* ── header ─────────────────────────────────────────────────────────── */
+/* ── header: the dark app bar ────────────────────────────────────────── */
 
+/* Brand, then which project you are in, then the steps centred, then a run
+   in progress. The DOM order is brand · steps · run · breadcrumb; `order`
+   moves the breadcrumb beside the brand without touching the markup. */
 .header {
+  flex: none;
+  height: 48px;
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 14px 26px 0;
+  gap: 14px;
+  padding: 0 14px;
+  background: var(--color-bar);
+  color: var(--color-bar-text);
+  position: relative;
+  z-index: 10;
 }
 
 .header-brand {
+  order: 0;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   cursor: pointer;
-  margin-right: 6px;
   background: none;
   border: 0;
-  padding: 0;
+  padding: 4px 6px;
+  margin-left: -6px;
+  border-radius: var(--radius-sm);
   color: inherit;
 }
+.header-brand:hover { background: var(--color-bar-raise); }
 
 .header-brand span {
   font-family: var(--font-heading);
-  font-size: 19px;
+  font-weight: 500;
+  font-size: 20px;
   letter-spacing: -0.01em;
 }
 
-.stepper { display: flex; align-items: center; gap: 2px; flex: 1; }
+.stepper {
+  order: 2;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--color-bar-raise);
+}
 
 .step {
-  padding: 7px 14px;
-  border-radius: 999px;
+  padding: 5px 14px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13.5px;
+  font-weight: 500;
   white-space: nowrap;
   border: 0;
   background: transparent;
   font-family: inherit;
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+  color: var(--color-bar-muted);
 }
-.step:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.step:hover:not(:disabled) { color: var(--color-bar-text); }
 .step[aria-current='step'] {
-  font-weight: 700;
-  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
-  color: var(--color-accent-800);
+  background: var(--color-bar-active);
+  color: var(--color-bar-text);
 }
 
 .breadcrumb {
-  margin-left: auto;
+  order: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  gap: 6px;
+  font-size: 13.5px;
+  color: var(--color-bar-muted);
 }
-.breadcrumb strong { color: var(--color-text); font-weight: 600; }
+.breadcrumb strong { color: var(--color-bar-text); font-weight: 500; }
 
 /* ── toast ──────────────────────────────────────────────────────────── */
 
@@ -114,9 +139,9 @@ body { margin: 0; background: var(--color-bg); }
   gap: 10px;
   padding: 12px 20px;
   border-radius: 999px;
-  background: var(--color-accent-2-200);
-  color: var(--color-accent-2-900);
-  box-shadow: var(--shadow-md);
+  background: var(--color-bar);
+  color: var(--color-bar-text);
+  box-shadow: var(--shadow-lg);
   font-size: 13.5px;
   z-index: 60;
 }
@@ -142,7 +167,7 @@ body { margin: 0; background: var(--color-bg); }
   background: var(--color-neutral-300);
   color: var(--color-neutral-800);
 }
-.infotip-marker:hover { background: var(--color-accent-300); color: var(--color-accent-900); }
+.infotip-marker:hover { background: var(--color-neutral-800); color: var(--color-neutral-100); }
 
 .infotip-bubble {
   position: absolute;
@@ -166,7 +191,7 @@ body { margin: 0; background: var(--color-bg); }
 }
 .infotip-bubble.is-top { bottom: calc(100% + 8px); transform: translateX(-50%); }
 .infotip-bubble.is-bottom { top: calc(100% + 8px); transform: translateX(-50%); }
-.infotip-bubble strong { color: var(--color-accent-300); font-weight: 700; }
+.infotip-bubble strong { color: var(--color-accent-300); font-weight: 600; }
 
 /* ── searchable select ──────────────────────────────────────────────────── */
 
@@ -195,7 +220,7 @@ body { margin: 0; background: var(--color-bg); }
   max-height: 260px;
   overflow-y: auto;
   border-radius: var(--radius-md);
-  background: var(--color-neutral-100);
+  background: var(--color-surface);
   box-shadow: var(--shadow-lg);
 }
 
@@ -209,8 +234,8 @@ body { margin: 0; background: var(--color-bg); }
   cursor: pointer;
 }
 /* Hover and keyboard share one highlight, so arrowing and pointing agree. */
-.combo-option.is-highlighted { background: var(--color-accent-100); }
-.combo-option.is-selected { font-weight: 700; color: var(--color-accent-800); }
+.combo-option.is-highlighted { background: var(--color-neutral-200); }
+.combo-option.is-selected { font-weight: 600; color: var(--color-accent-2-900); }
 
 .combo-option-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .combo-option-hint {
@@ -232,23 +257,21 @@ body { margin: 0; background: var(--color-bg); }
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  order: 3;
   margin-left: auto;
   padding: 5px 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   white-space: nowrap;
-  background: var(--color-accent-100);
-  box-shadow: inset 0 0 0 1px var(--color-accent-300);
-  color: var(--color-accent-900);
+  background: var(--color-bar-raise);
+  color: var(--color-bar-text);
 }
-.header-run:hover { background: var(--color-accent-200); }
+.header-run:hover { background: var(--color-bar-active); }
 .header-run-percent { font-size: 12px; font-variant-numeric: tabular-nums; }
-/* Both want `margin-left: auto`. With the chip there it is the one that
-   pushes the pair right, and the breadcrumb just sits after it. */
-.header-run + .breadcrumb { margin-left: 0; }
+
 
 
 /* ── whether the model map still shows the data ─────────────────────────── */
@@ -280,3 +303,12 @@ body { margin: 0; background: var(--color-bg); }
 .model-status-apply { flex: none; height: 34px; padding-inline: 16px; font-size: 13.5px; }
 .model-status.is-compact { flex-wrap: wrap; font-size: 12.5px; padding: 9px 11px; }
 .model-status.is-compact .model-status-apply { width: 100%; }
+
+/* On a phone the steps cannot sit centred over the brand: the brand keeps
+   its mark only, and the steps take the rest of the bar. */
+@media (max-width: 760px) {
+  .header { gap: 8px; padding: 0 8px; }
+  .header-brand span, .breadcrumb { display: none; }
+  .stepper { position: static; transform: none; margin-left: auto; }
+  .step { padding: 5px 9px; }
+}

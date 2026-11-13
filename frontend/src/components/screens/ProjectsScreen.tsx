@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
-import { RAMP_INPUT, rampCss } from '../../lib/ramp';
 import type { Project } from '../../types';
 import { Icon } from '../ui/Icon';
 
-const SWATCH = `linear-gradient(135deg,${rampCss(RAMP_INPUT, 0.15)},${rampCss(RAMP_INPUT, 0.85)})`;
+/** A flat hexagon in the data ink: the product's mark, not a decoration. */
+const SWATCH = 'var(--color-accent-2-900)';
 
 /** "3 folders · 2 days ago", with the hexagon count once there is one. */
 function detailLine(project: Project): string {
@@ -183,7 +183,7 @@ export function ProjectsScreen() {
 
               <button type="button" className="project-new" onClick={() => goTo('setup')}>
                 <div className="project-new-icon">
-                  <Icon name="plus" size={19} color="var(--color-accent-800)" />
+                  <Icon name="plus" size={19} color="var(--color-surface)" />
                 </div>
                 <div className="project-new-title">New project</div>
                 <div className="muted-55" style={{ fontSize: 12 }}>

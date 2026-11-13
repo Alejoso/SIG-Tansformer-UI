@@ -1,25 +1,36 @@
 /* ── map screen ─────────────────────────────────────────────────────────── */
 
+/* The generated document fills the whole screen under the bar; the sidebar
+   floats over its left edge, 12px in. The heading and the file name sit
+   just right of the panel so they never cover it. */
 .map-screen {
+  --map-panel: 330px;
+  --map-inset: 12px;
   flex: 1;
-  display: flex;
+  position: relative;
   min-height: 0;
-  gap: 18px;
-  padding: 18px 26px 26px;
 }
 
 .map-sidebar {
-  width: 310px;
-  flex: none;
+  position: absolute;
+  z-index: 3;
+  top: var(--map-inset);
+  left: var(--map-inset);
+  bottom: var(--map-inset);
+  width: var(--map-panel);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  padding: 14px 12px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
 }
 
 .mode-switch { width: 100%; margin-bottom: 14px; }
 .mode-switch .seg-opt { flex: 1; justify-content: center; }
 
-.mode-hint { margin: 0 0 12px; font-size: 12px; line-height: 1.45; }
+.mode-hint { margin: 0 4px 12px; font-size: 12.5px; line-height: 1.45; }
 
 .layer-tree-scroll {
   flex: 1;
@@ -32,13 +43,12 @@
 
 .layer-section-title {
   margin: 0 0 8px;
-  padding-left: 2px;
-  font-family: var(--font-body);
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+  padding-left: 4px;
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--color-text);
 }
 
 .layer-list, .layer-children {
@@ -48,28 +58,25 @@
 }
 /* The variables under a dimension, indented just enough to read as inside
    it without pushing the codes off the edge. */
-.layer-children { margin-left: 14px; }
+.layer-children { margin-left: 16px; }
 
 .layer-row {
   display: flex;
   align-items: center;
   gap: 2px;
   border-radius: var(--radius-md);
-  padding: 0 8px 0 12px;
+  padding: 0 8px 0 8px;
 }
-.layer-row:hover { background: color-mix(in srgb, var(--color-text) 5%, transparent); }
-.layer-row.is-selected {
-  background: var(--color-accent-100);
-  box-shadow: inset 0 0 0 1.5px var(--color-accent-400);
-}
+.layer-row:hover { background: var(--color-neutral-200); }
+.layer-row.is-selected { background: var(--color-select); }
 .layer-row.is-empty { opacity: 0.5; }
 /* A dimension. Not dimmed like an empty row: it has no document, but
    clicking it does something — it opens. */
 .layer-row.is-folder .layer-name {
-  font-size: 12px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--color-text) 62%, transparent);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-transform: capitalize;
+  color: var(--color-text);
 }
 
 /* The disclosure arrow on a dimension. */
@@ -89,11 +96,10 @@
   flex: none;
   min-width: 17px;
   padding: 1px 6px;
-  border-radius: 999px;
-  font-size: 10px;
-  text-align: center;
-  background: var(--color-neutral-200);
-  color: var(--color-neutral-800);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-neutral-700);
 }
 
 .layer-label {
@@ -106,13 +112,13 @@
   border: 0;
   background: none;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 13.5px;
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 .layer-label:disabled { cursor: not-allowed; }
-.is-selected .layer-label { font-weight: 700; }
+.is-selected .layer-label { font-weight: 600; }
 
 .layer-name {
   flex: 1;
@@ -128,14 +134,12 @@
 /* ── the map canvas ─────────────────────────────────────────────────────── */
 
 .map-canvas {
-  flex: 1;
-  position: relative;
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
+  position: absolute;
+  inset: 0;
+  background: var(--color-bg);
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
 }
-/* The generated document fills the frame; the rounded corners are ours. */
+/* The generated document fills the screen, edge to edge. */
 .layer-frame {
   position: absolute;
   inset: 0;
@@ -143,7 +147,6 @@
   height: 100%;
   border: 0;
   display: block;
-  border-radius: var(--radius-lg);
   background: var(--color-bg);
 }
 
@@ -156,12 +159,11 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 24px;
+  padding: 24px 24px 24px calc(var(--map-panel, 0px) + 36px);
   text-align: center;
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
+  background: var(--color-bg);
 }
-.layer-frame-overlay-text { font-family: var(--font-heading); font-size: 18px; }
+.layer-frame-overlay-text { font-family: var(--font-heading); font-size: 22px; letter-spacing: -0.01em; }
 .layer-frame-overlay code {
   padding: 1px 6px;
   border-radius: 6px;
@@ -171,17 +173,21 @@
 
 .map-heading {
   position: absolute;
-  top: 16px;
-  left: 18px;
+  top: var(--map-inset, 12px);
+  left: calc(var(--map-panel, 0px) + var(--map-inset, 12px) * 2);
   z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
+  max-width: 420px;
+  padding: 8px 14px 9px;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
   pointer-events: none;
-  text-shadow: 0 1px 3px color-mix(in srgb, var(--color-bg) 85%, transparent);
 }
-.map-heading-title { font-family: var(--font-heading); font-size: 20px; }
-.map-heading-hint { font-size: 12px; }
+.map-heading-title { font-family: var(--font-heading); font-size: 21px; line-height: 1.15; letter-spacing: -0.01em; }
+.map-heading-hint { font-size: 12.5px; }
 
 .map-controls {
   position: absolute;
@@ -197,31 +203,33 @@
 .map-btn {
   width: 34px;
   height: 34px;
-  background: color-mix(in srgb, var(--color-bg) 90%, transparent);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
 }
-.map-btn:hover { background: var(--color-bg); }
+.map-btn:hover { background: var(--color-neutral-200); }
 
 .map-sidebar-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-divider);
 }
 
 /* The generated document's filename, bottom-right of the frame. */
 .layer-frame-source {
   position: absolute;
-  bottom: 14px;
-  left: 18px;
+  bottom: var(--map-inset, 12px);
+  left: calc(var(--map-panel, 0px) + var(--map-inset, 12px) * 2);
   z-index: 2;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-md);
   white-space: nowrap;
-  font-size: 11px;
-  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
-  backdrop-filter: blur(4px);
-  box-shadow: var(--shadow-sm);
+  font-size: 11.5px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
 }
 
 /* A layer the pipeline logged a problem for. It still rendered — the pipeline
@@ -235,7 +243,12 @@
   border-radius: 999px;
   font-size: 10px;
   font-weight: 700;
-  background: var(--color-accent-300);
-  color: var(--color-accent-900);
+  background: var(--color-accent-200);
+  color: var(--color-accent-800);
   cursor: help;
+}
+
+@media (max-width: 760px) {
+  .map-screen { --map-panel: 0px; }
+  .map-sidebar { top: auto; right: var(--map-inset); width: auto; height: 46%; }
 }
