@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maphex rework</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root { --ground: #f4f3ef; --ink: #1b1b19; --ink-2: #5d5b55; --tone: #e9e7e1; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 "Instrument Sans", system-ui, sans-serif; }
+main { max-width: 1240px; margin: 0 auto; padding: 56px 24px 96px; }
+h1 { font-size: 44px; line-height: 1.05; letter-spacing: -.03em; margin: 0 0 12px; font-weight: 600; }
+.lead { font-size: 19px; color: var(--ink-2); max-width: 760px; margin: 0 0 64px; }
+article { display: grid; grid-template-columns: 1.6fr 1fr; gap: 40px; margin-bottom: 96px; align-items: start; }
+article img { width: 100%; display: block; border-radius: 10px; background: var(--tone); }
+h2 { font-size: 30px; letter-spacing: -.02em; margin: 0 0 4px; font-weight: 600; }
+.ref { color: var(--ink-2); margin: 0 0 16px; }
+ul { padding-left: 18px; margin: 0 0 20px; }
+li { margin-bottom: 8px; }
+a.open { display: inline-block; background: var(--ink); color: #fff; text-decoration: none; padding: 10px 18px; border-radius: 6px; font-weight: 500; }
+a.open:hover { background: #3a3a36; }
+.cost { background: var(--tone); padding: 12px 14px; border-radius: 8px; font-size: 15px; margin-bottom: 20px; }
+.notes { background: var(--tone); padding: 24px 28px; border-radius: 10px; }
+.notes h2 { font-size: 22px; margin-bottom: 10px; }
+@media (max-width: 860px) { article { grid-template-columns: 1fr; gap: 20px; } h1 { font-size: 34px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Maphex: tres caminos para el rework</h1>
+  <p class="lead">Cada maqueta usa el proyecto Vento real (sus 79 variables, los nombres de archivo y el model.yaml) sobre celdas H3 reales de Colombia. Los scores son inventados. Todas son interactivas: arrastra el mapa, haz zoom con la rueda y haz clic en un hexágono.</p>
+
+  <article>
+    <a href="a-lienzo/"><img src="shots/a-lienzo.png" alt="Dirección A: el mapa a pantalla completa con paneles flotantes"></a>
+    <div>
+      <h2>A · Lienzo</h2>
+      <p class="ref">El mapa es la app. Basado en Felt.</p>
+      <ul>
+        <li>El mapa nunca se va. Data, Layers y Model son modos de un panel que flota encima.</li>
+        <li>El árbol de capas es el árbol del modelo: criterio → variables, cada uno con su peso.</li>
+        <li>Al hacer clic en un hexágono ves por qué tiene ese score: cuánto aporta cada criterio y cuál lo frena.</li>
+        <li>Un filtro en vivo («celdas con score ≥ 3.5») con su histograma. Los pesos de los criterios repintan el mapa mientras arrastras.</li>
+      </ul>
+      <div class="cost"><b>Costo:</b> el más grande. Obliga a pintar el mapa nosotros (deck.gl + H3, que ya están en package.json) en vez de usar el iframe de pydeck.</div>
+      <a class="open" href="a-lienzo/">Abrir A</a>
+    </div>
+  </article>
+
+  <article>
+    <a href="b-consola/"><img src="shots/b-consola.png" alt="Dirección B: panel oscuro del proyecto con cifras, mapa y la última corrida"></a>
+    <div>
+      <h2>B · Consola</h2>
+      <p class="ref">Panel de control oscuro. Basado en Ada.</p>
+      <ul>
+        <li>Abre con un resumen del proyecto que responde «¿la última corrida salió bien?»: 12 archivos sin leer, 65 de 79 variables en el score.</li>
+        <li>Cifras grandes en tipografía, sin tarjetas con íconos. El color se reserva para los datos y la acción principal.</li>
+        <li>La corrida del pipeline queda a la vista, con la duración de cada paso (deben sumar 23 min 55 s).</li>
+        <li>La tabla de variables abre filtrada en «Not read», con el motivo y un botón para reemplazar el archivo.</li>
+      </ul>
+      <div class="cost"><b>Costo:</b> el más bajo. Es una pantalla nueva (Overview) más un re-skin oscuro, y el mapa puede seguir siendo el iframe.</div>
+      <a class="open" href="b-consola/">Abrir B</a>
+    </div>
+  </article>
+
+  <article>
+    <a href="c-mesa/"><img src="shots/c-mesa.png" alt="Dirección C: banco de trabajo con árbol, mapa e inspector"></a>
+    <div>
+      <h2>C · Mesa</h2>
+      <p class="ref">Un solo banco de trabajo. Mezcla Felt y una herramienta técnica.</p>
+      <ul>
+        <li>Data, Model y Map se juntan en una sola pantalla: árbol del modelo a la izquierda, mapa en el centro, inspector a la derecha.</li>
+        <li>Para cada variable configuras su tipo (minmax / zscore / range / map / direct), si un valor alto es mejor o peor, cómo se llenan los huecos y su peso, con controles en vez de YAML.</li>
+        <li>Una franja de pesos que arrastras y que siempre suma 100 %.</li>
+        <li>El model.yaml sigue visible abajo y marca lo que cambiaste. Los 69 avisos están en una pestaña.</li>
+      </ul>
+      <div class="cost"><b>Costo:</b> medio. Cambia la navegación y requiere escribir el YAML desde los formularios, pero reutiliza el lint y el editor que ya existen.</div>
+      <a class="open" href="c-mesa/">Abrir C</a>
+    </div>
+  </article>
+
+  <section class="notes">
+    <h2>Notas</h2>
+    <ul>
+      <li>La paleta actual (crema + terracota + Caprasimo) es justo la combinación que hoy se lee como «hecha por IA». Las tres direcciones la cambian.</li>
+      <li>Datos de muestra que habría que cambiar por los reales: los scores por hexágono, cuáles son los 12 archivos fallidos y sus motivos, las duraciones de cada paso y el texto «hace 2 h».</li>
+      <li>No se tocó nada de <code>frontend/</code>. Todo está en <code>design/rework/</code>.</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maphex — B · Consola</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/h3-js@4.1.0/dist/h3-js.umd.js"></script>
+<script src="../shared/geo.js"></script>
+<script src="../shared/vento.js"></script>
+<script src="../shared/hexmap.js"></script>
+<style>
+/*
+ * Direction B — "Consola". The project's overview at night (after Ada).
+ * One dark ground everywhere; elevation by lightness alone; colour only on data
+ * and on the one action. Canvas: 32px gutters, 24px gap.
+ * Row 2: 2fr + 1fr → (1376 − 24) = 1352 → 901 + 24 + 451 at 1440.
+ */
+:root {
+  --ground: #0a0d0c;
+  --raise: #111614;
+  --raise-2: #18201d;
+  --line: #1f2724;
+  --ink: #e9eeeb;
+  --ink-2: #8d9893;
+  --ink-3: #5c6662;
+  --accent: #9fcf95;           /* Ada's sage: the action, and the data ramp's top */
+  --accent-ink: #0d1a0c;
+  --warn: #f0b36b;
+  --warn-bg: #2a2014;
+  --sans: "Hanken Grotesk", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--ground); color: var(--ink); font: 14px/1.5 var(--sans); }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ── Top bar ── */
+.top { height: 60px; display: flex; align-items: center; gap: 28px; padding: 0 32px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--ground); z-index: 3; }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 17px; letter-spacing: -.01em; }
+.switch { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--raise); color: var(--ink); border: 0; }
+.switch span { color: var(--ink-2); }
+.nav { display: flex; gap: 22px; }
+.nav a { color: var(--ink-2); text-decoration: none; font-weight: 500; }
+.nav a:hover, .nav a[aria-current] { color: var(--ink); }
+.top-right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+.btn { border-radius: 99px; padding: 8px 18px; font-weight: 500; border: 1px solid var(--line); background: transparent; }
+.btn:hover { background: var(--raise); }
+.btn-accent { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn-accent:hover { background: #b4dcab; }
+
+main { padding: 32px; max-width: 1440px; margin: 0 auto; }
+
+/* ── Title row ── */
+.title { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; margin-bottom: 28px; }
+.title h1 { font-size: 40px; font-weight: 300; letter-spacing: -.03em; line-height: 1.05; margin: 0 0 8px; }
+.title p { margin: 0; color: var(--ink-2); font-size: 15px; max-width: 860px; }
+.title p b { color: var(--warn); font-weight: 500; }
+
+/* ── Figures as type ── */
+.figures { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 24px; background: var(--raise); border-radius: 14px; }
+.fig { padding: 20px 24px; }
+.fig + .fig { box-shadow: inset 1px 0 0 var(--line); }
+.fig b { display: block; font-size: 46px; font-weight: 300; letter-spacing: -.035em; line-height: 1; }
+.fig b small { font-size: 20px; color: var(--ink-2); font-weight: 300; margin-left: 4px; letter-spacing: 0; }
+.fig span { display: block; margin-top: 10px; color: var(--ink-2); }
+.fig.warn b { color: var(--warn); }
+
+/* ── Row: map + run ── */
+.row { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px; }
+.card { background: var(--raise); border-radius: 14px; overflow: hidden; }
+.card-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px 0; gap: 16px; }
+.card-head h2 { font-size: 16px; font-weight: 500; margin: 0; }
+.card-head .sub { color: var(--ink-2); font-size: 13px; }
+.seg { display: flex; background: var(--ground); border-radius: 99px; padding: 3px; }
+.seg button { border: 0; background: transparent; color: var(--ink-2); padding: 4px 11px; border-radius: 99px; font-size: 13px; }
+.seg button[aria-pressed="true"] { background: var(--raise-2); color: var(--ink); }
+.mapwrap { position: relative; height: 470px; }
+#map { width: 100%; height: 100%; display: block; }
+.legend { position: absolute; left: 20px; bottom: 18px; display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 12px; }
+.legend .ramp { width: 160px; height: 8px; border-radius: 4px; }
+.cellinfo { position: absolute; right: 18px; bottom: 18px; background: var(--raise-2); border-radius: 10px; padding: 12px 14px; min-width: 220px; font-size: 13px; }
+.cellinfo b { font-size: 28px; font-weight: 300; letter-spacing: -.02em; display: block; line-height: 1.1; }
+.cellinfo .k { color: var(--ink-2); }
+
+.steps { list-style: none; margin: 0; padding: 10px 20px 16px; }
+.steps li { display: grid; grid-template-columns: 16px 1fr auto; gap: 10px; align-items: baseline; padding: 6px 0; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); align-self: center; justify-self: center; }
+.dot.skip { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.dot.warn { background: var(--warn); }
+.steps .lbl { color: var(--ink); }
+.steps .lbl em { display: block; font-style: normal; color: var(--warn); font-size: 12px; }
+.steps .skip-lbl { color: var(--ink-2); }
+.steps .t { color: var(--ink-2); font-size: 13px; }
+.run-total { display: flex; justify-content: space-between; padding: 12px 20px; background: var(--raise-2); }
+.run-total b { font-weight: 500; }
+.bar-time { display: flex; height: 6px; margin: 14px 20px 0; border-radius: 3px; overflow: hidden; gap: 2px; }
+.bar-time i { display: block; background: #3f6e45; }
+.bar-time i.hot { background: var(--accent); }
+
+/* ── Variables table ── */
+.toolbar { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px 8px; }
+.chips { display: flex; gap: 6px; }
+.chips button { border: 1px solid var(--line); background: transparent; color: var(--ink-2); border-radius: 99px; padding: 4px 12px; font-size: 13px; }
+.chips button[aria-pressed="true"] { color: var(--ink); background: var(--raise-2); border-color: var(--raise-2); }
+.search { background: var(--ground); border: 1px solid var(--line); border-radius: 99px; height: 32px; width: 260px; padding: 0 14px; color: var(--ink); font: inherit; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-weight: 500; color: var(--ink-2); font-size: 13px; padding: 10px 20px; border-bottom: 1px solid var(--line); }
+td { padding: 11px 20px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--raise-2); }
+th.r, td.r { text-align: right; font-variant-numeric: tabular-nums; }
+.id { font-weight: 500; }
+.code { color: var(--ink-2); font-size: 13px; }
+.status { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.status .dot { width: 7px; height: 7px; }
+.reason { color: var(--ink-2); font-size: 13px; }
+.rowact { border: 1px solid var(--line); background: transparent; border-radius: 99px; padding: 4px 12px; font-size: 13px; color: var(--ink); }
+.rowact:hover { background: var(--raise-2); }
+.foot { padding: 12px 20px; color: var(--ink-2); display: flex; justify-content: space-between; }
+.foot a { color: var(--ink); }
+
+@media (max-width: 900px) {
+  .nav, .switch span { display: none; }
+  .top { padding: 0 16px; gap: 12px; }
+  main { padding: 20px 16px; }
+  .title { flex-direction: column; align-items: flex-start; }
+  .title h1 { font-size: 32px; }
+  .figures { grid-template-columns: 1fr 1fr; }
+  .fig:nth-child(3) { box-shadow: inset 0 1px 0 var(--line); }
+  .fig:nth-child(4) { box-shadow: inset 1px 0 0 var(--line), inset 0 1px 0 var(--line); }
+  .fig b { font-size: 34px; }
+  .row { grid-template-columns: 1fr; }
+  .mapwrap { height: 380px; }
+  .cellinfo { display: none; }
+  .hide-sm { display: none; }
+  .toolbar { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .chips { flex-wrap: wrap; }
+  .search { width: 100%; }
+  td, th { padding: 10px 12px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" fill="none" stroke="#9fcf95" stroke-width="2"/><path d="M12 8l3.46 2v4L12 16l-3.46-2v-4z" fill="#9fcf95"/></svg>
+    Maphex
+  </div>
+  <button class="switch">Vento <span>Colombia</span> ▾</button>
+  <nav class="nav"><a href="#" aria-current="page">Overview</a><a href="#">Data</a><a href="#">Map</a><a href="#">Model</a></nav>
+  <div class="top-right"><button class="btn">Model file</button><button class="btn btn-accent">Run again</button></div>
+</header>
+
+<main>
+  <div class="title">
+    <div>
+      <h1>Vento</h1>
+      <p>The last run finished 2 h ago. <b>12 files were not read</b>, so the score stands on 65 of the 79 variables you added.</p>
+    </div>
+    <button class="btn btn-accent">Review the 12 files</button>
+  </div>
+
+  <section class="figures" aria-label="This project in figures" id="figures"></section>
+
+  <div class="row">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Where it scores</h2><div class="sub">H3 resolution 6 for the map · computed at 8</div></div>
+        <div class="seg" id="seg" role="group" aria-label="Paint the map by"></div>
+      </div>
+      <div class="mapwrap">
+        <canvas id="map" aria-label="Map of Colombia scored by hexagon"></canvas>
+        <div class="legend"><span>Low</span><span class="ramp" id="ramp"></span><span>High</span></div>
+        <div class="cellinfo" id="cellinfo"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Last run</h2><div class="sub">Nov 6, 16:19 · execution rf_001</div></div></div>
+      <div class="bar-time" id="bartime" aria-hidden="true"></div>
+      <ol class="steps" id="steps"></ol>
+      <div class="run-total"><span>Finished in</span><b class="num">23 min 55 s</b></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="toolbar">
+      <div class="chips" id="chips"></div>
+      <input class="search" placeholder="Find a variable or file" aria-label="Find a variable">
+    </div>
+    <table>
+      <thead><tr><th>Variable</th><th class="hide-sm">Source</th><th class="hide-sm">Criterion</th><th class="r hide-sm">Size</th><th class="r">Weight</th><th>Status</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="foot"><span id="foot-count"></span><a href="#">View all variables</a></div>
+  </section>
+</main>
+
+<script>
+const V = window.VENTO;
+const RAMP = ['#263b31', '#2f5a3b', '#4f8a4f', '#8fc274', '#d7f2a6'];
+const CRIT = { ambiental: 'Ambiental', social: 'Social', socioeconomica: 'Socioeconómica', tecnica: 'Técnica' };
+const fmtBytes = (b) => b > 1e9 ? (b / 1e9).toFixed(1) + ' GB' : b > 1e6 ? Math.round(b / 1e6) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' kB';
+
+const inModel = V.variables.filter((v) => v.status === 'model').length;
+const failed = V.variables.filter((v) => v.status === 'failed');
+const map = new HexMap(document.getElementById('map'), {
+  ramp: RAMP, neighbours: '#101513', neighbourStroke: '#1c2421', land: '#151b19', selectStroke: '#ffffff',
+  padding: 28, labels: HexData.CITIES, labelColor: '#c9d1cd', labelHalo: 'rgba(10,13,12,.8)', labelFont: 'Hanken Grotesk',
+  onHover: (c) => c && showCell(c), onSelect: showCell,
+});
+console.assert(V.variables.length === 79 && failed.length === 12 && inModel === 65, 'figures disagree with the data');
+
+document.getElementById('figures').innerHTML = [
+  [map.list.length.toLocaleString('en'), '', 'Hexagons on the map (resolution 6)'],
+  [inModel, `/ ${V.variables.length}`, 'Variables the score uses'],
+  [failed.length, '', 'Files the engine could not read', 'warn'],
+  [map.list.filter((c) => c.s.total >= 3.5).length.toLocaleString('en'), '', 'Hexagons scoring 3.5 or more'],
+].map(([n, s, l, c]) => `<div class="fig ${c || ''}"><b class="num">${n}<small>${s}</small></b><span>${l}</span></div>`).join('');
+
+/* Map: paint by total or one criterion */
+const seg = document.getElementById('seg');
+seg.innerHTML = [['total', 'Score'], ...HexData.CRITERIA.map((k) => [k, CRIT[k]])]
+  .map(([k, l]) => `<button data-f="${k}" aria-pressed="${k === 'total'}">${l}</button>`).join('');
+seg.querySelectorAll('button').forEach((b) => b.onclick = () => {
+  seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b)); map.set(b.dataset.f);
+});
+document.getElementById('ramp').style.background = `linear-gradient(90deg, ${RAMP.join(',')})`;
+function showCell(c) {
+  document.getElementById('cellinfo').innerHTML = `<span class="k">Hexagon ${c.id.slice(0, 9)}…</span><b class="num">${c.s.total.toFixed(2)}</b>
+    <span class="k num">Amb ${c.s.ambiental.toFixed(1)} · Soc ${c.s.social.toFixed(1)} · SoE ${c.s.socioeconomica.toFixed(1)} · Téc ${c.s.tecnica.toFixed(1)}</span>`;
+}
+showCell(map.list.reduce((a, c) => (c.s.total > a.s.total ? c : a)));
+
+/* Pipeline run — SAMPLE durations, they add up to 23 min 55 s */
+const STEPS = [
+  ['Normalise administrative boundaries', 0, 'skip', 'already normalised'],
+  ['Build the H3 grid', 0, 'skip', 'grid exists'],
+  ['Clean file names', 4],
+  ['Read vector files', 552, 'warn', '10 files not read'],
+  ['Rasters to H3', 400, 'warn', '1 file not read'],
+  ['Vector tables to H3', 185, 'warn', '1 file not read'],
+  ['Apply variable fixes', 48],
+  ['Load values into the master table', 96],
+  ['Render the layers', 130],
+  ['Export the master table', 14],
+  ['Fill gaps in the master table', 6],
+];
+const total = STEPS.reduce((a, s) => a + s[1], 0);
+console.assert(total === 23 * 60 + 55, 'steps must add up to the run time');
+const mmss = (s) => s >= 60 ? `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s` : `${s} s`;
+document.getElementById('steps').innerHTML = STEPS.map(([l, t, k, note]) =>
+  `<li><span class="dot ${k || ''}"></span><span class="${k === 'skip' ? 'skip-lbl' : 'lbl'}">${l}${k === 'warn' ? `<em>${note}</em>` : ''}</span><span class="t num">${k === 'skip' ? 'Skipped' : mmss(t)}</span></li>`).join('');
+document.getElementById('bartime').innerHTML = STEPS.filter((s) => s[1]).map(([l, t]) =>
+  `<i class="${t > 300 ? 'hot' : ''}" style="flex:${t}" title="${l} · ${mmss(t)}"></i>`).join('');
+
+/* Variables */
+let filter = 'attention';
+const REASON = { gpkg: 'Layer has no geometry column', geojson: 'Coordinates outside Colombia', shp: 'Missing .prj — CRS unknown', tiff: 'No-data value not set', xlsx: 'Spreadsheet, not a table the engine reads' };
+const chips = document.getElementById('chips');
+chips.innerHTML = [['attention', `Not read · ${failed.length}`], ['all', `All · ${V.variables.length}`], ...HexData.CRITERIA.map((k) => [k, `${CRIT[k]} · ${V.variables.filter(v => v.crit === k).length}`])]
+  .map(([k, l]) => `<button data-k="${k}" aria-pressed="${k === filter}">${l}</button>`).join('');
+chips.querySelectorAll('button').forEach((b) => b.onclick = () => {
+  filter = b.dataset.k; chips.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b)); rows();
+});
+function rows() {
+  const list = V.variables.filter((v) => filter === 'all' || (filter === 'attention' ? v.status === 'failed' : v.crit === filter));
+  const shown = list.slice(0, 6);
+  document.getElementById('rows').innerHTML = shown.map((v) => {
+    const e = v.file.split('.').pop().toLowerCase();
+    const st = v.status === 'failed' ? `<span class="status"><span class="dot warn"></span>Not read</span><div class="reason">${REASON[e] || 'Could not be read'}</div>`
+      : v.status === 'idle' ? `<span class="status"><span class="dot skip"></span>Not in the model</span>`
+      : `<span class="status"><span class="dot"></span>Scored</span>`;
+    return `<tr><td><div class="id">${v.id}</div><div class="code">${v.code || '—'}</div></td>
+      <td class="hide-sm">${v.file}</td><td class="hide-sm">${CRIT[v.crit]}</td><td class="r hide-sm">${fmtBytes(v.bytes)}</td>
+      <td class="r">${v.weight ? (v.weight * 100).toFixed(1) + '%' : '—'}</td><td>${st}</td>
+      <td class="r">${v.status === 'failed' ? '<button class="rowact">Replace file</button>' : ''}</td></tr>`;
+  }).join('');
+  document.getElementById('foot-count').textContent = `Showing ${shown.length} of ${list.length}`;
+}
+rows();
+</script>
+</body>
+</html>

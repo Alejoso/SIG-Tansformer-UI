@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maphex — A · Lienzo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/h3-js@4.1.0/dist/h3-js.umd.js"></script>
+<script src="../shared/geo.js"></script>
+<script src="../shared/vento.js"></script>
+<script src="../shared/hexmap.js"></script>
+<style>
+/*
+ * Direction A — "Lienzo". The map is the app (after Felt).
+ * Grid: a full-bleed map; floating panels inset 12px. Left panel 340px,
+ * right inspector 320px, both 12px from the edges and from the bar.
+ */
+:root {
+  --ground: #efede6;          /* paper, the map's sea and the page */
+  --neighbour: #e4e1d8;
+  --panel: #fbfaf7;
+  --panel-2: #f3f1eb;          /* one tone step inside a panel */
+  --ink: #1c1b18;
+  --ink-2: #5d5a52;
+  --line: #e3e0d7;
+  --bar: #1c1b18;              /* the app bar, dark like Felt's */
+  --bar-ink: #f3f1eb;
+  --bar-ink-2: #a19d92;
+  --accent: #e2553f;           /* used on the primary action and the "needs a look" signal only */
+  --data-1: #173f5f;           /* deepest step of the score ramp, used as the data hue */
+  --warn-bg: #fbe3dc;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(28,27,24,.08), 0 8px 24px rgba(28,27,24,.10);
+  --serif: "Newsreader", Georgia, serif;
+  --sans: "Instrument Sans", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--ground); color: var(--ink); font: 14px/1.45 var(--sans); overflow: hidden; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--data-1); outline-offset: 2px; }
+
+#map { position: fixed; inset: 44px 0 0 0; width: 100%; height: calc(100% - 44px); cursor: grab; }
+#map:active { cursor: grabbing; }
+
+/* ── App bar ─────────────────────────────────────────────── */
+.bar { position: fixed; inset: 0 0 auto 0; height: 44px; background: var(--bar); color: var(--bar-ink);
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 12px; z-index: 5; }
+.bar-left, .bar-right { display: flex; align-items: center; gap: 10px; }
+.bar-right { justify-content: flex-end; }
+.brand { display: flex; align-items: center; gap: 8px; font-family: var(--serif); font-size: 19px; font-weight: 500; letter-spacing: -.01em; }
+.crumb { color: var(--bar-ink-2); display: flex; align-items: center; gap: 6px; }
+.crumb strong { color: var(--bar-ink); font-weight: 500; }
+.modes { display: flex; gap: 2px; background: #2a2925; padding: 3px; border-radius: 8px; }
+.modes button { border: 0; background: transparent; color: var(--bar-ink-2); padding: 5px 14px; border-radius: 6px; font-weight: 500; }
+.modes button[aria-pressed="true"] { background: #3a3833; color: var(--bar-ink); }
+.modes button:hover { color: var(--bar-ink); }
+.run { color: var(--bar-ink-2); font-size: 13px; }
+.run b { color: var(--bar-ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.btn-primary { white-space: nowrap; background: var(--accent); color: #fff; border: 0; padding: 6px 14px; border-radius: 6px; font-weight: 600; }
+.btn-primary:hover { background: #cc4834; }
+.btn-ghost { background: transparent; border: 1px solid #3a3833; color: var(--bar-ink); padding: 5px 12px; border-radius: 6px; }
+.avatar { width: 26px; height: 26px; border-radius: 50%; background: #c8dccf; color: #173f5f; display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+
+/* ── Floating panels ─────────────────────────────────────── */
+.panel { position: fixed; background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); z-index: 4; }
+.left { top: 56px; left: 12px; bottom: 12px; width: 340px; display: flex; flex-direction: column; overflow: hidden; }
+.panel-head { padding: 16px 16px 10px; }
+.panel-head h1 { font: 500 26px/1.1 var(--serif); letter-spacing: -.015em; margin: 0 0 4px; }
+.panel-head p { margin: 0; color: var(--ink-2); font-size: 13px; }
+.search { margin: 10px 0 0; display: flex; align-items: center; gap: 8px; background: var(--panel-2); border-radius: 8px; padding: 0 10px; height: 34px; color: var(--ink-2); }
+.search input { border: 0; background: transparent; font: inherit; color: var(--ink); flex: 1; outline: none; }
+.scroll { overflow: auto; flex: 1; padding: 4px 8px 12px; }
+
+/* layer tree */
+.layer { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+.layer:hover { background: var(--panel-2); }
+.layer[aria-selected="true"] { background: #e7ece8; }
+.layer .name { font-weight: 500; }
+.layer .sub { color: var(--ink-2); font-size: 12px; }
+.layer .w { font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: 13px; }
+.chev { width: 18px; height: 18px; display: grid; place-items: center; color: var(--ink-2); transition: transform .15s; border: 0; background: none; padding: 0; }
+.open > .layer .chev { transform: rotate(90deg); }
+.leaves { display: none; padding-left: 26px; }
+.open > .leaves { display: block; }
+.leaf { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 5px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.leaf:hover { background: var(--panel-2); }
+.leaf .code { color: var(--ink-2); font-size: 12px; }
+.leaf .w { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.wbar { grid-column: 2 / 4; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; margin-top: 2px; }
+.wbar i { display: block; height: 100%; background: var(--data-1); }
+.score-row { padding: 10px 8px 12px; margin: 0 0 4px; }
+.group-label { font-size: 12px; color: var(--ink-2); padding: 12px 8px 4px; }
+.tag { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--warn-bg); color: #9a3020; white-space: nowrap; font-weight: 500; }
+.tag.quiet { background: var(--panel-2); color: var(--ink-2); }
+
+.dropzone { margin: 8px; padding: 14px; border-radius: 10px; background: var(--panel-2); display: flex; gap: 12px; align-items: center; }
+.dropzone b { display: block; font-weight: 500; }
+.dropzone span { color: var(--ink-2); font-size: 12px; }
+.dropzone button { margin-left: auto; border: 0; background: var(--ink); color: #fff; border-radius: 6px; padding: 6px 12px; font-weight: 500; }
+
+/* data rows */
+.var { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 8px; border-radius: 8px; }
+.var:hover { background: var(--panel-2); }
+.ftype { width: 34px; height: 34px; border-radius: 6px; background: var(--panel-2); display: grid; place-items: center; font-size: 10px; font-weight: 600; color: var(--ink-2); }
+.var .file { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+.var .meta { color: var(--ink-2); font-size: 12px; }
+.var.failed .ftype { background: var(--warn-bg); color: #9a3020; }
+
+/* model weights */
+.crit { padding: 12px 8px; }
+.crit-top { display: flex; justify-content: space-between; align-items: baseline; }
+.crit-top b { font-weight: 500; text-transform: capitalize; }
+.crit-top span { font-variant-numeric: tabular-nums; font-size: 20px; font-family: var(--serif); }
+input[type=range] { width: 100%; accent-color: var(--data-1); }
+.sum { margin: 8px; padding: 12px; border-radius: 10px; background: #e7ece8; display: flex; justify-content: space-between; }
+.sum.bad { background: var(--warn-bg); }
+.linkish { background: none; border: 0; padding: 0; color: var(--data-1); font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
+
+/* ── Inspector ───────────────────────────────────────────── */
+.right { top: 56px; right: 12px; width: 320px; padding: 16px; }
+.right h2 { font: 500 15px/1.3 var(--sans); margin: 0; }
+.right .where { color: var(--ink-2); font-size: 13px; margin: 2px 0 14px; }
+.big { display: flex; align-items: baseline; gap: 6px; margin-bottom: 14px; }
+.big b { font: 400 54px/1 var(--serif); letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.big span { color: var(--ink-2); }
+.contrib { display: grid; grid-template-columns: 112px 1fr 34px; gap: 8px; align-items: center; font-size: 13px; padding: 5px 0; text-transform: capitalize; }
+.contrib .track { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+.contrib .track i { display: block; height: 100%; border-radius: 4px; }
+.contrib .v { text-align: right; font-variant-numeric: tabular-nums; }
+.note { margin-top: 14px; padding: 10px 12px; background: var(--panel-2); border-radius: 8px; font-size: 13px; }
+.inspector-actions { display: flex; gap: 8px; margin-top: 14px; }
+.inspector-actions button { flex: 1; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 7px 0; font-weight: 500; }
+.inspector-actions button:hover { background: var(--panel-2); }
+.empty { color: var(--ink-2); }
+
+/* ── Legend + live filter ────────────────────────────────── */
+.legend { bottom: 12px; left: 364px; width: 360px; padding: 14px 16px; }
+.legend-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.legend-top b { font-weight: 500; }
+.legend-top span { color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.hist { display: flex; align-items: flex-end; gap: 2px; height: 56px; }
+.hist i { flex: 1; border-radius: 2px 2px 0 0; }
+.axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-2); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.legend input { margin-top: 6px; }
+
+.zoom { right: 12px; bottom: 12px; display: flex; flex-direction: column; overflow: hidden; }
+.zoom button { width: 36px; height: 36px; border: 0; background: var(--panel); font-size: 18px; }
+.zoom button:hover { background: var(--panel-2); }
+.zoom button + button { border-top: 1px solid var(--line); }
+
+.tip { position: fixed; pointer-events: none; background: var(--ink); color: #fff; font-size: 12px; padding: 5px 8px; border-radius: 6px; z-index: 9; display: none; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 900px) {
+  .right { display: none; }
+  #map { height: calc(56% - 44px); }
+  .left { width: auto; right: 8px; left: 8px; bottom: 8px; top: auto; height: calc(44% - 8px); }
+  .legend { display: none; }
+  .brand-name { display: none; }
+  .zoom { display: none; }
+  .modes button { padding: 5px 9px; }
+  .run, .crumb, .avatar, .btn-ghost { display: none; }
+  .bar { grid-template-columns: auto 1fr auto; gap: 8px; }
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar-left">
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" fill="none" stroke="#f3f1eb" stroke-width="2"/><path d="M12 8l3.46 2v4L12 16l-3.46-2v-4z" fill="#e2553f"/></svg>
+      <span class="brand-name">Maphex</span>
+    </div>
+    <div class="crumb">/ <strong>Vento</strong> <span>· Colombia, H3 res 8</span></div>
+  </div>
+  <nav class="modes" aria-label="Workspace mode">
+    <button aria-pressed="true" data-mode="layers">Layers</button>
+    <button aria-pressed="false" data-mode="data">Data</button>
+    <button aria-pressed="false" data-mode="model">Model</button>
+  </nav>
+  <div class="bar-right">
+    <span class="run">Applied <b>2 h ago</b> in <b>23 min 55 s</b></span>
+    <button class="btn-ghost">Share</button>
+    <button class="btn-primary">Apply model</button>
+    <span class="avatar" title="You">AT</span>
+  </div>
+</header>
+
+<canvas id="map" aria-label="Map of Colombia scored by hexagon"></canvas>
+
+<aside class="panel left" id="left"></aside>
+
+<aside class="panel right" id="inspector" aria-live="polite"></aside>
+
+<section class="panel legend" aria-label="Score distribution">
+  <div class="legend-top"><b id="legend-title">Score, all criteria</b><span id="legend-count"></span></div>
+  <div class="hist" id="hist"></div>
+  <div class="axis"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div>
+  <label style="display:flex;justify-content:space-between;font-size:13px;margin-top:10px">
+    <span>Show cells scoring at least</span><b id="thr-v" style="font-variant-numeric:tabular-nums">1.0</b>
+  </label>
+  <input type="range" id="thr" min="1" max="5" step="0.1" value="1" aria-label="Minimum score">
+</section>
+
+<div class="panel zoom"><button aria-label="Zoom in" id="zin">+</button><button aria-label="Zoom out" id="zout">−</button><button aria-label="Fit Colombia" id="zfit" style="font-size:13px">⤢</button></div>
+<div class="tip" id="tip"></div>
+
+<script>
+const V = window.VENTO;
+const RAMP = ['#f4efdc', '#cfe0b7', '#7fb79d', '#3b7f86', '#173f5f'];
+const CRIT_LABEL = { ambiental: 'Ambiental', social: 'Social', socioeconomica: 'Socioeconómica', tecnica: 'Técnica' };
+const fmtBytes = (b) => b > 1e9 ? (b / 1e9).toFixed(1) + ' GB' : b > 1e6 ? Math.round(b / 1e6) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' kB';
+const ext = (f) => (f.split('.').pop() || '').toUpperCase().slice(0, 4);
+const weights = Object.fromEntries(V.criteria.map((c) => [c.key, c.weight]));
+let field = 'total', threshold = 1, mode = 'layers';
+
+const map = new HexMap(document.getElementById('map'), {
+  ramp: RAMP, neighbours: '#e4e1d8', neighbourStroke: '#d6d2c6', land: '#e8e5dc', selectStroke: '#1c1b18',
+  offsetX: innerWidth < 900 ? 0 : 352, padding: innerWidth < 900 ? 16 : 36, labels: HexData.CITIES, labelColor: '#1c1b18', labelHalo: 'rgba(251,250,247,.85)', labelFont: 'Instrument Sans',
+  filter: null,
+  onSelect: inspect,
+  onHover: (cell, x, y) => {
+    const tip = document.getElementById('tip');
+    if (!cell) { tip.style.display = 'none'; return; }
+    tip.style.display = 'block'; tip.style.left = (x + 14) + 'px'; tip.style.top = (y + 44 + 14) + 'px';
+    tip.textContent = (field === 'total' ? 'Score ' : CRIT_LABEL[field] + ' ') + cell.s[field].toFixed(2);
+  },
+});
+
+/* ── Left panel, by mode ── */
+function renderLeft() {
+  const el = document.getElementById('left');
+  const byCrit = (k) => V.variables.filter((v) => v.crit === k);
+  if (mode === 'layers') {
+    el.innerHTML = `
+      <div class="panel-head"><h1>Layers</h1><p>The model's tree. Pick a node to paint the map with it.</p>
+        <label class="search"><span aria-hidden="true">⌕</span><input placeholder="Find a variable or file" aria-label="Find a variable"></label></div>
+      <div class="scroll">
+        <div class="layer score-row" data-field="total" aria-selected="${field === 'total'}">
+          <span></span><div><div class="name">Score</div><div class="sub">4 criteria · ${V.variables.filter(v=>v.status==='model').length} variables</div></div><span class="w">1–5</span>
+        </div>
+        <div class="group-label">Criteria</div>
+        ${V.criteria.map((c) => {
+          const leaves = byCrit(c.key).filter((v) => v.status === 'model');
+          const failed = byCrit(c.key).filter((v) => v.status === 'failed').length;
+          return `<div class="node">
+            <div class="layer" data-field="${c.key}" aria-selected="${field === c.key}">
+              <button class="chev" aria-label="Show variables">›</button>
+              <div><div class="name">${CRIT_LABEL[c.key]}</div><div class="sub">${leaves.length} variables${failed ? ` · <span class="tag">${failed} need a look</span>` : ''}</div></div>
+              <span class="w">${Math.round(weights[c.key] * 100)}%</span>
+              <div class="wbar"><i style="width:${weights[c.key] * 100}%"></i></div>
+            </div>
+            <div class="leaves">${leaves.map((v) => `<div class="leaf" data-field="${c.key}"><div>${v.code}<div class="code">${v.id} · ${v.file}</div></div><span class="w">${(v.weight * 100).toFixed(1)}%</span></div>`).join('')}</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  } else if (mode === 'data') {
+    const failed = V.variables.filter((v) => v.status === 'failed');
+    el.innerHTML = `
+      <div class="panel-head"><h1>Data</h1><p>${V.variables.length} variables in this project. ${failed.length} could not be processed on the last run.</p></div>
+      <div class="dropzone"><div><b>Add a variable</b><span>Drop a folder, or several</span></div><button>Browse</button></div>
+      <div class="scroll">
+        <div class="group-label">Need a look</div>
+        ${failed.map(row).join('')}
+        ${V.criteria.map((c) => `<div class="group-label">${CRIT_LABEL[c.key]} · ${byCrit(c.key).length}</div>${byCrit(c.key).filter(v=>v.status!=='failed').slice(0, 4).map(row).join('')}`).join('')}
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <div class="panel-head"><h1>Model</h1><p>How much each criterion counts. The map repaints as you drag.</p></div>
+      <div class="scroll">
+        ${V.criteria.map((c) => `<div class="crit"><div class="crit-top"><b>${CRIT_LABEL[c.key]}</b><span>${Math.round(weights[c.key] * 100)}%</span></div>
+          <input type="range" min="0" max="1" step="0.05" value="${weights[c.key]}" data-crit="${c.key}" aria-label="${CRIT_LABEL[c.key]} weight"></div>`).join('')}
+        <div class="sum" id="sum"></div>
+        <div style="padding:8px;color:var(--ink-2);font-size:13px">Leaf weights, scoring types and fill rules live in the model file. <button class="linkish">Open model.yaml</button></div>
+      </div>`;
+    el.querySelectorAll('input[data-crit]').forEach((r) => r.addEventListener('input', () => {
+      weights[r.dataset.crit] = +r.value; r.previousElementSibling.lastElementChild.textContent = Math.round(r.value * 100) + '%';
+      reweight(); updateSum();
+    }));
+    updateSum();
+  }
+  el.querySelectorAll('[data-field]').forEach((n) => n.addEventListener('click', (e) => {
+    if (e.target.closest('.chev')) { n.closest('.node').classList.toggle('open'); return; }
+    field = n.dataset.field; map.set(field); renderLeft(); renderLegend(); if (map.selected) inspect(map.selected);
+  }));
+}
+function row(v) {
+  return `<div class="var ${v.status}"><span class="ftype">${ext(v.file)}</span>
+    <div><div class="file">${v.file}</div><div class="meta">${v.id} · ${fmtBytes(v.bytes)}</div></div>
+    ${v.status === 'failed' ? '<span class="tag">Not read</span>' : v.status === 'idle' ? '<span class="tag quiet">Not in model</span>' : ''}</div>`;
+}
+function updateSum() {
+  const s = Object.values(weights).reduce((a, b) => a + b, 0), el = document.getElementById('sum');
+  if (!el) return;
+  el.className = 'sum' + (Math.abs(s - 1) > 0.001 ? ' bad' : '');
+  el.innerHTML = `<span>Criteria add to</span><b style="font-variant-numeric:tabular-nums">${s.toFixed(2)}${Math.abs(s - 1) > 0.001 ? ' — should be 1.00' : ''}</b>`;
+}
+function reweight() {
+  const s = Object.values(weights).reduce((a, b) => a + b, 0) || 1;
+  for (const c of map.list) c.s.total = HexData.CRITERIA.reduce((a, k) => a + c.s[k] * weights[k], 0) / s;
+  field = 'total'; map.set('total'); renderLegend(); if (map.selected) inspect(map.selected);
+}
+
+/* ── Legend, histogram and the live threshold ── */
+function renderLegend() {
+  const h = HexData.histogram(field), max = Math.max(...h), col = HexData.ramp(RAMP);
+  document.getElementById('hist').innerHTML = h.map((n, i) => {
+    const lo = 1 + (i / h.length) * 4;
+    return `<i title="${n} cells" style="height:${Math.max(2, (n / max) * 100)}%;background:${lo + 0.25 <= threshold ? '#dcd8cd' : map.colourOf(lo + 0.125)}"></i>`;
+  }).join('');
+  const shown = map.list.filter((c) => c.s[field] >= threshold).length;
+  document.getElementById('legend-count').textContent =
+    `${shown.toLocaleString('en')} of ${map.list.length.toLocaleString('en')} cells`;
+  document.getElementById('legend-title').textContent = field === 'total' ? 'Score, all criteria' : CRIT_LABEL[field] + ' score';
+}
+document.getElementById('thr').addEventListener('input', (e) => {
+  threshold = +e.target.value; document.getElementById('thr-v').textContent = threshold.toFixed(1);
+  map.setFilter(threshold > 1 ? (c) => c.s[field] >= threshold : null); renderLegend();
+});
+
+/* ── Inspector ── */
+function nearest(cell) {
+  let best = null, d = 1e9;
+  for (const c of HexData.CITIES) { const dd = (c.lat - cell.lat) ** 2 + (c.lng - cell.lng) ** 2; if (dd < d) { d = dd; best = c; } }
+  return `${Math.round(Math.sqrt(d) * 111)} km from ${best.name}`;
+}
+function inspect(cell) {
+  const el = document.getElementById('inspector'), col = HexData.ramp(RAMP);
+  if (!cell) { el.innerHTML = `<h2>Nothing selected</h2><p class="empty">Click a hexagon to see why it scores what it does.</p>`; return; }
+  const sorted = HexData.CRITERIA.slice().sort((a, b) => cell.s[a] - cell.s[b]);
+  el.innerHTML = `
+    <h2>Hexagon ${cell.id}</h2>
+    <div class="where">${cell.lat.toFixed(3)}°, ${cell.lng.toFixed(3)}° · ${nearest(cell)}</div>
+    <div class="big"><b>${cell.s.total.toFixed(2)}</b><span>out of 5</span></div>
+    ${HexData.CRITERIA.map((k) => `<div class="contrib"><span>${CRIT_LABEL[k]}</span>
+      <span class="track"><i style="width:${(cell.s[k] / 5) * 100}%;background:var(--data-1)"></i></span>
+      <span class="v">${cell.s[k].toFixed(1)}</span></div>`).join('')}
+    <div class="note">${CRIT_LABEL[sorted[0]]} holds it back most (${cell.s[sorted[0]].toFixed(1)}). ${CRIT_LABEL[sorted[3]]} is its strongest side.</div>
+    <div class="inspector-actions"><button>Copy cell id</button><button>Export row</button></div>`;
+}
+
+document.querySelectorAll('.modes button').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('.modes button').forEach((x) => x.setAttribute('aria-pressed', x === b));
+  mode = b.dataset.mode; renderLeft();
+}));
+document.getElementById('zin').onclick = () => map.zoomBy(1.3);
+document.getElementById('zout').onclick = () => map.zoomBy(1 / 1.3);
+document.getElementById('zfit').onclick = () => map.reset();
+
+renderLeft(); renderLegend();
+// Open on a hexagon in La Guajira so the inspector is never empty on first look.
+const start = map.list.reduce((a, c) => (c.s.total > a.s.total ? c : a));
+map.selected = start; map.draw(); inspect(start);
+</script>
+</body>
+</html>

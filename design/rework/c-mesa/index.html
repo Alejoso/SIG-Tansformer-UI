@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maphex — C · Mesa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/h3-js@4.1.0/dist/h3-js.umd.js"></script>
+<script src="../shared/geo.js"></script>
+<script src="../shared/vento.js"></script>
+<script src="../shared/hexmap.js"></script>
+<style>
+/*
+ * Direction C — "Mesa". One workbench: the model's tree is the navigation,
+ * the map is the preview, the inspector is the settings. Data, Model and Map
+ * stop being three screens.
+ * Shell: tinted frame + white sheet inset 8px. Columns inside the sheet:
+ * 300 tree | 1fr map | 360 inspector. 48px top bar.
+ */
+:root {
+  --frame: #f3f3f1;
+  --sheet: #ffffff;
+  --tone: #f6f6f4;          /* one tone step inside the sheet */
+  --line: #e7e6e2;
+  --ink: #17181a;
+  --ink-2: #5f6168;
+  --ink-3: #8e9097;
+  --accent: #2257d6;        /* selection, focus and the one primary action */
+  --accent-pale: #e9effc;
+  --warn: #b5471f;
+  --warn-bg: #fcebe4;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--frame); color: var(--ink); font: 14px/1.45 var(--sans); overflow: hidden; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+.topbar { height: 48px; display: flex; align-items: center; gap: 14px; padding: 0 16px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.crumb { color: var(--ink-2); display: flex; gap: 6px; align-items: center; }
+.crumb strong { color: var(--ink); font-weight: 500; }
+.tabs { display: flex; gap: 4px; margin-left: 18px; }
+.tabs a { color: var(--ink-2); text-decoration: none; padding: 5px 10px; border-radius: 6px; font-weight: 500; }
+.tabs a[aria-current] { background: #e6e6e3; color: var(--ink); }
+.tabs a:hover { color: var(--ink); }
+.top-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.pending { color: var(--ink-2); font-size: 13px; }
+.pending b { color: var(--accent); font-weight: 500; }
+.btn { border: 1px solid var(--line); background: var(--sheet); border-radius: 6px; padding: 5px 12px; font-weight: 500; }
+.btn:hover { background: var(--tone); }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { background: #1b48b8; }
+
+.sheet { position: fixed; top: 48px; left: 8px; right: 8px; bottom: 8px; background: var(--sheet); border: 1px solid var(--line);
+  border-radius: 14px; display: grid; grid-template-columns: 300px 1fr 360px; overflow: hidden; }
+
+/* ── Tree ── */
+.tree { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.tree-head { padding: 16px 16px 8px; }
+.tree-head h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+.tree-head p { margin: 2px 0 10px; color: var(--ink-2); font-size: 13px; }
+.find { width: 100%; height: 32px; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; font: inherit; }
+.tree-body { overflow: auto; padding: 4px 8px 16px; flex: 1; }
+.crit { margin-top: 6px; }
+.crit-row { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.crit-row:hover, .leaf:hover { background: var(--tone); }
+.crit-row b { font-weight: 600; }
+.crit-row .w { color: var(--ink-2); }
+.sw { width: 10px; height: 10px; border-radius: 3px; }
+.leaf { display: grid; grid-template-columns: 1fr 44px; gap: 2px 8px; padding: 5px 8px 5px 26px; border-radius: 6px; cursor: pointer; }
+.leaf .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.leaf .w { text-align: right; color: var(--ink-2); font-size: 13px; }
+.leaf .id { grid-column: 1 / 3; color: var(--ink-3); font-size: 12px; display: flex; gap: 6px; }
+.leaf.failed .n { color: var(--warn); }
+[aria-selected="true"] { background: var(--accent-pale) !important; }
+[aria-selected="true"] b, .leaf[aria-selected="true"] .n { color: var(--accent); }
+.more { padding: 4px 8px 4px 26px; color: var(--ink-3); font-size: 13px; }
+.tree-foot { padding: 12px 16px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+.tree-foot span { color: var(--ink-2); font-size: 13px; }
+
+/* ── Centre: weight strip + map + drawer ── */
+.centre { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr auto; min-width: 0; min-height: 0; }
+.weights { padding: 16px 20px 12px; border-bottom: 1px solid var(--line); }
+.weights-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.weights-top h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.weights-top span { color: var(--ink-2); font-size: 13px; }
+.strip { position: relative; display: flex; height: 40px; border-radius: 8px; overflow: hidden; user-select: none; touch-action: none; }
+.seg { display: flex; flex-direction: column; justify-content: center; padding: 0 10px; min-width: 0; color: #fff; font-size: 13px; line-height: 1.2; }
+.seg b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg span { opacity: .85; }
+.seg.light { color: var(--ink); }
+.handle { position: absolute; top: 0; bottom: 0; width: 14px; margin-left: -7px; cursor: ew-resize; display: grid; place-items: center; }
+.handle::after { content: ""; width: 4px; height: 22px; border-radius: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.18); }
+.mapbox { position: relative; min-height: 0; background: #f6f6f4; }
+#map { width: 100%; height: 100%; display: block; }
+.maplabel { position: absolute; left: 16px; top: 14px; background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.maplabel b { font-weight: 600; }
+.maplabel span { display: block; color: var(--ink-2); font-size: 12px; }
+.mapleg { position: absolute; right: 16px; bottom: 14px; background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 12px; color: var(--ink-2); display: flex; gap: 8px; align-items: center; }
+.mapleg i { display: block; width: 120px; height: 8px; border-radius: 4px; }
+
+.drawer { border-top: 1px solid var(--line); height: 196px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 36px 1fr; }
+.drawer-tabs { display: flex; gap: 2px; padding: 0 12px; align-items: center; background: var(--tone); }
+.drawer-tabs button { border: 0; background: transparent; padding: 5px 10px; border-radius: 6px; color: var(--ink-2); font-weight: 500; font-size: 13px; }
+.drawer-tabs button[aria-pressed="true"] { background: var(--sheet); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.drawer-tabs .count { color: var(--warn); }
+.drawer-tabs .path { margin-left: auto; color: var(--ink-3); font-size: 12px; }
+pre { margin: 0; padding: 10px 16px; overflow: auto; font: 12.5px/1.6 var(--mono); color: #33353a; }
+pre .k { color: #8a3b12; } pre .c { color: #8e9097; } pre .v { color: #1d5a2a; } pre .hl { background: #fff4c2; display: inline-block; width: 100%; }
+.problems { overflow: auto; padding: 4px 0; }
+.problem { display: grid; grid-template-columns: 70px 1fr; gap: 10px; padding: 6px 16px; font-size: 13px; }
+.problem .ln { color: var(--ink-3); }
+
+/* ── Inspector ── */
+.insp { border-left: 1px solid var(--line); overflow: auto; }
+.insp-head { padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+.insp-head .kicker { color: var(--ink-2); font-size: 13px; }
+.insp-head h2 { margin: 2px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+.file { display: grid; grid-template-columns: 38px 1fr; gap: 10px; align-items: center; margin-top: 14px; padding: 10px; background: var(--tone); border-radius: 8px; }
+.file .ext { width: 38px; height: 38px; border-radius: 6px; background: var(--sheet); display: grid; place-items: center; font-size: 10px; font-weight: 600; color: var(--ink-2); }
+.file b { font-weight: 500; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file span { color: var(--ink-2); font-size: 12px; }
+.field { padding: 14px 20px; border-bottom: 1px solid var(--line); }
+.field label, .field .lab { display: block; font-weight: 500; margin-bottom: 8px; }
+.field .help { color: var(--ink-2); font-size: 13px; margin-top: 8px; }
+.segs { display: flex; background: var(--tone); border-radius: 7px; padding: 3px; gap: 2px; }
+.segs button { flex: 1; border: 0; background: transparent; border-radius: 5px; padding: 5px 0; color: var(--ink-2); font-size: 13px; font-weight: 500; }
+.segs button[aria-pressed="true"] { background: var(--sheet); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.weightline { display: flex; align-items: center; gap: 12px; }
+.weightline input { flex: 1; accent-color: var(--accent); }
+.weightline output { width: 56px; text-align: right; font-weight: 500; }
+.select { width: 100%; height: 36px; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; font: inherit; background: var(--sheet); }
+.mini-hist { display: flex; align-items: flex-end; gap: 2px; height: 48px; margin-top: 6px; }
+.mini-hist i { flex: 1; background: #d9d8d3; border-radius: 2px 2px 0 0; }
+.mini-axis { display: flex; justify-content: space-between; color: var(--ink-3); font-size: 11px; margin-top: 3px; }
+
+@media (max-width: 1000px) {
+  body { overflow: auto; }
+  .sheet { position: static; margin: 0 8px 8px; grid-template-columns: minmax(0, 1fr); }
+  .weights-top span, .drawer-tabs .path { display: none; }
+  .seg span { display: none; }
+  .tree { border-right: 0; border-bottom: 1px solid var(--line); max-height: 300px; }
+  .mapbox { height: 380px; }
+  .insp { border-left: 0; border-top: 1px solid var(--line); }
+  .tabs, .pending, .crumb span { display: none; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" fill="none" stroke="#2257d6" stroke-width="2"/><path d="M12 8l3.46 2v4L12 16l-3.46-2v-4z" fill="#2257d6"/></svg>Maphex</div>
+  <div class="crumb">/ <strong>Vento</strong> <span>Colombia · H3 8</span></div>
+  <nav class="tabs"><a href="#" aria-current="page">Workbench</a><a href="#">Runs</a><a href="#">Project settings</a></nav>
+  <div class="top-right">
+    <span class="pending" id="pending"></span>
+    <button class="btn">Discard</button>
+    <button class="btn btn-primary">Apply model</button>
+  </div>
+</header>
+
+<div class="sheet">
+  <aside class="tree">
+    <div class="tree-head">
+      <h1>Vento model</h1>
+      <p>4 criteria · 65 variables scored · 12 not read</p>
+      <input class="find" placeholder="Find a variable or file" aria-label="Find a variable">
+    </div>
+    <div class="tree-body" id="tree"></div>
+    <div class="tree-foot"><span>Add data to a criterion</span><button class="btn">Add folder</button></div>
+  </aside>
+
+  <section class="centre">
+    <div class="weights">
+      <div class="weights-top"><h2>How much each criterion counts</h2><span>Drag the white handles · always adds to 100%</span></div>
+      <div class="strip" id="strip" aria-label="Criteria weights"></div>
+    </div>
+    <div class="mapbox">
+      <canvas id="map" aria-label="Map of Colombia scored by hexagon"></canvas>
+      <div class="maplabel" id="maplabel"></div>
+      <div class="mapleg"><span>Low</span><i id="legramp"></i><span>High</span></div>
+    </div>
+    <div class="drawer">
+      <div class="drawer-tabs">
+        <button aria-pressed="true" data-t="yaml">model.yaml</button>
+        <button aria-pressed="false" data-t="problems">Problems <span class="count">69</span></button>
+        <span class="path">vento/model/model.yaml · edits from the panels land here</span>
+      </div>
+      <div id="drawer"></div>
+    </div>
+  </section>
+
+  <aside class="insp" id="insp"></aside>
+</div>
+
+<script>
+const V = window.VENTO;
+const CRIT = { ambiental: 'Ambiental', social: 'Social', socioeconomica: 'Socioeconómica', tecnica: 'Técnica' };
+const CRIT_COL = { ambiental: '#2f6b4f', social: '#a4483c', socioeconomica: '#8a6d1f', tecnica: '#2a5d8f' };
+const RAMP = ['#fdf6e3', '#f6d08a', '#e98b52', '#bf4d48', '#5e2142'];
+const stem = (f) => f.replace(/\.[^.]+$/, '');
+const fmtBytes = (b) => b > 1e9 ? (b / 1e9).toFixed(1) + ' GB' : b > 1e6 ? Math.round(b / 1e6) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' kB';
+const w = Object.fromEntries(V.criteria.map((c) => [c.key, c.weight]));
+const original = { ...w };
+let sel = { kind: 'leaf', id: 'AMB_005' };
+const leafState = {};   // per-leaf edits: type, direction, weight
+
+const map = new HexMap(document.getElementById('map'), {
+  ramp: RAMP, neighbours: '#ecebe7', neighbourStroke: '#dddcd6', land: '#ecebe7', selectStroke: '#17181a',
+  padding: 28, labels: HexData.CITIES, labelColor: '#17181a', labelHalo: 'rgba(255,255,255,.85)', labelFont: 'IBM Plex Sans',
+});
+document.getElementById('legramp').style.background = `linear-gradient(90deg, ${RAMP.join(',')})`;
+
+/* ── Tree ── */
+function renderTree() {
+  document.getElementById('tree').innerHTML = V.criteria.map((c) => {
+    const all = V.variables.filter((v) => v.crit === c.key);
+    const scored = all.filter((v) => v.status === 'model'), failed = all.filter((v) => v.status === 'failed');
+    const open = sel.id === c.key || all.some((v) => v.id === sel.id);
+    const leaves = open ? scored.slice(0, 7) : [];
+    return `<div class="crit">
+      <div class="crit-row" data-crit="${c.key}" aria-selected="${sel.id === c.key}"><span class="sw" style="background:${CRIT_COL[c.key]}"></span><b>${CRIT[c.key]}</b><span class="w num">${Math.round(w[c.key] * 100)}%</span></div>
+      ${leaves.map((v) => `<div class="leaf" data-leaf="${v.id}" aria-selected="${sel.id === v.id}"><span class="n">${stem(v.file)}</span><span class="w num">${((leafState[v.id]?.weight ?? v.weight) * 100).toFixed(1)}%</span><span class="id">${v.id} · column ${v.code}</span></div>`).join('')}
+      ${open && scored.length > 7 ? `<div class="more">${scored.length - 7} more</div>` : ''}
+      ${open ? failed.map((v) => `<div class="leaf failed" data-leaf="${v.id}" aria-selected="${sel.id === v.id}"><span class="n">${v.file}</span><span class="w">—</span><span class="id">${v.id} · not read</span></div>`).join('') : ''}
+    </div>`;
+  }).join('');
+  document.querySelectorAll('[data-crit]').forEach((n) => n.onclick = () => { sel = { kind: 'crit', id: n.dataset.crit }; refresh(); });
+  document.querySelectorAll('[data-leaf]').forEach((n) => n.onclick = () => { sel = { kind: 'leaf', id: n.dataset.leaf }; refresh(); });
+}
+
+/* ── Weight strip (the live thing) ── */
+function renderStrip() {
+  const strip = document.getElementById('strip'), keys = HexData.CRITERIA;
+  strip.innerHTML = keys.map((k) => `<div class="seg" style="flex:${w[k]};background:${CRIT_COL[k]}"><b>${CRIT[k]}</b><span class="num">${Math.round(w[k] * 100)}%</span></div>`).join('');
+  let acc = 0;
+  keys.slice(0, -1).forEach((k, i) => {
+    acc += w[k];
+    const h = document.createElement('div'); h.className = 'handle'; h.style.left = (acc * 100) + '%';
+    h.setAttribute('role', 'separator'); h.setAttribute('aria-label', `Between ${CRIT[k]} and ${CRIT[keys[i + 1]]}`); h.tabIndex = 0;
+    h.onpointerdown = (e) => {
+      h.setPointerCapture(e.pointerId);
+      const rect = strip.getBoundingClientRect(), a = keys[i], b = keys[i + 1], pair = w[a] + w[b];
+      const before = keys.slice(0, i).reduce((s, x) => s + w[x], 0);
+      h.onpointermove = (ev) => {
+        let x = (ev.clientX - rect.left) / rect.width - before;
+        x = Math.round(Math.max(0.05, Math.min(pair - 0.05, x)) * 100) / 100;
+        w[a] = x; w[b] = Math.round((pair - x) * 100) / 100; reweight(); renderStrip(); renderTree(); renderDrawer(); renderPending(); renderInsp();
+      };
+      h.onpointerup = () => { h.onpointermove = null; };
+    };
+    strip.appendChild(h);
+  });
+}
+function reweight() {
+  for (const c of map.list) c.s.total = HexData.CRITERIA.reduce((a, k) => a + c.s[k] * w[k], 0);
+  map.draw();
+}
+function renderPending() {
+  const changed = HexData.CRITERIA.filter((k) => Math.abs(w[k] - original[k]) > 0.001).length + Object.keys(leafState).length;
+  document.getElementById('pending').innerHTML = changed ? `<b>${changed} unapplied change${changed > 1 ? 's' : ''}</b> · the map is a preview` : 'Matches the last run';
+}
+
+/* ── Map label follows the selection ── */
+function renderMap() {
+  const v = sel.kind === 'leaf' ? V.variables.find((x) => x.id === sel.id) : null;
+  const f = sel.kind === 'crit' ? sel.id : v ? v.crit : 'total';
+  map.set(sel.kind === 'leaf' ? 'total' : f);
+  document.getElementById('maplabel').innerHTML = sel.kind === 'crit'
+    ? `<b>${CRIT[f]} score</b><span>1–5, its variables averaged by weight</span>`
+    : `<b>Score, all criteria</b><span>Preview with your unapplied weights</span>`;
+}
+
+/* ── Inspector ── */
+const TYPES = { minmax: 'The range present in the data, stretched onto 1–5.', zscore: 'Like minmax, but around the mean: z of −2…2 becomes 1…5.', range: 'Your own cuts: bins of [from, to, score].', map: 'An exact value to a score, for categories.', direct: 'The value already is a 1–5 score.' };
+function renderInsp() {
+  const el = document.getElementById('insp');
+  if (sel.kind === 'crit') {
+    const k = sel.id, leaves = V.variables.filter((v) => v.crit === k && v.status === 'model');
+    const vals = map.list.map((c) => c.s[k]);
+    el.innerHTML = `<div class="insp-head"><div class="kicker">Criterion</div><h2>${CRIT[k]}</h2></div>
+      <div class="field"><span class="lab">Weight in the score</span><div class="weightline"><input type="range" min="0.05" max="0.85" step="0.01" value="${w[k]}" disabled><output class="num">${Math.round(w[k] * 100)}%</output></div><div class="help">Set it on the strip above, so the other criteria give way.</div></div>
+      <div class="field"><span class="lab">How its hexagons score</span>${hist(vals)}<div class="help num">Mean ${(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2)} across ${vals.length.toLocaleString('en')} hexagons</div></div>
+      <div class="field"><span class="lab">${leaves.length} variables</span><div class="help">Equal weights of ${(100 / leaves.length).toFixed(1)}% each. Pick one in the tree to change how it scores.</div></div>`;
+    return;
+  }
+  const v = V.variables.find((x) => x.id === sel.id), st = leafState[v.id] || {};
+  if (v.status === 'failed') {
+    el.innerHTML = `<div class="insp-head"><div class="kicker">${CRIT[v.crit]} · not read</div><h2>${v.id}</h2>
+      <div class="file"><span class="ext">${v.file.split('.').pop().toUpperCase().slice(0, 4)}</span><div><b>${v.file}</b><span>${fmtBytes(v.bytes)}</span></div></div></div>
+      <div class="field"><span class="lab" style="color:var(--warn)">The engine skipped this file on the last run</span><div class="help">It has no .prj, so its coordinates can't be placed. Add the projection or replace the file, then run the pipeline again.</div></div>
+      <div class="field" style="display:flex;gap:8px"><button class="btn btn-primary">Replace file</button><button class="btn">Remove variable</button></div>`;
+    return;
+  }
+  const type = st.type || v.type, dir = st.dir || 'benefit', weight = st.weight ?? v.weight;
+  el.innerHTML = `<div class="insp-head"><div class="kicker">${CRIT[v.crit]} · variable ${v.id} · column ${v.code}</div><h2>${stem(v.file)}</h2>
+      <div class="file"><span class="ext">${v.file.split('.').pop().toUpperCase().slice(0, 4)}</span><div><b>${v.file}</b><span>${v.id} · ${fmtBytes(v.bytes)}</span></div></div></div>
+    <div class="field"><span class="lab">How values become a score</span>
+      <div class="segs" id="types">${Object.keys(TYPES).map((t) => `<button data-t="${t}" aria-pressed="${t === type}">${t}</button>`).join('')}</div>
+      <div class="help">${TYPES[type]}</div></div>
+    <div class="field"><span class="lab">A high value is</span>
+      <div class="segs" id="dir"><button data-d="benefit" aria-pressed="${dir === 'benefit'}">Better</button><button data-d="cost" aria-pressed="${dir === 'cost'}">Worse</button></div>
+      <div class="help">${dir === 'cost' ? 'Inverted: the highest value scores 1.' : 'The highest value scores 5.'}</div></div>
+    <div class="field"><label for="lw">Weight inside ${CRIT[v.crit]}</label>
+      <div class="weightline"><input id="lw" type="range" min="0" max="0.3" step="0.005" value="${weight}"><output class="num" id="lwo">${(weight * 100).toFixed(1)}%</output></div></div>
+    <div class="field"><label for="fill">Hexagons with no value</label>
+      <select class="select" id="fill"><option>Fill with the spatial median</option><option>Score 5 — no data means no restriction</option><option>Score 1 — no data means unknown</option><option>Leave empty</option></select></div>
+    <div class="field"><span class="lab">Raw values across the mesh</span>${hist(map.list.map((c) => c.s[v.crit] * (0.8 + 0.4 * ((parseInt(c.id.slice(-6, -3), 16) % 100) / 100))))}</div>`;
+  el.querySelectorAll('#types button').forEach((b) => b.onclick = () => { leafState[v.id] = { ...st, type: b.dataset.t }; renderInsp(); renderDrawer(); renderPending(); });
+  el.querySelectorAll('#dir button').forEach((b) => b.onclick = () => { leafState[v.id] = { ...st, dir: b.dataset.d }; renderInsp(); renderDrawer(); renderPending(); });
+  el.querySelector('#lw').oninput = (e) => { leafState[v.id] = { ...(leafState[v.id] || {}), weight: +e.target.value }; document.getElementById('lwo').textContent = (e.target.value * 100).toFixed(1) + '%'; renderTree(); renderDrawer(); renderPending(); };
+}
+function hist(vals) {
+  const bins = new Array(20).fill(0), lo = Math.min(...vals), hi = Math.max(...vals);
+  vals.forEach((x) => bins[Math.min(19, Math.floor(((x - lo) / (hi - lo || 1)) * 20))]++);
+  const m = Math.max(...bins);
+  return `<div class="mini-hist">${bins.map((n) => `<i style="height:${Math.max(3, n / m * 100)}%"></i>`).join('')}</div><div class="mini-axis num"><span>${lo.toFixed(1)}</span><span>${hi.toFixed(1)}</span></div>`;
+}
+
+/* ── Drawer: the YAML follows the edits ── */
+let drawerTab = 'yaml';
+function renderDrawer() {
+  const el = document.getElementById('drawer');
+  if (drawerTab === 'problems') {
+    el.innerHTML = `<div class="problems">${['ambiental/variables/presencia', 'ambiental/variables/value', 'social/variables/ateo_%', 'social/variables/es_zni'].map((p, i) =>
+      `<div class="problem"><span class="ln">line ${37 + i * 2}</span><span>${p}: no <b>absent</b>. A hexagon with no value here gets no score; set the score it should get, 1 to 5.</span></div>`).join('')}</div>`;
+    return;
+  }
+  const crit = sel.kind === 'crit' ? sel.id : V.variables.find((x) => x.id === sel.id).crit;
+  const leaves = V.variables.filter((v) => v.crit === crit && v.status === 'model').slice(0, 6);
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  el.innerHTML = `<pre><span class="c"># ${CRIT[crit]} — ${leaves.length} of ${V.variables.filter((v) => v.crit === crit && v.status === 'model').length} leaves shown</span>
+  - <span class="k">key</span>: ${crit}
+    <span class="k">weight</span>: <span class="v">${w[crit].toFixed(2)}</span>
+    <span class="k">subgroups</span>:
+      - <span class="k">key</span>: variables
+        <span class="k">leaves</span>:
+${leaves.map((v) => { const s = leafState[v.id] || {}; const line = `          - {code: ${esc(v.code)}, column: ${v.id}, type: ${s.type || v.type}${s.dir === 'cost' ? ', direction: cost' : ''}, weight: ${(s.weight ?? v.weight).toFixed(3)}}`;
+  return v.id === sel.id || leafState[v.id] ? `<span class="hl">${line}</span>` : line; }).join('\n')}</pre>`;
+}
+document.querySelectorAll('.drawer-tabs button').forEach((b) => b.onclick = () => {
+  drawerTab = b.dataset.t; document.querySelectorAll('.drawer-tabs button').forEach((x) => x.setAttribute('aria-pressed', x === b)); renderDrawer();
+});
+
+function refresh() { renderTree(); renderMap(); renderInsp(); renderDrawer(); renderPending(); }
+renderStrip(); refresh();
+</script>
+</body>
+</html>
