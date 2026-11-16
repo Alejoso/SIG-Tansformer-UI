@@ -1,0 +1,55 @@
+# The whole application in one `docker compose up`:
+#
+#   db      Postgres/PostGIS      ┐ SIG-Transformer's own services, from its
+#   app     the engine (idle)     ┘ docker-compose.yml, included unchanged
+#   maphex  this UI + its API, on http://localhost:8765
+#
+# SIG-Transformer stays its own checkout, next to this one by default
+# (../SIG-Transformer; set SIG_TRANSFORMER_DIR in SIG-UI/.env to move it). Its
+# .env is still the one that configures Postgres and the engine.
+#
+# Run it from this folder: the backend learns where it lives on the host from
+# $PWD (see docker/entrypoint.sh for why it has to know).
+
+# The project name SIG-Transformer has always had (its folder's name). Keep
+# it: the database lives in the volume <name>_pgdata, so a different name
+# starts an empty one; and the backend runs `docker compose` inside the
+# engine's folder, where it has to land on these same containers.
+# If the engine's .env sets COMPOSE_PROJECT_NAME (its .env.example suggests
+# `sigmc`), put the same line in SIG-UI/.env: that is the one that counts here.
+name: ${COMPOSE_PROJECT_NAME:-sig-transformer}
+
+include:
+  - path: ${SIG_TRANSFORMER_DIR:-../SIG-Transformer}/docker-compose.yml
+
+services:
+  maphex:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: maphex:local
+    container_name: maphex
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${MAPHEX_PORT:-8765}:8765"
+    environment:
+      MAPHEX_PORT: ${MAPHEX_PORT:-8765}
+      MAPHEX_UI_HOST_DIR: ${PWD:-}
+      MAPHEX_ENGINE_DIR: ${SIG_TRANSFORMER_DIR:-../SIG-Transformer}
+      MAPHEX_HOST_ROOT: ${MAPHEX_HOST_ROOT:-${HOME}}
+      # The backend's `docker compose` calls must find this same project.
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-sig-transformer}
+      HOME: ${HOME}
+    volumes:
+      # Drives the host's Docker, so the engine's containers are siblings of
+      # this one, not children.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same path inside as outside: the two repositories, the projects' output
+      # folders and the data folders they read all have to resolve identically
+      # for the host's daemon. Everything the UI points at must be under here.
+      - ${MAPHEX_HOST_ROOT:-${HOME}}:${MAPHEX_HOST_ROOT:-${HOME}}
+    restart: unless-stopped

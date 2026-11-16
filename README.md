@@ -49,6 +49,54 @@ Because the document owns its own pan, zoom, tooltip, legend and opacity
 control, the app adds no map chrome of its own. Anything drawn on top would
 duplicate or contradict what is inside it.
 
+## Everything with one `docker compose up`
+
+With both checkouts side by side (see below) and the engine's `.env` in
+place, this folder's `docker-compose.yml` brings up the whole application:
+
+```bash
+cd SIG-UI
+docker compose up        # add -d to leave it in the background
+```
+
+Then open <http://localhost:8765>. Three containers:
+
+| container | what it is |
+|-----------|------------|
+| `sig_db`  | Postgres/PostGIS, from the engine's compose file |
+| `sig_app` | the engine, idle until a run execs into it, from the same file |
+| `maphex`  | this UI, built and served by its FastAPI backend |
+
+The engine's `docker-compose.yml` is pulled in with `include:`, unchanged,
+and its `.env` still configures Postgres and the engine. The project name is
+`sig-transformer`, the one the engine always had, so the existing database
+volume (`sig-transformer_pgdata`) is the one used. If the engine's `.env`
+sets `COMPOSE_PROJECT_NAME`, put the same line in a `SIG-UI/.env`.
+
+How it works, and what it asks of you:
+
+- **Run it from `SIG-UI/`.** The backend drives the engine with `docker
+  compose`, as it does outside Docker, through the host's Docker socket. The
+  folders it hands to compose are resolved by the host's daemon, so they must
+  have the same path inside the container as on the host: your home is
+  mounted at its own path, and `$PWD` tells the container where `SIG-UI` is.
+  Project folders and data folders therefore have to be under your home
+  (or under `MAPHEX_HOST_ROOT`, if you set it in `SIG-UI/.env`).
+- The backend runs as whoever owns `SIG-UI/` on the host, so what it writes
+  stays yours.
+- The engine somewhere other than `../SIG-Transformer`: set
+  `SIG_TRANSFORMER_DIR` in `SIG-UI/.env`. Another port: `MAPHEX_PORT`.
+- The folder picker opens a Windows dialog from WSL, which a container
+  cannot do; type or paste the path instead.
+- After changing the UI's code: `docker compose up --build`.
+- The image's `docker compose` is pinned to the host's version
+  (`COMPOSE_VERSION` in the `Dockerfile`). When Docker Desktop updates it,
+  rebuild with `--build-arg COMPOSE_VERSION=v…`; until then each side
+  recreates `sig_app` (harmlessly) after the other has touched it.
+
+The sections below are the setup without Docker for the UI, for development
+with Vite's hot reload.
+
 ## A clean start
 
 Four things have to be in place, and the order matters — the engine holds the
