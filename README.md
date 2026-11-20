@@ -630,6 +630,14 @@ they came from. So the legend is derived from the hexagons themselves, which
 means every swatch is a colour that is actually on screen and a layer
 rendered months ago gets a legend as well.
 
+The tooltip comes in two forms, and the legend reads both. Layers rendered
+before 2026-11-18 have it as text, `global: {global} | alerta: {alert}`.
+Since then the engine writes HTML, one item per line, with the code of the
+hexagon under the cursor first:
+`<b>H3 (res 6):</b> {h3_index}<br/><b>global:</b> {global}<br/><b>alert:</b> {alert}`.
+Either way the column is the first `label: {column}` item that is not
+`h3_index`, and its label titles the legend.
+
 What it draws follows the shape of the column, which is the engine's own rule
 (`render_html` treats an integer column with more than twelve distinct values
 as continuous) applied to the data rather than to a dtype we can no longer

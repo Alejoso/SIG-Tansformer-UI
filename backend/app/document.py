@@ -5,8 +5,11 @@ The pipeline writes each layer as a pydeck export: one self-contained HTML
 file holding the hexagons inline, a CARTO basemap, and at the end
 
     const jsonInput = { "layers": [ { "data": [ ... ] } ] };
-    const tooltip = {'text': 'poblacion: {poblacion}'};
+    const tooltip = {'html': '<b>H3 (res 6):</b> {h3_index}<br/><b>poblacion:</b> {poblacion}', ...};
     const deckInstance = createDeck({container, jsonInput, ...});
+
+(Layers rendered before 2026-11-18 have `{'text': 'poblacion: {poblacion}'}`
+instead; the legend reads both.)
 
 Those files are the engine's to write, and re-rendering them to add chrome
 would mean a pipeline run for a slider. So it is added on the way out
@@ -325,19 +328,36 @@ LEGEND = """
     return found.fill ? found : null;
   }
 
-  /* What the map is of. The tooltip is the engine's own answer — its first
-     placeholder names the column the colours came from, and on a classified
-     layer it points at the label column rather than at the class codes. */
-  function subject(rows) {
-    var text = inlineTooltip();
-    text = text && text.text;
-    if (typeof text === 'string') {
-      var placeholder = text.match(/\\{([^}]+)\\}/);
-      var head = text.split(':')[0].replace(/^\\s+|\\s+$/g, '');
-      if (placeholder && placeholder[1] in rows[0]) {
-        return { field: placeholder[1], label: head || placeholder[1] };
+  /* What the map is of. The tooltip is the engine's own answer: its first
+     placeholder that is not the H3 cell names the column the colours came
+     from, and on a classified layer it points at the label column rather than
+     at the class codes. The engine has written it two ways: as text, one
+     line ('global: {global} | alerta: {alert}'), and since 2026-11-18 as
+     HTML, one item per line with the cell's code first
+     ('<b>H3 (res 6):</b> {h3_index}<br/><b>global:</b> {global}'). Both
+     come down to "label: {column}" items once the tags are gone. */
+  function fromTemplate(template, rows) {
+    if (typeof template !== 'string') { return null; }
+    var items = template
+      .replace(/<br\\s*\\/?>/gi, '\\n')
+      .replace(/<[^>]*>/g, '')
+      .split(/\\n|\\|/);
+    for (var i = 0; i < items.length; i += 1) {
+      var placeholder = items[i].match(/\\{([^}]+)\\}/);
+      if (!placeholder || placeholder[1] === 'h3_index' || !(placeholder[1] in rows[0])) {
+        continue;
       }
+      var head = items[i].slice(0, placeholder.index)
+        .replace(/^\\s+|\\s+$/g, '').replace(/:$/, '').replace(/^\\s+|\\s+$/g, '');
+      return { field: placeholder[1], label: head || placeholder[1] };
     }
+    return null;
+  }
+
+  function subject(rows) {
+    var tip = inlineTooltip();
+    var named = tip && (fromTemplate(tip.html, rows) || fromTemplate(tip.text, rows));
+    if (named) { return named; }
     /* No tooltip to go by: the value is the one column that is neither the H3
        cell nor something the render added for itself. */
     var keys = Object.keys(rows[0] || {});
