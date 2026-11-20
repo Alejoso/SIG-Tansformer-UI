@@ -107,7 +107,10 @@ def _to_project(row: store.ProjectRow) -> Project:
         name=row.name,
         meshId=row.mesh_id,
         meshLabel=row.mesh_label or _mesh_label(row.mesh_id),
-        status="draft",
+        # From what is on disk rather than from what this app remembers doing:
+        # a folder processed from a terminal, or before the store was made, is
+        # processed too.
+        status="processed" if outputs.has_results(row) else "draft",
         description=row.description,
         outFolder=row.out_folder,
         variableCount=len(variables),

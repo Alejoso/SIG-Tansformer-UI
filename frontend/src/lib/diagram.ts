@@ -17,11 +17,12 @@ import { leafCount, LEAF_TYPE_LABELS, totalLeaves } from './model';
 
 /**
  * Vertical space reserved per leaf, and the box height used to centre a node
- * on its slot. Read-only boxes are three short lines, so this is tighter than
- * it was when every node held inputs to type into.
+ * on its slot. A leaf box is four short lines (code, column, weight, and the
+ * type with its badges, `absent` among them): 111 px drawn. The slot leaves
+ * a gap of a dozen pixels under it; at 104 the boxes overlapped by seven.
  */
-const SLOT = 104;
-const NODE_HEIGHT = 84;
+const SLOT = 124;
+const NODE_HEIGHT = 111;
 /** Horizontal distance between levels, and how wide a box is. */
 const COLUMN_WIDTH = 218;
 const NODE_WIDTH = 196;

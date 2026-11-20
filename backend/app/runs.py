@@ -493,6 +493,9 @@ class Run:
             if execution_id and not self._state.executionId:
                 self._set(executionId=execution_id)
                 self._open_log(execution_id)
+                if self.job is pipeline.PIPELINE_JOB:
+                    # So `adopt` can tell this run from anyone else's later on.
+                    store.record_run(self.project_id, execution_id)
 
             matched = self.job.match(line)
             if matched is not None:
@@ -707,18 +710,42 @@ def _pipeline_is_running() -> bool:
 SUMMARY_FILE = "run_summary.txt"
 
 
+#: The `prefix` the engine writes into `run.json` for a `run_full.sh` run. A
+#: model run (`mcda`) or one script run by hand (`rnd`, ...) leaves a folder
+#: with a `run.json` too, and none of them is a processing run.
+PIPELINE_PREFIX = "rf"
+
+
+def _is_pipeline_folder(folder: Path) -> bool:
+    try:
+        meta = json.loads((folder / "run.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(meta, dict) and meta.get("prefix") == PIPELINE_PREFIX
+
+
 def _latest_run_folder() -> Path | None:
-    """The most recently started run, by the timestamp in its folder name."""
+    """The most recently started processing run on this machine, whoever started it."""
     log_dir = pipeline.manifest_path("x").parent.parent
     if not log_dir.is_dir():
         return None
     folders = [
         folder for folder in log_dir.iterdir()
-        if folder.is_dir() and (folder / "run.json").is_file()
+        if folder.is_dir() and _is_pipeline_folder(folder)
     ]
     if not folders:
         return None
     return max(folders, key=lambda folder: folder.stat().st_mtime)
+
+
+def _project_run_folder(project: store.ProjectRow) -> Path | None:
+    """The newest processing run this app started for the project that is still in the logs."""
+    log_dir = pipeline.manifest_path("x").parent.parent
+    for execution_id in reversed(store.runs_of(project.id)):
+        folder = log_dir / execution_id
+        if (folder / "run.json").is_file():
+            return folder
+    return None
 
 
 def adopt(project: store.ProjectRow) -> Run | None:
@@ -727,17 +754,20 @@ def adopt(project: store.ProjectRow) -> Run | None:
 
     Deliberately conservative about ownership: the engine's logs do not record
     which project asked for a run, because the engine has no idea projects
-    exist. So this only adopts a run whose folder we can see, and reports it
-    as the project's own — correct as long as one machine runs one pipeline,
-    which is already enforced when starting one.
+    exist. So only a run this app recorded starting for the project is
+    adopted (`store.record_run`). The newest folder in the logs is not enough:
+    the same engine also runs from a terminal, for its own projects, and runs
+    the model and single scripts, and each of those leaves a folder too.
     """
-    folder = _latest_run_folder()
+    folder = _project_run_folder(project)
     if folder is None:
         return None
 
     run = Run(project)
     run._adopted = True
-    alive = _pipeline_is_running()
+    # A pipeline going now is this run only if it is also the newest one: a
+    # run started from a terminal after it is someone else's.
+    alive = _pipeline_is_running() and folder == _latest_run_folder()
     run._state.executionId = folder.name
     run._state.startedAt = (folder / "run.json").stat().st_mtime
     run._absorb_manifest()

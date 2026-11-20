@@ -453,6 +453,26 @@ def _documents(root: Path) -> list[Path]:
     return sorted(path for _, path in best.values())
 
 
+def has_results(project: store.ProjectRow) -> bool:
+    """
+    Whether any variable of the project has been rendered.
+
+    What the projects list shows as processed. The same test as
+    `scan_variables` (a document in a variable's folder under `out/`), but it
+    stops at the first one and reads no logs, since the list asks it of every
+    project on every load.
+    """
+    root = out_dir(project)
+    if root is None or not root.is_dir():
+        return False
+    for suffix in HTML_SUFFIXES:
+        for html in root.rglob(f"*{suffix}"):
+            parts = html.relative_to(root).parts
+            if len(parts) >= 3 and all(is_variable_folder(part) for part in parts[:-1]):
+                return True
+    return False
+
+
 def scan_variables(project: store.ProjectRow) -> list[VariableLayer]:
     """Every rendered variable under `out/`, alphabetical by label."""
     root = out_dir(project)

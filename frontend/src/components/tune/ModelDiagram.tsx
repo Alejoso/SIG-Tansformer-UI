@@ -40,13 +40,28 @@ export function ModelDiagram({ model, weightSum }: ModelDiagramProps) {
 
   const diagram = buildDiagram(model.criteria);
   const excluded = model.excludedColumns + model.excludedThresholds;
+  // Read by `fit` without making it change on every keystroke in the editor.
+  // Synced in an effect declared before the one that fits, so on mount the
+  // fit already sees it.
+  const criterionTop = diagram.nodes.find((node) => node.kind === 'criterion')?.top ?? 0;
+  const firstCriterionTop = useRef(criterionTop);
+  useEffect(() => {
+    firstCriterionTop.current = criterionTop;
+  }, [criterionTop]);
 
   const fit = useCallback(() => {
     const element = pane.current;
     if (!element) return;
     const scale = Math.min(1, (element.clientWidth - FIT_PADDING) / (DIAGRAM_CANVAS_WIDTH + 20));
-    element.scrollTo(0, 0);
-    setZoom(Math.max(MIN_FIT_ZOOM, scale));
+    const next = Math.max(MIN_FIT_ZOOM, scale);
+    setZoom(next);
+    // Open on the first criterion rather than on the top of the canvas. A
+    // criterion is centred on its leaves, so with a few dozen of them it sits
+    // far below the top, and the top alone is a column of leaves with nothing
+    // shown that they belong to.
+    const canvas = element.querySelector<HTMLElement>('.diagram-canvas');
+    const offset = canvas ? canvas.offsetTop : 0;
+    element.scrollTo(0, Math.max(0, offset + firstCriterionTop.current * next - FIT_PADDING));
   }, []);
 
   // Fit once on mount, and again whenever the pane is resized.
@@ -60,7 +75,10 @@ export function ModelDiagram({ model, weightSum }: ModelDiagramProps) {
   }, [fit]);
 
   return (
-    <div className="diagram-pane" ref={pane}>
+    // The frame holds still and the canvas scrolls inside it, so the caption
+    // and the zoom buttons stay put however far down the leaves go.
+    <div className="diagram-pane diagram-frame">
+      <div className="diagram-scroll" ref={pane}>
       <div
         className="diagram-canvas"
         style={{
@@ -127,6 +145,7 @@ export function ModelDiagram({ model, weightSum }: ModelDiagramProps) {
             </div>
           </div>
         ))}
+      </div>
       </div>
 
       <div className="diagram-caption">

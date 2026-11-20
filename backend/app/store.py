@@ -31,6 +31,12 @@ from pathlib import Path
 DATA_DIR = Path(os.environ.get("MAPHEX_DATA_DIR", Path(__file__).resolve().parents[2] / "data"))
 PROJECTS_CSV = DATA_DIR / "projects.csv"
 FOLDERS_CSV = DATA_DIR / "folders.csv"
+#: The processing runs this app started, by project. The engine's logs do not
+#: say which project a run was for (or which folder it read), so this is how a
+#: run read back from those logs after a restart is known to be the project's
+#: own, and not the engine's next run from a terminal or another project's.
+RUNS_CSV = DATA_DIR / "runs.csv"
+RUN_FIELDS = ["project_id", "execution_id", "started_at"]
 
 PROJECT_FIELDS = [
     "id",
@@ -170,7 +176,26 @@ def delete_project(project_id: str) -> bool:
         return False
     write_projects(remaining)
     write_folders([f for f in read_folders() if f.project_id != project_id])
+    _write(RUNS_CSV, RUN_FIELDS,
+           [r for r in _read(RUNS_CSV, RUN_FIELDS) if r["project_id"] != project_id])
     return True
+
+
+# ── processing runs ───────────────────────────────────────────────────────
+
+
+def record_run(project_id: str, execution_id: str) -> None:
+    """Remember that this app started processing run `execution_id` for the project."""
+    rows = _read(RUNS_CSV, RUN_FIELDS)
+    if any(r["project_id"] == project_id and r["execution_id"] == execution_id for r in rows):
+        return
+    rows.append({"project_id": project_id, "execution_id": execution_id, "started_at": now()})
+    _write(RUNS_CSV, RUN_FIELDS, rows)
+
+
+def runs_of(project_id: str) -> list[str]:
+    """The project's processing runs this app started, oldest first."""
+    return [r["execution_id"] for r in _read(RUNS_CSV, RUN_FIELDS) if r["project_id"] == project_id]
 
 
 # ── folders ───────────────────────────────────────────────────────────────

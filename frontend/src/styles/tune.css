@@ -211,6 +211,15 @@
   overflow: auto;
 }
 
+/* The drawn diagram: the frame keeps the caption and the zoom buttons in
+   place, and only the scroll area inside it moves. */
+.diagram-pane.diagram-frame { overflow: hidden; }
+.diagram-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
 .diagram-canvas {
   position: absolute;
   left: 20px;
