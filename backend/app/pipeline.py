@@ -295,6 +295,27 @@ def unwritable_host_folders() -> list[Path]:
     return blocked
 
 
+def _compose_db_name(fallback: str) -> str:
+    """
+    The `POSTGRES_DB` the engine's db container was created with.
+
+    Then the engine's `.env`, then `fallback`: what compose would have been
+    given anyway when there is no container yet.
+    """
+    found = _run(["docker", "compose", "ps", "-aq", "db"], cwd=PIPELINE_DIR, timeout=30)
+    container = (found.stdout.split() or [""])[0] if found and found.returncode == 0 else ""
+    if container:
+        inspected = _run(
+            ["docker", "inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", container],
+            cwd=PIPELINE_DIR, timeout=30,
+        )
+        if inspected and inspected.returncode == 0:
+            for line in inspected.stdout.splitlines():
+                if line.startswith("POSTGRES_DB=") and line[len("POSTGRES_DB="):]:
+                    return line[len("POSTGRES_DB="):]
+    return read_env_file().get("POSTGRES_DB") or fallback
+
+
 def compose_up(
     data_dir: Path | None = None, *, recreate: bool = False
 ) -> subprocess.CompletedProcess[str] | None:
@@ -315,6 +336,12 @@ def compose_up(
     prepare_host_folders(data_dir)
     env = run_full_env(extra={"DATA_DIR": str(data_dir)} if data_dir else None)
     env.update(machine_fit(env))
+    # `POSTGRES_DB` only reaches the db service (its first database and its
+    # healthcheck); the app reads `DATABASE_URL`, worked out above for this
+    # project's database. Handing compose the project's name instead would
+    # change the db service's configuration and recreate Postgres for nothing,
+    # stopping whatever else was using it. The engine's run_full.sh does the same.
+    env["POSTGRES_DB"] = _compose_db_name(env.get("POSTGRES_DB", ""))
     command = ["docker", "compose", "up", "-d"]
     if recreate:
         command.append("--force-recreate")
