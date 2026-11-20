@@ -504,11 +504,10 @@ the app container. Both parts are necessary:
 forwards nothing but the execution id — so the model run's maps read it from
 the container too, and the file is the one mechanism that covers every path.
 
-Because the engine has one database and one `.env`, these are really
-properties of the engine as it is configured right now; keeping them per
-project means "set the engine to this before running this project". Two
-projects that disagree about the processing resolution cost a master rebuild
-each time you switch. The engine notices and does it; `settings.save` marks
+Because the engine has one `.env`, these are really properties of the engine
+as it is configured right now; keeping them per project means "set the engine
+to this before running this project". Each project has its own database, so
+its master is built at its own resolution and kept between its runs. The engine notices and does it; `settings.save` marks
 the project stale so our own record of what the database holds is cleared
 with it.
 
@@ -976,12 +975,17 @@ country from Natural Earth when the 110m file has it; anything else (an empty
 id, a name the old mocked upload made up) is `dane_colombia`, which is what it
 ran on. Their card now says *Colombia (DANE)*.
 
-**One database for every mesh.** The engine still has one database, and the
-H3 master in it belongs to whichever mesh ran last. Switching between projects
-on different meshes makes the engine rebuild the master on the next run (it
-notices the change by its own fingerprint), which costs minutes, the same as
-switching processing resolutions. Nothing else changes: a project switch
-already clears the per-project tables.
+**One database per project.** Every project runs on a database of its own,
+`<main>_maphex_<project id>` next to the engine's main one (`sigdb_maphex_...`
+with the default `.env`), passed as `POSTGRES_DB` and `DATABASE_URL` to every
+processing and model run (`pipeline.project_database`). The engine creates it
+on the project's first run. So projects never share a master table: switching
+between projects, or between meshes, rebuilds nothing, and a project can
+neither merge its variables into another's nor delete them. The engine also
+refuses to load a project folder into its main database, which belongs to
+its main data folder only. A project's first run after this change builds
+its database from scratch. Deleting a project here does not drop its
+database.
 
 ## Working with the current engine
 
@@ -1016,10 +1020,10 @@ and how, is in `out/maestro/<run>/*.fill.yaml`.
 **No engine project.** The engine keeps projects of its own in `projects/`,
 and its `.env` may name a default one. This app's runs set `PROJECT` empty, so
 none of them is loaded: everything comes from `.env` and from what is passed
-here, `DATA_DIR` first. A `POSTGRES_DB` set where the backend runs is a
-database of its own (the engine creates it next to the main one and never
-rewrites `admin/out` from it), which is how to try the app without touching
-the main database.
+here, `DATA_DIR` first, and the project's own database (`POSTGRES_DB`,
+`DATABASE_URL`). A `POSTGRES_DB` set where the backend runs does not change
+the project databases (they are named after the engine's `.env`); it only
+sets what a direct call outside a project, like `docker compose up`, uses.
 
 **Reports.** Every run of either kind writes `logs/<id>/run_report.yaml`:
 stage times, results, every error and warning, and the parameters it ran

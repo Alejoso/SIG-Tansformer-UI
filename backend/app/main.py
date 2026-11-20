@@ -495,9 +495,8 @@ def start_processing(project_id: str, payload: ProcessPayload | None = None) -> 
     except variable_settings.SettingsError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    # One database serves every project, and nothing in it is scoped to one —
-    # so a run clears the per-project tables when it must, and reuses the H3
-    # master, which belongs to the boundaries rather than to any project.
+    # Each project has a database of its own (`pipeline.project_database`), so
+    # a run clears its tables only when this project's own record says it must.
     reset, reason = engine_state.plan_reload(project)
 
     try:
@@ -519,13 +518,16 @@ def _engine_env(project: store.ProjectRow) -> dict[str, str]:
     What every run of this project passes to the engine besides its data
     folder: the project's switches (CSVs, keeping the machine awake), where
     its model and model runs are, so the engine's model status at the end of
-    a run checks this project's model, and its mesh (`MESH_*`). Both runners
-    get the same, so processing and the model agree on the area.
+    a run checks this project's model, its mesh (`MESH_*`) and its own
+    database (`POSTGRES_DB`, `DATABASE_URL`). Both runners get the same, so
+    processing and the model agree on the area and read the same master.
     """
     return {
         **project_settings.option_env(project),
         **model_status.env(project),
         **meshes.env_for(project),
+        # Its own database: see `pipeline.project_database`.
+        **pipeline.project_database_env(project.id),
     }
 
 

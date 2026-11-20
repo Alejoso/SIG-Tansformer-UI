@@ -476,15 +476,53 @@ def write_env_values(values: dict[str, str]) -> bool:
     return changed
 
 
-def database_url() -> str:
+def main_database() -> str:
+    """The engine's main database: the `POSTGRES_DB` of its `.env` (`sigdb` if unset)."""
+    return read_env_file().get("POSTGRES_DB") or "sigdb"
+
+
+def project_database(project_id: str) -> str:
     """
-    The connection string the DB stages expect.
+    The database a project runs on: one of its own, `<main>_maphex_<id>`.
+
+    Every project gets one, so two projects never share a master table: a
+    second project can neither merge its variables into the first's, delete
+    them, nor rebuild the master for another mesh. The engine creates it on the
+    first run and refuses to load a project folder into the main database.
+    Postgres folds names to lower case and allows 63 characters, so the id is
+    reduced to its letters and digits.
+    """
+    suffix = re.sub(r"[^a-z0-9]", "", project_id.lower())
+    if suffix.startswith("p") and len(suffix) > 1:
+        suffix = suffix[1:]
+    return f"{main_database()}_maphex_{suffix}"[:63]
+
+
+def project_database_env(project_id: str) -> dict[str, str]:
+    """`POSTGRES_DB` and `DATABASE_URL` for every engine call of a project."""
+    database = project_database(project_id)
+    return {"POSTGRES_DB": database, "DATABASE_URL": database_url(database)}
+
+
+def database_url(database: str | None = None) -> str:
+    """
+    The connection string the DB stages expect, for `database` (a project's,
+    see `project_database`) or else the main one.
 
     `run_full.sh` builds this when it is not already set, and the container
-    does not get it from compose — so driving stages directly means building
+    does not get it from compose, so driving stages directly means building
     it here too, by the same rule, or anything touching Postgres fails with
     "DATABASE_URL no configurada".
     """
+    url = _base_database_url()
+    if not database:
+        return url
+    base, sep, query = url.partition("?")
+    return base.rsplit("/", 1)[0] + "/" + database + (f"?{query}" if sep else "")
+
+
+def _base_database_url() -> str:
+    """The URL of the database this server is set to (its env, then the engine's `.env`)."""
     env = read_env_file()
     # A POSTGRES_DB set where this server runs wins over the file, as it does
     # for `run_full.sh`: the engine then treats it as a database of its own,

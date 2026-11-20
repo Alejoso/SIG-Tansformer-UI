@@ -369,10 +369,10 @@ class PipelineRun(BaseModel):
     #: can finish successfully with variables missing; these are what say so.
     skippedFiles: int = 0
     erroredFiles: int = 0
-    #: True when this run clears the engine's per-project tables first, and
-    #: why. One database serves every project and nothing in it is scoped to
-    #: one, so switching projects — or removing a variable — means the
-    #: previous rows have to go before new ones are loaded.
+    #: True when this run clears the project's tables first, and why. Each
+    #: project has a database of its own; within it, removing a variable or a
+    #: run that did not finish means the previous rows have to go before new
+    #: ones are loaded.
     reset: bool = True
     resetReason: str = ""
     #: True when the H3 master is being rebuilt too: minutes, not seconds.

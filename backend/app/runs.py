@@ -157,7 +157,7 @@ class Run:
         #: honours one; None means the engine's own default.
         self.data_dir = data_dir
         #: Whether the engine's per-project tables are cleared first, and why.
-        #: See `engine_state.plan_reload` — one database serves every project.
+        #: See `engine_state.plan_reload`: each project has its own database.
         self.reset = reset
         self.reset_reason = reset_reason
         self.rebuild_everything = rebuild_everything
