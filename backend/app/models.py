@@ -16,6 +16,11 @@ class Project(BaseModel):
     name: str
     meshId: str
     meshLabel: str
+    #: dane_colombia | natural_earth | geoboundaries | file. See `meshes.py`.
+    meshSource: str = "dane_colombia"
+    #: Only the Colombia (DANE) mesh has a sea. Without one, the sea fill
+    #: domain and the model's offshore site are not offered, and refused.
+    meshHasSea: bool = True
     status: str
     description: str = ""
     outFolder: str = ""
@@ -31,9 +36,15 @@ class Project(BaseModel):
 
 class NewProjectPayload(BaseModel):
     name: str
+    #: `dane_colombia`, `natural_earth:<ADM0_A3>`, `geoboundaries:<ISO3>:<ADM0|ADM1|ADM2>`
+    #: or `file:<upload id>`. Checked against what exists by `meshes.resolve`.
     meshId: str
     outFolder: str = ""
     description: str = ""
+    #: An uploaded mesh's columns naming and coding each feature. Left empty,
+    #: the engine finds them itself.
+    meshNameField: str = ""
+    meshCodeField: str = ""
 
     @field_validator("name")
     @classmethod
@@ -44,15 +55,38 @@ class NewProjectPayload(BaseModel):
 
 
 class Mesh(BaseModel):
-    """A study area to build a project on. Today that means a country."""
+    """
+    A study area to build a project on: Colombia from DANE, a Natural Earth
+    country, or an uploaded file. See `meshes.py`.
+    """
 
     id: str
     label: str
     continent: str = ""
+    #: ISO 3166-1 alpha-3, where Natural Earth has one.
     iso: str = ""
     #: Every name and code this row answers to, joined, so the UI can filter
     #: on one field without knowing which of them exist.
     search: str = ""
+    #: dane_colombia | natural_earth | file.
+    source: str = "natural_earth"
+    #: The Natural Earth code (ADM0_A3) the engine is given.
+    country: str = ""
+    #: Whether geoBoundaries detail can be offered: it is keyed by ISO3.
+    geoboundaries: bool = False
+    #: The one to pick for work in Colombia.
+    recommended: bool = False
+    hasSea: bool = False
+    # An upload's own description, empty for the rest.
+    format: str = ""
+    featureCount: int | None = None
+    #: Its text columns, any of which can name or code each feature.
+    columns: list[str] = Field(default_factory=list)
+    #: The columns that look like a name and a code, as suggestions.
+    nameField: str = ""
+    codeField: str = ""
+    #: What was assumed or will be left out, said once when it arrives.
+    notes: list[str] = Field(default_factory=list)
 
 
 class DataFolder(BaseModel):

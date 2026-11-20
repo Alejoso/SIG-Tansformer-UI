@@ -65,6 +65,10 @@ class Stage:
     #: observed carries a guess, which is still better than treating it as
     #: equal to a one-second rename.
     weight: float = 10.0
+    #: Other scripts the engine runs as this same step. Step 3 is
+    #: `normalize_dane_mgn.py` for the Colombia (DANE) mesh and
+    #: `prepare_mesh.py` for any other mesh, and the manifest names whichever ran.
+    aliases: tuple[str, ...] = ()
 
 
 #: Taken from the table in the pipeline's own docs/pipeline.md, which carries a
@@ -72,8 +76,9 @@ class Stage:
 #: validation, `docker compose up` and the SQL schema; this module does the
 #: first two itself and the third is handled by Postgres on first start.
 STAGES: tuple[Stage, ...] = (
-    Stage(3, "normalize_dane", "Normalise administrative boundaries",
-          "/app/app/pipeline/normalize_dane_mgn.py", conditional=True, weight=60),
+    Stage(3, "normalize_dane", "Prepare the mesh boundaries",
+          "/app/app/pipeline/normalize_dane_mgn.py", conditional=True, weight=60,
+          aliases=("/app/app/pipeline/prepare_mesh.py",)),
     Stage(4, "fill_h3", "Build the H3 master table",
           "/app/app/pipeline/fill_h3_from_geojson.py", conditional=True, needs_db=True, weight=119),
     Stage(5, "h3_grid", "Export the H3 grid",
@@ -654,6 +659,7 @@ RUN_SCRIPT = "run_full.sh"
 STAGE_LOG_MARKERS: tuple[tuple[str, str, str], ...] = (
     ("normalizando shapefiles dane", "normalize_dane", "running"),
     ("geojson normalizados ya existen", "normalize_dane", "skipped"),
+    ("preparando la malla", "normalize_dane", "running"),
     ("llenando h3", "fill_h3", "running"),
     ("tabla maestro ya tiene", "fill_h3", "skipped"),
     ("generando malla h3", "h3_grid", "running"),

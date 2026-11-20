@@ -13,17 +13,17 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import (
-    countries,
     document,
     engine_state,
     fsutil,
     inputs,
+    meshes,
     model_runs as model_run_store,
     model_status,
     model_store,
@@ -88,13 +88,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def _mesh_label(mesh_id: str) -> str:
-    """The stored label, so an old project still reads correctly if the
-    reference data is later swapped for a different edition."""
-    return next(
-        (c["label"] for c in countries.list_countries() if c["id"] == mesh_id),
-        mesh_id,
-    )
+def _mesh_label(row: store.ProjectRow) -> str:
+    """
+    The label stored when the project was made, so it still reads the same if
+    the country list is later swapped for another edition. A project made
+    before meshes reached the engine is labelled by the mesh it actually runs
+    on (`meshes.legacy_id`): its stored "Colombia" now says "Colombia (DANE)".
+    """
+    if row.mesh_source.strip() and row.mesh_label:
+        return row.mesh_label
+    try:
+        return meshes.label_of(meshes.spec_of(row))
+    except Exception:  # noqa: BLE001 (a label is never worth failing a list over)
+        return row.mesh_label or row.mesh_id
 
 
 def _to_project(row: store.ProjectRow) -> Project:
@@ -102,11 +108,14 @@ def _to_project(row: store.ProjectRow) -> Project:
     # the tree is what gets processed, and it holds data put there by hand
     # as well as data this app copied in.
     variables = inputs.scan(row)
+    mesh = meshes.spec_of(row)
     return Project(
         id=row.id,
         name=row.name,
-        meshId=row.mesh_id,
-        meshLabel=row.mesh_label or _mesh_label(row.mesh_id),
+        meshId=mesh.id,
+        meshLabel=_mesh_label(row),
+        meshSource=mesh.source,
+        meshHasSea=mesh.has_sea,
         # From what is on disk rather than from what this app remembers doing:
         # a folder processed from a terminal, or before the store was made, is
         # processed too.
@@ -135,13 +144,31 @@ def health() -> dict[str, object]:
 @app.get("/api/meshes")
 def list_meshes() -> list[Mesh]:
     """
-    The study areas a project can be built on: every country in Natural
-    Earth's 110m set, read through GeoPandas.
-
-    Names only for now. The polygons are loaded with them, ready for the step
-    that hands one to h3 to build the hexagon mesh.
+    The study areas a project can be built on: Colombia from DANE first, then
+    every country in the engine's Natural Earth 10m set. geoBoundaries detail
+    is a choice made on a country (`geoboundaries` says where it can be), and
+    an upload is added with `POST /api/meshes`.
     """
-    return [Mesh(**country) for country in countries.list_countries()]
+    return [Mesh(**entry) for entry in meshes.catalog()]
+
+
+@app.post("/api/meshes", status_code=201)
+def upload_mesh(file: UploadFile = File(...)) -> Mesh:
+    """
+    Keep an uploaded outline as a mesh a project can be created on.
+
+    Checked here, before anything is created on it: readable, with polygons
+    and a coordinate system. A GeoJSON, a GeoPackage, a GeoParquet, or a
+    shapefile zipped with its parts. Nothing about where it is written comes
+    from the upload's own names; see `meshes.save_upload`.
+    """
+    try:
+        record = meshes.save_upload(file.filename or "", file.file)
+    except meshes.MeshError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    finally:
+        file.file.close()
+    return Mesh(**meshes.as_mesh(record))
 
 
 # ── projects ──────────────────────────────────────────────────────────────
@@ -156,19 +183,27 @@ def list_projects() -> list[Project]:
 
 @app.post("/api/projects", status_code=201)
 def create_project(payload: NewProjectPayload) -> Project:
+    try:
+        mesh = meshes.resolve(payload.meshId, payload.meshNameField, payload.meshCodeField)
+    except meshes.MeshError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     row = store.ProjectRow(
         id=store.new_id("p"),
         name=payload.name,
-        mesh_id=payload.meshId,
-        mesh_label=_mesh_label(payload.meshId),
+        mesh_label=meshes.label_of(mesh),
         description=payload.description,
         out_folder=payload.outFolder,
         created_at=store.now(),
         updated_at=store.now(),
+        **meshes.store_fields(mesh),
     )
     store.add_project(row)
     # Create the input folder now, while we still can — see `inputs.prepare`.
     inputs.prepare(row)
+    # An uploaded mesh goes into the project's folder now, where the engine
+    # reads it. Not fatal if it cannot yet (no folder chosen): every run
+    # tries again first, and says why it cannot when it still cannot.
+    meshes.materialise(row)
     return _to_project(row)
 
 
@@ -427,6 +462,10 @@ def start_processing(project_id: str, payload: ProcessPayload | None = None) -> 
                 ),
             )
 
+    # An uploaded mesh has to be in the project's folder before the engine
+    # looks for it there.
+    _require_mesh(project)
+
     # Create what the run needs as us, in case nothing has yet — otherwise
     # `run_full.sh`'s own `docker compose up` makes them as root and its very
     # next line, a host-side mkdir, fails.
@@ -451,7 +490,10 @@ def start_processing(project_id: str, payload: ProcessPayload | None = None) -> 
     # How each variable's gaps are filled is set per variable on the Data
     # screen; the engine reads it from a transform.yaml in the project folder
     # (step 13.5), which is rewritten here so it always matches the screen.
-    variable_settings.write_transform(project, inputs.scan(project))
+    try:
+        variable_settings.write_transform(project, inputs.scan(project))
+    except variable_settings.SettingsError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
     # One database serves every project, and nothing in it is scoped to one —
     # so a run clears the per-project tables when it must, and reuses the H3
@@ -475,11 +517,23 @@ def start_processing(project_id: str, payload: ProcessPayload | None = None) -> 
 def _engine_env(project: store.ProjectRow) -> dict[str, str]:
     """
     What every run of this project passes to the engine besides its data
-    folder: the project's switches (CSVs, keeping the machine awake), and
-    where its model and model runs are, so the engine's model status at the
-    end of a run checks this project's model.
+    folder: the project's switches (CSVs, keeping the machine awake), where
+    its model and model runs are, so the engine's model status at the end of
+    a run checks this project's model, and its mesh (`MESH_*`). Both runners
+    get the same, so processing and the model agree on the area.
     """
-    return {**project_settings.option_env(project), **model_status.env(project)}
+    return {
+        **project_settings.option_env(project),
+        **model_status.env(project),
+        **meshes.env_for(project),
+    }
+
+
+def _require_mesh(project: store.ProjectRow) -> None:
+    """Refuse a run whose uploaded mesh cannot be put where the engine reads it."""
+    problem = meshes.materialise(project)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
 
 
 @app.get("/api/projects/{project_id}/process")
@@ -557,18 +611,20 @@ def _defaults(file_format: str) -> dict[str, object]:
     return {"fill": suggested.fill, "fillDomain": suggested.fillDomain}
 
 
-def _wanted_settings(item) -> tuple[str, str] | None:
+def _wanted_settings(item, project: store.ProjectRow) -> tuple[str, str] | None:
     """
     The fill a request row asked for, checked, or None for the default.
 
     Raises `variable_settings.SettingsError` when it would not be accepted,
-    so the row is refused before anything is copied.
+    so the row is refused before anything is copied. That includes the sea
+    on a mesh that has none.
     """
     if item.fill is None and item.fillDomain is None:
         return None
     return variable_settings.check(
         item.fill if item.fill is not None else variable_settings.NO_FILL,
         item.fillDomain or variable_settings.DEFAULT_FILL_DOMAIN,
+        has_sea=meshes.has_sea(project),
     )
 
 
@@ -628,7 +684,7 @@ def add_input(project_id: str, payload: ImportPayload) -> InputVariable:
     """
     project = _require_project(project_id)
     try:
-        wanted = _wanted_settings(payload)
+        wanted = _wanted_settings(payload, project)
     except variable_settings.SettingsError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     try:
@@ -660,7 +716,7 @@ def add_inputs(project_id: str, payload: ImportManyPayload) -> ImportOutcome:
     refused, accepted, wanted = [], [], []
     for item in payload.variables:
         try:
-            settings = _wanted_settings(item)
+            settings = _wanted_settings(item, project)
         except variable_settings.SettingsError as error:
             refused.append({"source": item.source, "code": item.code, "problem": str(error)})
             continue
@@ -697,7 +753,7 @@ def save_input_settings(
     variable = _find_input(project, dimension, code)
     try:
         variable_settings.save(project.id, variable.id, payload.fill, payload.fillDomain,
-                               file_format=variable.format)
+                               file_format=variable.format, has_sea=meshes.has_sea(project))
     except variable_settings.SettingsError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return _input(project, variable)
@@ -805,6 +861,7 @@ def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> 
     `MCDA/runs/`, which every project would otherwise share.
     """
     project = _require_project(project_id)
+    _refuse_offshore(project, payload or ModelRunPayload())
 
     status = pipeline.status()
     if not status.ready:
@@ -823,6 +880,7 @@ def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> 
         )
 
     options = payload or ModelRunPayload()
+    _require_mesh(project)
     # The container execs against whatever DATA_DIR was mounted last, so it
     # has to be pointed at this project before the model reads anything.
     pipeline.prepare_host_folders(folder)
@@ -881,6 +939,36 @@ def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> 
     except RuntimeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return _to_run(run.snapshot())
+
+
+def _refuse_offshore(project: store.ProjectRow, options: ModelRunPayload) -> None:
+    """
+    The engine refuses `offshore` on a mesh with no sea, as a run's site or a
+    leaf's. Said here first, in words, and before anything is started. The
+    model file is only read when it exists: a new project's is written from
+    its data, every leaf `site: both`.
+    """
+    if meshes.has_sea(project):
+        return
+    if options.site == "offshore":
+        raise HTTPException(status_code=400, detail=f"The model cannot run offshore. {meshes.NO_SEA}")
+    path = model_store.model_path(project)
+    if not path.is_file():
+        return
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    offshore = model_store.offshore_leaves(text)
+    if offshore:
+        many = len(offshore) != 1
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{len(offshore)} lea{'ves' if many else 'f'} in the model {'are' if many else 'is'} "
+                f"`site: offshore` ({', '.join(offshore[:5])}). {meshes.NO_SEA}"
+            ),
+        )
 
 
 @app.get("/api/projects/{project_id}/model/run")
@@ -1028,7 +1116,11 @@ def remove_model_run(project_id: str, run_id: str) -> ModelRunsRemoval:
 def _describe_model(project: store.ProjectRow, text: str, created: bool = False) -> ModelFile:
     """Pair the file with what is wrong with it, so one round trip tells all."""
     syntax = [ModelIssue(**issue) for issue in model_store.parse_errors(text)]
-    structure = [ModelIssue(**issue) for issue in model_store.structure_errors(text)]
+    structure = [
+        ModelIssue(**issue)
+        for issue in model_store.structure_errors(text)
+        + model_store.mesh_errors(text, meshes.has_sea(project))
+    ]
     return ModelFile(
         path=str(model_store.model_path(project)),
         text=text,

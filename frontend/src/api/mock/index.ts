@@ -7,10 +7,7 @@
  * a real server.
  */
 
-import type {
-  Mesh,
-  ModelExample,
-} from '../../types';
+import type { ModelExample } from '../../types';
 import { EXAMPLES } from './fixtures';
 
 const delay = <T>(value: T, ms = 180): Promise<T> =>
@@ -22,15 +19,9 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 export const MAX_FOLDERS = 10;
 
 /**
- * Meshes, projects and data folders now come from the backend; what is left
- * here is only the parts the engine has not been wired up for yet.
+ * Meshes, projects and data folders now come from the backend, mesh uploads
+ * included; what is left here is only the model examples, which are UI copy.
  */
-
-export async function uploadMesh(file: File): Promise<Mesh> {
-  // Mesh upload has no server route yet, so this still only pretends.
-  const label = file.name.replace(/\.geojson$/i, '');
-  return delay({ id: file.name, label, continent: '', iso: '', search: label }, 500);
-}
 
 /* ── model ─────────────────────────────────────────────────────────────── */
 

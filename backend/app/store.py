@@ -43,6 +43,15 @@ PROJECT_FIELDS = [
     "name",
     "mesh_id",
     "mesh_label",
+    # The mesh in the terms the engine is given it (see `meshes.py`). A store
+    # written before these existed reads them as blank, and `meshes.spec_of`
+    # reads such a row's `mesh_id` the old way: see `meshes.legacy_id`.
+    "mesh_source",
+    "mesh_country",
+    "mesh_level",
+    "mesh_file",
+    "mesh_name_field",
+    "mesh_code_field",
     "description",
     "out_folder",
     # The engine's two resolution knobs, kept beside the folder they apply
@@ -69,6 +78,18 @@ class ProjectRow:
     name: str
     mesh_id: str
     mesh_label: str
+    #: dane_colombia | natural_earth | geoboundaries | file. Blank on a row
+    #: written before meshes reached the engine.
+    mesh_source: str = ""
+    #: ADM0_A3 for Natural Earth, ISO3 for geoBoundaries.
+    mesh_country: str = ""
+    #: ADM0, ADM1 or ADM2, for geoBoundaries.
+    mesh_level: str = ""
+    #: An uploaded mesh's file under `<project folder>/mesh/`.
+    mesh_file: str = ""
+    #: The uploaded file's columns naming and coding each feature, when chosen.
+    mesh_name_field: str = ""
+    mesh_code_field: str = ""
     description: str = ""
     out_folder: str = ""
     #: H3 resolution the values are computed and stored at.

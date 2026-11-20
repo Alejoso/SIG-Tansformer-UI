@@ -10,7 +10,8 @@ SIG-UI/
 ├── design/      the source mockup (Maphex.dc.html + the Organic design system)
 ├── backend/     FastAPI — projects, data, the engine, the model file
 │   ├── app/         one module per concern; see the sections below
-│   └── reference/   vendored Natural Earth 110m countries (820 kB)
+│   ├── reference/   vendored Natural Earth 110m countries (820 kB): names fallback, old mesh ids
+│   └── tests/       pytest: meshes, uploads, what a mesh without a sea refuses
 ├── data/        projects.csv + folders.csv (git-ignored, machine-specific)
 ├── frontend/    React + Vite + TypeScript
 │   └── tests/       browser checks against the running app
@@ -102,6 +103,12 @@ when it brings the containers up (`pipeline.compose_up` asks the engine's
 `app/tools/machine_resources.py`). `FIT_TO_MACHINE=0` in the engine's `.env`
 uses the sizes as written.
 
+Meshes other than Colombia need the engine from 2026-11-20 on: it reads the
+`MESH_*` variables this app passes (see [Meshes](#meshes-the-area-the-engine-builds-over))
+and vendors the Natural Earth 10m countries the picker lists
+(`admin/in/natural_earth/ne_10m_admin_0_countries.parquet`). An older engine
+ignores them and builds Colombia whatever was picked.
+
 `admin/in/dane_mgn2024/` has to hold the DANE boundary shapefiles. They are
 ~108 MB and not in git — ask whoever has them. Without them there is nothing
 to build the hexagon master table from, and processing stops at the first
@@ -176,9 +183,12 @@ Worth knowing before pointing it at an engine you care about:
   it back. The engine's `./MCDA/run_mcda.sh` does not start the containers,
   so after a run here it has to check what it finds before scoring.
 - **the project's folder**: `in/`, `out/`, `model/model.yaml`,
-  `config/transform.yaml`, `MCDA/runs/`. All of it the engine's doing except
-  the model file and `config/transform.yaml`, which is rewritten from each
-  variable's fill before every run.
+  `config/transform.yaml`, `MCDA/runs/`, and `mesh/` for a project created on
+  an uploaded mesh. All of it the engine's doing except the model file,
+  `config/transform.yaml` (rewritten from each variable's fill before every
+  run) and the mesh, copied in when the project is created and again before a
+  run if it has gone. A file already in `mesh/` under the same name is never
+  overwritten when it differs: the run is refused, saying which file.
 - **`data/*.csv` here**: the project list, where each variable was copied
   from, each variable's fill when changed from the default
   (`variable_settings.csv`), the value column chosen for a file with
@@ -186,6 +196,9 @@ Worth knowing before pointing it at an engine you care about:
   project (`runs.csv`). The engine's logs do not say which project a run was
   for, so after a restart that list is how the Data screen tells its own last
   run from one started in a terminal, a model run, or another project's.
+  Uploaded meshes are kept under `data/meshes/<id>/`, one folder each with a
+  `mesh.json` saying what was found in it; a project uses its own copy, so an
+  upload no project was created on can be deleted by hand.
 
 A project counts as processed (the projects list says *Processed* and opens
 on the map) once any of its variables has a map under `out/`, whoever drew
@@ -198,6 +211,17 @@ Nothing is written to the folders variables were imported *from*. Those are
 read and copied, never moved or changed.
 
 ## Checking it still works
+
+The backend has tests of its own, which need nothing running and never touch
+the engine (they point it at an empty folder):
+
+```bash
+cd backend
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest
+```
+
+The rest are browser checks:
 
 ```bash
 cd frontend && npm test            # all of them
@@ -238,14 +262,15 @@ two of them would be writing the same project's model file.
 | Area | State |
 |---|---|
 | Projects, data folders, meshes, path checking | **Live** — FastAPI, stored in `data/*.csv` |
+| Meshes: Colombia (DANE), Natural Earth, geoBoundaries, uploads | **Live**: passed to the engine as `MESH_*` with every run |
 | The model file, and running the model | **Live** — a YAML file under the project's folder, run with `MCDA/run_mcda.sh` |
 | Processing | **Live** — `run_full.sh`, watched stage by stage |
 | The layer tree and the rendered maps | **Live** — discovered from the project's `out/` folder |
 | Project settings | **Live** — two resolutions, written into the engine's `.env` before a run |
-| Uploading a mesh, and the model examples | Mocked in `frontend/src/api/mock/` |
+| The model examples | Mocked in `frontend/src/api/mock/` |
 
-Those last two are all that is left of the mocks. A mesh upload has no server
-route, and the examples are UI copy with nowhere else to live yet.
+That is all that is left of the mocks: the examples are UI copy with nowhere
+else to live yet.
 
 ## What is a variable, and what is the engine's own working file
 
@@ -578,7 +603,10 @@ Two CSV files, because the point is that you can open them, read them, and fix
 them by hand:
 
 ```
-data/projects.csv   id, name, mesh_id, mesh_label, description, out_folder, created_at, updated_at
+data/projects.csv   id, name, mesh_id, mesh_label, mesh_source, mesh_country, mesh_level,
+                    mesh_file, mesh_name_field, mesh_code_field, description, out_folder,
+                    h3_res, render_h3_res, export_csv, mcda_tables_csv, keep_awake,
+                    created_at, updated_at
 data/folders.csv    project_id, folder_id, name, path, added_at
 ```
 
@@ -602,6 +630,7 @@ project's folder *is* that directory:
                                         <file>.pipeline.jsonl
 <project folder>/out/model_status.json            the engine's check of the model
 <project folder>/model/model.yaml                 the model, edited here
+<project folder>/mesh/<file>                      an uploaded mesh, as MESH_PATH=mesh/<file>
 ```
 
 `GET /api/projects/{id}/layers` scans `out/` and returns what is actually
@@ -837,33 +866,6 @@ steps aside when it does not parse. It is deliberately **read-only**: writing a
 change back would mean rewriting your file — comments, ordering, formatting —
 which is the opposite of what a text editor is for.
 
-### Study areas come from GeoPandas
-
-`GET /api/meshes` returns all 177 countries from Natural Earth's 110m admin-0
-set, read with GeoPandas.
-
-The `world` dataframe everyone remembers —
-`gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))` — **no longer
-exists**: `geopandas.datasets` was removed in GeoPandas 1.0, which now points
-you at naturalearthdata.com instead. So the file is vendored in
-`backend/reference/`, which also keeps the app working offline.
-
-Only names are served today. `countries.geometry_for(id)` loads the polygon
-alongside them and is the seam the H3 mesh step plugs into.
-
-Two details in that data worth knowing:
-
-- **ISO_A3 is not a key.** Five rows have `-99`, Norway and France among them.
-  The id is a slug of `NAME`, which is unique.
-- **`SOVEREIGNT` is left out of the search terms.** Every dependency carries
-  its parent's name there, so including it made "United States of America"
-  match Puerto Rico. Each row is still findable by what it is actually called,
-  by its short name, and by either ISO code.
-
-The picker is a searchable combobox rather than a `<select>`, which stops being
-usable well before 177 options. Matches on the label rank above matches on an
-alias.
-
 ### Folders are paths, and paths go stale
 
 A browser will not reveal an absolute path from a file picker, so folders are
@@ -892,6 +894,95 @@ The request blocks for as long as the dialog is open, so the button shows it
 is waiting. If nothing can be opened, the result says so and pasting a path
 still works.
 
+## Meshes: the area the engine builds over
+
+A project's mesh is the area its hexagons cover. The engine builds it; the app
+says which one, with the variables both runners forward into the container
+(`run_full.sh` for processing, `MCDA/run_mcda.sh` for the model). All six are
+passed with every run of both kinds, the unused ones empty, so a value left in
+the engine's `.env` by hand cannot leak into a run here (`meshes.env_of`):
+
+| Mesh | Id | Passed to the engine |
+|---|---|---|
+| Colombia (DANE) | `dane_colombia` | `MESH_SOURCE=dane_colombia` |
+| A Natural Earth country | `natural_earth:<ADM0_A3>` | `MESH_SOURCE=natural_earth`, `MESH_COUNTRY=URY` |
+| A country at geoBoundaries detail | `geoboundaries:<ISO3>:<ADM0\|ADM1\|ADM2>` | `MESH_SOURCE=geoboundaries`, `MESH_COUNTRY=URY`, `MESH_LEVEL=ADM1` |
+| An uploaded file | `file:<upload id>` | `MESH_SOURCE=file`, `MESH_PATH=mesh/<file>`, `MESH_NAME_FIELD`, `MESH_CODE_FIELD` |
+
+`MESH_PATH` is relative to `/data`, which is the project's folder.
+
+**The picker** (`GET /api/meshes`) lists Colombia (DANE) first, the one to
+pick for work in Colombia: the DANE municipalities with the sea out to the
+exclusive economic zone, which is what every run used before meshes could be
+chosen. Then every country in Natural Earth 10m, read from the engine's own
+copy (`admin/in/natural_earth/ne_10m_admin_0_countries.parquet`, columns only,
+through `pyarrow`), so a country offered is a country the engine can find.
+Labels are Natural Earth's long names; the search matches the name, both
+codes and the continent. Without the engine's file (an older engine) the
+names fall back to the 110m set in `backend/reference/`, and a run on one of
+them fails in the engine, which says why.
+
+**Detail.** A Natural Earth country is its outline by default. One with an
+ISO code can be built at geoBoundaries detail instead: ADM0 (the country),
+ADM1 or ADM2 (its first and second divisions). geoBoundaries is keyed by ISO
+code, so the 22 Natural Earth rows without one (France and Norway among them)
+offer only the outline. The engine downloads geoBoundaries on the first run
+that asks for a country and level, so that run needs internet. Boundaries from
+geoBoundaries are CC BY 4.0, attributed as *geoBoundaries
+(www.geoboundaries.org)*, which the screen shows wherever it is offered.
+
+**Uploads** (`POST /api/meshes`, multipart, field `file`): a GeoJSON
+(`.geojson`, `.json`), a GeoPackage with one layer (`.gpkg`), a GeoParquet
+(`.parquet`), or a shapefile zipped with its `.shx`, `.dbf` and `.prj`
+(`.zip`). Up to 200 MB (`MAPHEX_MESH_MAX_MB`). Checked on arrival with
+GeoPandas: it has to be readable, hold at least one Polygon or MultiPolygon
+(other features are left out, and the answer says how many), and have a
+coordinate system. One without is accepted only when every coordinate is a
+longitude and a latitude: EPSG:4326 is assumed, written into the kept copy
+(a `.prj` for a shapefile) so the engine reads the same thing, and the answer
+says so. The answer lists the file's text columns, and the screen offers them
+as the name and code columns (`MESH_NAME_FIELD`, `MESH_CODE_FIELD`), both
+optional: left empty, the engine finds them.
+
+Nothing about where an upload is written comes from the upload. The file is
+kept under a name built from the last part of what the browser sent, spelled
+the way the engine's lint spells names, in a folder named by the app. Out of a
+zip only the one shapefile's parts are taken, each written under that name; a
+member whose path climbs out of the zip (`../`, an absolute path), or is a
+link, refuses the whole upload, and a zip with more than one shapefile is
+refused too. A refused upload leaves nothing behind.
+
+**No sea, except on Colombia (DANE).** Every other mesh covers its own
+outline and nothing else, so the engine refuses what only means something
+with a sea, and the app does not offer it and refuses it on the server first:
+
+- the `sea` fill domain (`land` and everywhere both cover the whole mesh);
+- a model leaf with `site: offshore`, or a model run with `--site offshore`
+  (`onshore` and `both` cover the whole mesh). The model file shows each such
+  leaf as an error, and Apply is refused, naming them;
+- a `region` fill by department, and the DIVIPOLA / `codigo_dane` joins, which
+  are Colombia's. The app never writes a region level: a bare `region` is the
+  department on the Colombia (DANE) mesh and the mesh's own features on any
+  other.
+
+Onshore and offshore need two projects: one on Colombia (DANE) for the sea,
+or one per mesh. The Data screen says the mesh has no sea beside its name.
+
+**Projects made before meshes reached the engine** stored a slug of the
+110m name (`colombia`) and all ran on the DANE boundaries. They are read
+without rewriting the store (`meshes.legacy_id`): `colombia` is
+`dane_colombia`, so they keep running exactly as before; another slug is that
+country from Natural Earth when the 110m file has it; anything else (an empty
+id, a name the old mocked upload made up) is `dane_colombia`, which is what it
+ran on. Their card now says *Colombia (DANE)*.
+
+**One database for every mesh.** The engine still has one database, and the
+H3 master in it belongs to whichever mesh ran last. Switching between projects
+on different meshes makes the engine rebuild the master on the next run (it
+notices the change by its own fingerprint), which costs minutes, the same as
+switching processing resolutions. Nothing else changes: a project switch
+already clears the per-project tables.
+
 ## Working with the current engine
 
 **Each variable's fill, and each leaf's absent.** The engine splits missing
@@ -901,7 +992,9 @@ data in two, and so does the app:
   master-table column's empty hexagons with a chain of methods (`spatial` the
   neighbours' mean, `region` the municipality's, `nearest` the closest value,
   `idw`, `mean`, `median`, a fixed number, or `none`), inside a domain
-  (`all`, `land` = hexagons in a municipality, `sea` = the rest). Every
+  (`all`, `land` = hexagons in a municipality, `sea` = the rest; on a mesh
+  other than Colombia (DANE) there is no sea, and `land` and `all` are the
+  whole mesh, see [Meshes](#meshes-the-area-the-engine-builds-over)). Every
   variable is asked for its fill when it is added (one row per file in a
   batch) and can change it afterwards from its row. The default depends on
   the kind of file: a raster or a table is a measurement that should exist
@@ -1068,8 +1161,8 @@ No component changes.
 | `getProject` | `GET /api/projects/{id}` | **live** |
 | `createProject` | `POST /api/projects` | **live** |
 | `deleteProject` | `DELETE /api/projects/{id}` | **live** — CSV rows only, never the folders |
-| `listMeshes` | `GET /api/meshes` | **live** — 177 countries from Natural Earth via GeoPandas |
-| `uploadMesh` | `POST /api/meshes` | mocked; no server route yet |
+| `listMeshes` | `GET /api/meshes` | **live**: Colombia (DANE), then the engine's Natural Earth 10m countries |
+| `uploadMesh` | `POST /api/meshes` | **live**: multipart `file`; checked, kept in `data/meshes/`, answers with a `Mesh` |
 | `pickFolder` | `POST /api/fs/pick-folder` | **live** — zenity / kdialog / tkinter / Windows-under-WSL |
 | `inspectPath` | `POST /api/fs/inspect` | **live** — validates a typed path |
 | `listFolders` | `GET /api/projects/{id}/folders` | **live** — existence re-checked each read |

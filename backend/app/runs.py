@@ -350,8 +350,9 @@ class Run:
         if not path.exists():
             return
 
-        by_script = {stage.script.rsplit("/", 1)[-1].removesuffix(".py"): stage.key
-                     for stage in self.job.stages}
+        by_script = {script.rsplit("/", 1)[-1].removesuffix(".py"): stage.key
+                     for stage in self.job.stages
+                     for script in (stage.script, *getattr(stage, "aliases", ()))}
 
         skipped_files = errored_files = 0
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():

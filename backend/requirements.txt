@@ -23,10 +23,19 @@ pydantic==2.13.5
 # the editor is a text editor, so nothing here reformats what was typed.
 ruamel.yaml==0.19.1
 
-# Country outlines for the study-area picker, and the geometry the H3 mesh
-# step will need. Imported lazily — it is a couple of seconds of startup the
-# server should not pay until a country is actually asked for.
+# Reads and checks an uploaded mesh (GeoJSON, GeoPackage, shapefile), and
+# the vendored 110m country names. Imported lazily: it is a couple of seconds
+# of startup the server should not pay until a mesh is actually asked for.
 geopandas==1.1.4
+
+# The engine's Natural Earth 10m country list and uploaded meshes are
+# GeoParquet. Held at the engine's own version (its requirements.txt), which
+# is below 26 for its own reasons; one version on both sides is one less
+# thing to wonder about.
+pyarrow==25.0.0
+
+# FastAPI reads a multipart upload (the mesh file) only with this installed.
+python-multipart==0.0.34
 
 # ── resolved dependencies of the above ────────────────────────────────────
 # Generated, not chosen. Pinned so a rebuild resolves to this exact set.

@@ -12,6 +12,7 @@
 import { API_BASE, request } from './client';
 import * as mock from './mock';
 import type {
+  GeoBoundariesLevel,
   ImportOutcome,
   ImportPlan,
   InputVariable,
@@ -57,11 +58,31 @@ export const deleteProject = (id: string): Promise<void> =>
 
 /* ── meshes ────────────────────────────────────────────────────────────── */
 
-/** LIVE: GET /api/meshes — still a fixed list server-side. */
+/**
+ * LIVE: GET /api/meshes
+ *
+ * Colombia from DANE first, then every country in the engine's Natural
+ * Earth 10m set. geoBoundaries detail is chosen on a country, with
+ * `geoboundariesMeshId`.
+ */
 export const listMeshes = (): Promise<Mesh[]> => request('/meshes');
 
-/** ENDPOINT: POST /api/meshes (multipart) — upload a new mesh GeoJSON. */
-export const uploadMesh = (file: File): Promise<Mesh> => mock.uploadMesh(file);
+/**
+ * LIVE: POST /api/meshes (multipart, field `file`)
+ *
+ * Upload an outline: GeoJSON, GeoPackage, GeoParquet, or a zipped shapefile.
+ * Checked on the server, which answers with the reason when it cannot be a
+ * mesh.
+ */
+export const uploadMesh = (file: File): Promise<Mesh> => {
+  const body = new FormData();
+  body.append('file', file);
+  return request('/meshes', { method: 'POST', body });
+};
+
+/** The id of a country at geoBoundaries detail: `geoboundaries:<ISO3>:<level>`. */
+export const geoboundariesMeshId = (iso3: string, level: GeoBoundariesLevel): string =>
+  `geoboundaries:${iso3}:${level}`;
 
 /**
  * LIVE: POST /api/fs/pick-folder
