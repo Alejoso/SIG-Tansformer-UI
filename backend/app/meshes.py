@@ -56,6 +56,15 @@ GEOBOUNDARIES_ATTRIBUTION = "geoBoundaries (CC BY 4.0), www.geoboundaries.org"
 #: Inside the project's folder, so the engine sees it at `/data/mesh/`.
 PROJECT_MESH_DIRNAME = "mesh"
 
+#: What is recorded about an upload, beside the file in `data/meshes/<id>/`.
+#: The hyphen is what keeps it apart from the upload: a kept file is named by
+#: `_safe_name`, which leaves only letters, digits and underscores before the
+#: extension, so no upload can ever be written under this name.
+RECORD_FILE = "upload-record.json"
+#: Where uploads made before `RECORD_FILE` kept their record. A GeoJSON
+#: uploaded as `mesh.json` was written there too, and lost to the record.
+LEGACY_RECORD_FILE = "mesh.json"
+
 #: The largest upload accepted, and the most a zip may unpack to. A country's
 #: municipalities at full detail are tens of megabytes; this leaves room for
 #: that and refuses a file picked by mistake.
@@ -176,6 +185,13 @@ def resolve(mesh_id: str, name_field: str = "", code_field: str = "") -> MeshSpe
         for label, value in (("name", name_field), ("code", code_field)):
             if value and value not in columns:
                 raise MeshError(f"The {label} column `{value}` is not in the uploaded file.")
+        problem = _code_problem_of(spec.upload, upload, code_field) if code_field else ""
+        if problem:
+            raise MeshError(
+                f"The code column `{code_field}` cannot code the areas: it {problem}. Every "
+                "area needs a code of its own. Pick another column, or leave the code to be "
+                "found automatically."
+            )
         return MeshSpec(
             source=FILE,
             upload=spec.upload,
@@ -184,6 +200,29 @@ def resolve(mesh_id: str, name_field: str = "", code_field: str = "") -> MeshSpe
             code_field=code_field,
         )
     return spec
+
+
+def _code_problem_of(upload_id: str, upload: dict, column: str) -> str:
+    """
+    Why `column` of an upload cannot code its areas, or "" when it can.
+
+    From the record, which says so for every column since uploads were
+    checked for it. An older record does not, and then the kept file is read
+    again; when even that fails the choice is left to the engine, which
+    checks it too.
+    """
+    if "codeColumns" in upload:
+        if column in upload.get("codeColumns", []):
+            return ""
+        return str(upload.get("codeProblems", {}).get(column) or "does not code every area")
+    try:
+        frame = _read_frame(_upload_dir(upload_id) / str(upload.get("file", "")),
+                            str(upload.get("format", "")))
+    except (MeshError, OSError):
+        return ""
+    if column not in frame.columns:
+        return ""
+    return _code_problem(frame[frame.geometry.geom_type.isin(list(_POLYGONAL))][column])
 
 
 def label_of(spec: MeshSpec) -> str:
@@ -208,15 +247,12 @@ def legacy_id(mesh_id: str) -> str:
     The mesh a project created before meshes reached the engine runs on.
 
     Those projects stored a slug of a Natural Earth 110m name (`colombia`,
-    `dem_rep_congo`) and every one of them ran on the engine's Colombia
-    boundaries, whatever it said. So:
-
-    * `colombia` is `dane_colombia`, which is exactly what it has always run
-      on, and keeps it running the same way;
-    * another slug is that country from Natural Earth, when the 110m file
-      still has it (its ADM0_A3 is the 10m code);
-    * anything else, including an empty id or the name of a file the old
-      mocked upload made up, is `dane_colombia`, which is what it ran on.
+    `dem_rep_congo`), an empty id, or the name of a file the old mocked
+    upload made up. Whatever it said, the mesh never reached the engine, so
+    every one of them ran on the engine's Colombia boundaries: each is
+    `dane_colombia`, and keeps running exactly as it always has. Reading
+    `uruguay` as Uruguay instead would rebuild its master on another area,
+    drop its sea and refuse its sea fills, all without anyone asking.
 
     An id already in the current form is returned as it is.
     """
@@ -224,13 +260,7 @@ def legacy_id(mesh_id: str) -> str:
     try:
         return parse_id(raw).id
     except MeshError:
-        pass
-    if raw.lower() == "colombia":
         return DANE
-    code = countries.code_for_legacy_slug(raw)
-    if code and countries.find(code) is not None:
-        return f"{NATURAL_EARTH}:{code}"
-    return DANE
 
 
 def spec_of(project: store.ProjectRow) -> MeshSpec:
@@ -377,12 +407,29 @@ def _remove_upload_dir(folder: Path) -> None:
 
 
 def read_upload(upload_id: str) -> dict | None:
-    """What was recorded about an upload when it arrived, or None."""
+    """
+    What was recorded about an upload when it arrived, or None.
+
+    An upload from before `RECORD_FILE` is read from `LEGACY_RECORD_FILE`,
+    unless its own file had that name: then the record was written over the
+    outline, nothing of the mesh is left, and it reads as gone (so the user is
+    asked to upload it again rather than shown an error from the engine).
+    """
     try:
-        meta = _upload_dir(upload_id) / "mesh.json"
-        return json.loads(meta.read_text(encoding="utf-8"))
-    except (MeshError, OSError, json.JSONDecodeError):
+        folder = _upload_dir(upload_id)
+    except MeshError:
         return None
+    for name in (RECORD_FILE, LEGACY_RECORD_FILE):
+        try:
+            record = json.loads((folder / name).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(record, dict):
+            return None
+        if name == LEGACY_RECORD_FILE and record.get("file") == LEGACY_RECORD_FILE:
+            return None
+        return record
+    return None
 
 
 def _safe_name(original: str) -> str:
@@ -486,19 +533,93 @@ def _unzip_shapefile(archive: Path, folder: Path) -> str:
 @dataclass
 class _Reading:
     features: int
+    #: The columns that can name a feature: text, or whole numbers.
     columns: list[str] = field(default_factory=list)
+    #: Those that can also code one: a value for every polygon, none repeated.
+    code_columns: list[str] = field(default_factory=list)
+    #: Why each of the others cannot, as the end of a sentence about it.
+    code_problems: dict[str, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
 
-def _string_columns(frame) -> list[str]:
+def cell_text(value) -> str:
+    """
+    One value of a name or code column as text, the way the engine reads it
+    (`str(value).strip()`), except that a missing value is empty (the engine
+    would make `nan` of a missing float, a code nobody chose) and a whole
+    number stored as a float reads `5001` and not `5001.0`.
+    """
+    import numpy as np  # noqa: PLC0415 (lazy, with geopandas)
+    import pandas as pd  # noqa: PLC0415
+
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass  # not a scalar: a list or a mapping in a GeoJSON property
+    if isinstance(value, (float, np.floating)) and float(value).is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+def _is_whole_number_floats(series) -> bool:
+    """A float column whose every value is a whole number (and there is one)."""
+    import pandas as pd  # noqa: PLC0415
+
+    if not pd.api.types.is_float_dtype(series):
+        return False
+    present = series.dropna()
+    if present.empty:
+        return False
+    return bool(((present % 1) == 0).all())
+
+
+def _label_columns(frame) -> list[str]:
+    """
+    The columns that can name or code each feature: text, or whole numbers
+    (a municipality code is often stored as a number, and a GeoJSON or a
+    GeoPackage may store it as a float). A column of fractions is a measure,
+    a true or false a flag: neither is offered.
+    """
     import pandas as pd  # noqa: PLC0415 (lazy, with geopandas)
 
     geometry = frame.geometry.name
-    return [
-        str(column) for column in frame.columns
-        if column != geometry
-        and (pd.api.types.is_string_dtype(frame[column]) or frame[column].dtype == object)
-    ]
+    kept = []
+    for column in frame.columns:
+        if column == geometry:
+            continue
+        series = frame[column]
+        if pd.api.types.is_bool_dtype(series):
+            continue
+        if (pd.api.types.is_string_dtype(series) or series.dtype == object
+                or pd.api.types.is_integer_dtype(series) or _is_whole_number_floats(series)):
+            kept.append(str(column))
+    return kept
+
+
+def _code_problem(values) -> str:
+    """
+    Why a column cannot code the features, or "" when it can.
+
+    The engine's own rule for `MESH_CODE_FIELD`, checked here first so the
+    choice is refused when it is made rather than at the run's third step:
+    every polygon needs a code, and no two the same.
+    """
+    texts = [cell_text(value) for value in values]
+    empty = sum(1 for text in texts if not text)
+    if empty:
+        return f"has {empty} empty value{'s' if empty != 1 else ''}"
+    seen: set[str] = set()
+    repeated: set[str] = set()
+    for text in texts:
+        (repeated if text in seen else seen).add(text)
+    if repeated:
+        listed = sorted(repeated)
+        more = f" and {len(listed) - 5} more" if len(listed) > 5 else ""
+        return f"has repeated values ({', '.join(listed[:5])}{more})"
+    return ""
 
 
 def _guess(columns: list[str], hints: tuple[str, ...]) -> str:
@@ -514,6 +635,34 @@ def _guess(columns: list[str], hints: tuple[str, ...]) -> str:
     return ""
 
 
+def _read_frame(path: Path, kind: str):
+    """The kept file as the engine reads it. Raises MeshError when it cannot be read."""
+    import geopandas as gpd  # noqa: PLC0415 (a couple of seconds, only when uploading)
+
+    try:
+        if kind == "GeoParquet":
+            return gpd.read_parquet(path)
+        if kind == "GeoPackage":
+            import pyogrio  # noqa: PLC0415
+
+            layers = pyogrio.list_layers(path)
+            if len(layers) > 1:
+                names = ", ".join(str(layer[0]) for layer in layers[:5])
+                raise MeshError(
+                    f"The GeoPackage has {len(layers)} layers ({names}). A mesh is one "
+                    "layer: save that one on its own."
+                )
+        return gpd.read_file(path)
+    except MeshError:
+        raise
+    except Exception as error:  # noqa: BLE001 (whatever the reader says, it is unreadable)
+        reason = str(error).strip().splitlines()[0][:200] if str(error).strip() else type(error).__name__
+        raise MeshError(f"The file could not be read as {kind}: {reason}") from error
+
+
+_POLYGONAL = ("Polygon", "MultiPolygon")
+
+
 def _read_and_check(path: Path, kind: str) -> _Reading:
     """
     Read the kept file the way the engine will and check it can be a mesh:
@@ -522,34 +671,18 @@ def _read_and_check(path: Path, kind: str) -> _Reading:
     A file without a coordinate system is accepted only when every coordinate
     is a longitude and a latitude, and then EPSG:4326 is written into the kept
     copy, so the engine reads the same assumption rather than guessing again.
+
+    A column of whole numbers stored as floats is written back to the kept
+    copy as integers, for the same reason: the engine reads a code as
+    `str(value)`, and would make `5001.0` of `5001`.
     """
-    import geopandas as gpd  # noqa: PLC0415 (a couple of seconds, only when uploading)
-
-    try:
-        if kind == "GeoParquet":
-            frame = gpd.read_parquet(path)
-        else:
-            if kind == "GeoPackage":
-                import pyogrio  # noqa: PLC0415
-
-                layers = pyogrio.list_layers(path)
-                if len(layers) > 1:
-                    names = ", ".join(str(layer[0]) for layer in layers[:5])
-                    raise MeshError(
-                        f"The GeoPackage has {len(layers)} layers ({names}). A mesh is one "
-                        "layer: save that one on its own."
-                    )
-            frame = gpd.read_file(path)
-    except MeshError:
-        raise
-    except Exception as error:  # noqa: BLE001 (whatever the reader says, it is unreadable)
-        reason = str(error).strip().splitlines()[0][:200] if str(error).strip() else type(error).__name__
-        raise MeshError(f"The file could not be read as {kind}: {reason}") from error
+    frame = _read_frame(path, kind)
 
     if len(frame) == 0:
         raise MeshError("The file has no features in it.")
     types = frame.geometry.geom_type
-    polygons = int(types.isin(["Polygon", "MultiPolygon"]).sum())
+    is_polygon = types.isin(list(_POLYGONAL))
+    polygons = int(is_polygon.sum())
     if polygons == 0:
         found = ", ".join(sorted({str(t) for t in types.dropna().unique()})) or "no geometry"
         raise MeshError(
@@ -557,7 +690,16 @@ def _read_and_check(path: Path, kind: str) -> _Reading:
             "Polygon or MultiPolygon features."
         )
 
-    reading = _Reading(features=polygons, columns=_string_columns(frame))
+    columns = _label_columns(frame)
+    # Only the polygons become areas: the engine leaves the rest out first.
+    kept_rows = frame[is_polygon]
+    problems = {column: _code_problem(kept_rows[column]) for column in columns}
+    reading = _Reading(
+        features=polygons,
+        columns=columns,
+        code_columns=[column for column in columns if not problems[column]],
+        code_problems={column: problem for column, problem in problems.items() if problem},
+    )
     others = int(types.notna().sum()) - polygons
     if others:
         reading.notes.append(
@@ -565,6 +707,14 @@ def _read_and_check(path: Path, kind: str) -> _Reading:
             "not a polygon will be left out of the mesh."
         )
 
+    # Whole numbers stored as floats, without a gap: with one, the column
+    # cannot be an integer column in every format, and cannot code anyway.
+    whole = [column for column in columns
+             if _is_whole_number_floats(frame[column]) and frame[column].notna().all()]
+    for column in whole:
+        frame[column] = frame[column].astype("int64")
+
+    assumed_crs = False
     if frame.crs is None:
         minx, miny, maxx, maxy = (float(v) for v in frame.total_bounds)
         in_range = all(math.isfinite(v) for v in (minx, miny, maxx, maxy)) and (
@@ -576,30 +726,38 @@ def _read_and_check(path: Path, kind: str) -> _Reading:
                 "and latitudes, so where it is cannot be known. Save it with one (for a "
                 "shapefile, include its .prj)."
             )
-        _write_wgs84(path, kind, frame)
+        frame = frame.set_crs(4326)
+        assumed_crs = True
         reading.notes.append(
             "The file has no coordinate system. Its coordinates are longitudes and "
             "latitudes, so EPSG:4326 (WGS 84) is assumed."
         )
+    if whole or assumed_crs:
+        _write_kept(path, kind, frame, columns_changed=bool(whole))
     return reading
 
 
-def _write_wgs84(path: Path, kind: str, frame) -> None:
-    """Record the assumed EPSG:4326 in the kept copy itself."""
-    if kind == "Shapefile":
+def _write_kept(path: Path, kind: str, frame, *, columns_changed: bool) -> None:
+    """
+    Write what was assumed or corrected into the kept copy itself. A
+    shapefile that only needed its coordinate system gets a `.prj` and keeps
+    the rest of its parts as they came.
+    """
+    if kind == "Shapefile" and not columns_changed:
         from pyproj import CRS  # noqa: PLC0415
 
         path.with_suffix(".prj").write_text(
             CRS.from_epsg(4326).to_wkt(version="WKT1_ESRI"), encoding="utf-8"
         )
         return
-    located = frame.set_crs(4326)
     if kind == "GeoParquet":
-        located.to_parquet(path)
+        frame.to_parquet(path)
     elif kind == "GeoPackage":
-        located.to_file(path, driver="GPKG")
+        frame.to_file(path, driver="GPKG")
+    elif kind == "Shapefile":
+        frame.to_file(path, driver="ESRI Shapefile")
     else:
-        located.to_file(path, driver="GeoJSON")
+        frame.to_file(path, driver="GeoJSON")
 
 
 def save_upload(original_name: str, source: BinaryIO) -> dict:
@@ -644,12 +802,17 @@ def save_upload(original_name: str, source: BinaryIO) -> dict:
             "format": kind,
             "featureCount": reading.features,
             "columns": reading.columns,
+            "codeColumns": reading.code_columns,
+            "codeProblems": reading.code_problems,
             "nameField": _guess(reading.columns, ("name", "nombre", "shapename", "nom", "nm")),
-            "codeField": _guess(reading.columns, ("code", "codigo", "shapeid", "iso", "cod", "id")),
+            # Only a column that can code every area is suggested: the
+            # suggestion is what the form sends unless someone changes it.
+            "codeField": _guess(reading.code_columns,
+                                ("code", "codigo", "shapeid", "iso", "cod", "id")),
             "notes": reading.notes,
             "createdAt": store.now(),
         }
-        (folder / "mesh.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        (folder / RECORD_FILE).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         return record
     except BaseException:
         _remove_upload_dir(folder)
@@ -672,6 +835,7 @@ def as_mesh(record: dict) -> dict[str, object]:
         "format": record.get("format", ""),
         "featureCount": record.get("featureCount"),
         "columns": record.get("columns", []),
+        "codeColumns": record.get("codeColumns", record.get("columns", [])),
         "nameField": record.get("nameField", ""),
         "codeField": record.get("codeField", ""),
         "notes": record.get("notes", []),
@@ -712,7 +876,7 @@ def materialise(project: store.ProjectRow) -> str:
         for name in record.get("files", []):
             # Names written by `save_upload`, but read back from a file, so
             # checked again before they are joined to a path.
-            if not name or name != _safe_name(name) or name == "mesh.json":
+            if not name or name != _safe_name(name) or name == RECORD_FILE:
                 return f"The upload's record names a file it should not ({name})."
             source_file, target_file = source_dir / name, target / name
             if target_file.exists():
@@ -726,3 +890,20 @@ def materialise(project: store.ProjectRow) -> str:
     except OSError as error:
         return f"The mesh could not be copied into the project's folder: {error}"
     return ""
+
+
+def forget_upload(project: store.ProjectRow) -> None:
+    """
+    Remove the upload a deleted project was created on, once no other
+    project is on it. Only this app's own copy in `data/meshes/` goes: the
+    one in the project's folder is the user's, and stays with the folder.
+    Called after the project's row is gone, so it no longer counts itself.
+    """
+    spec = spec_of(project)
+    if spec.source != FILE or not _UPLOAD_ID.match(spec.upload):
+        return
+    for other in store.read_projects():
+        other_spec = spec_of(other)
+        if other_spec.source == FILE and other_spec.upload == spec.upload:
+            return
+    _remove_upload_dir(_upload_dir(spec.upload))

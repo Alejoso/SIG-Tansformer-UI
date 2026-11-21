@@ -15,16 +15,15 @@ business; here a plain column read through `pyarrow` is all that is needed.
 The 110m file vendored in `reference/` is kept for two jobs. It is the
 fallback for names when the engine's file is missing (an engine checkout
 older than 2026-11-20), so the picker still lists countries; a run on one of
-them would then fail in the engine, which says why. And it is how projects
-created before the 10m list existed are read: their `mesh_id` is a slug of
-the 110m `NAME` (`colombia`, `dem_rep_congo`), which `code_for_legacy_slug`
-turns into the ADM0_A3 the engine knows. GeoPandas used to ship that file as
+them would then fail in the engine, which says why. (Projects created before
+the 10m list existed stored a slug of the 110m `NAME`, `colombia` or
+`dem_rep_congo`, but they all ran on Colombia and are read as Colombia (DANE):
+see `meshes.legacy_id`.) GeoPandas used to ship that file as
 `naturalearth_lowres`, but `geopandas.datasets` was removed in GeoPandas 1.0.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -169,27 +168,6 @@ def search_terms(country: Country) -> str:
     """
     terms = {country.name, country.label, country.code, country.iso3, country.continent}
     return " ".join(sorted(term for term in terms if term))
-
-
-def _slug(name: str) -> str:
-    """`Dem. Rep. Congo` to `dem_rep_congo`. Names are unique in the 110m set."""
-    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
-
-
-def code_for_legacy_slug(slug: str) -> str | None:
-    """
-    The ADM0_A3 of a project created when ids were slugs of the 110m `NAME`.
-
-    Read from the vendored 110m file, which is where those slugs came from.
-    None when nothing there has that slug.
-    """
-    wanted = slug.strip().lower()
-    if not wanted:
-        return None
-    for _, row in _frame_110m().iterrows():
-        if _slug(_text(row.get("NAME"))) == wanted:
-            return _text(row.get("ADM0_A3")) or None
-    return None
 
 
 def reset_cache() -> None:

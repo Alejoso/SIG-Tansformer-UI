@@ -130,3 +130,238 @@ def test_the_record_from_the_shared_database_is_not_trusted(engine, state_file, 
                                       "stale": [], "lastOutputs": []}), encoding="utf-8")
     reset, _ = engine_state.plan_reload(_row("p-a", tmp_path / "a"))
     assert reset
+
+
+# ── refusing up front what the engine would refuse mid-run ────────────────
+
+
+class _Started(Exception):
+    """Raised by the stand-in runners: the route got as far as starting a run."""
+
+    def __init__(self, **kwargs):
+        super().__init__("started")
+        self.kwargs = kwargs
+
+
+@pytest.fixture
+def ready_engine(engine, data_dir, monkeypatch):
+    """
+    An engine that looks ready, with every call to Docker captured instead of
+    made, and runners that only record what they were asked to start.
+    """
+    import subprocess
+
+    from app import model_store, outputs, runs, settings as project_settings
+
+    (engine / pipeline.RUN_SCRIPT).write_text(
+        'DATA_DIR="${DATA_DIR:-${ROOT_DIR}/data}"\n', encoding="utf-8"
+    )
+    calls: list[dict] = []
+
+    def fake_run(command, cwd=None, timeout=30, env=None):
+        calls.append({"command": command, "env": env})
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(pipeline, "_run", fake_run)
+    monkeypatch.setattr(pipeline, "machine_fit", lambda env: {})
+    monkeypatch.setattr(pipeline, "status", lambda: pipeline.PipelineStatus(
+        pipelineDir=str(engine), pipelineFound=True, dockerAvailable=True,
+        composeAvailable=True, appRunning=True, dbRunning=True,
+    ))
+    monkeypatch.setattr(project_settings, "apply_to_engine", lambda project: False)
+    monkeypatch.setattr(main.inputs, "scan", lambda project: [])
+    monkeypatch.setattr(outputs, "scan_variables", lambda project: ["tec/TEC_001"])
+    monkeypatch.setattr(model_store, "read_model", lambda project: ("", False))
+
+    def fake_start(*args, **kwargs):
+        raise _Started(**kwargs)
+
+    monkeypatch.setattr(runs, "start", fake_start)
+    monkeypatch.setattr(runs, "start_model", fake_start)
+    return calls
+
+
+def _stored(project_id: str, folder: Path) -> store.ProjectRow:
+    folder.mkdir(parents=True, exist_ok=True)
+    row = store.ProjectRow(id=project_id, name=project_id, mesh_id="dane_colombia",
+                           mesh_label="", mesh_source="dane_colombia", out_folder=str(folder))
+    store.add_project(row)
+    return row
+
+
+def _up_calls(calls: list[dict]) -> list[dict]:
+    return [call for call in calls if call["command"][:4] == ["docker", "compose", "up", "-d"]]
+
+
+def test_a_model_run_before_the_project_was_processed_is_refused(ready_engine, state_file, tmp_path):
+    from fastapi import HTTPException
+
+    row = _stored("p-never", tmp_path / "never")
+    with pytest.raises(HTTPException) as refused:
+        main.start_model_run(row.id)
+    assert refused.value.status_code == 400
+    assert "Process" in refused.value.detail and "database" in refused.value.detail
+    # Nothing was started, not even the containers.
+    assert _up_calls(ready_engine) == []
+
+
+def test_a_model_run_after_a_failed_first_run_is_refused(ready_engine, state_file, tmp_path):
+    from fastapi import HTTPException
+
+    row = _stored("p-failed", tmp_path / "failed")
+    engine_state.record_run(row.id, "2026-11-20_10-00_rf_001", False, [])
+    with pytest.raises(HTTPException) as refused:
+        main.start_model_run(row.id)
+    assert refused.value.status_code == 400
+
+
+def test_a_model_run_after_processing_starts(ready_engine, state_file, tmp_path):
+    row = _stored("p-done", tmp_path / "done")
+    engine_state.record_run(row.id, "2026-11-20_10-00_rf_001", True, [])
+    # A variable removed since leaves the record stale, but the database is there.
+    engine_state.mark_stale(row.id)
+    with pytest.raises(_Started):
+        main.start_model_run(row.id)
+
+
+def test_a_record_written_before_the_processed_flag_still_counts(ready_engine, state_file, tmp_path):
+    row = _stored("p-old", tmp_path / "old")
+    state_file.write_text(json.dumps({"projects": {row.id: {
+        "lastExecutionId": "2026-11-20_10-00_rf_001", "stale": False, "lastOutputs": []}}}),
+        encoding="utf-8")
+    with pytest.raises(_Started):
+        main.start_model_run(row.id)
+
+
+@pytest.mark.parametrize("env_data_dir", ["", "DATA_DIR=./data\n", "DATA_DIR=elsewhere\n"])
+def test_a_project_on_the_engine_data_folder_is_refused(ready_engine, state_file, engine,
+                                                        env_data_dir):
+    from fastapi import HTTPException
+
+    if env_data_dir:
+        with (engine / ".env").open("a", encoding="utf-8") as env:
+            env.write(env_data_dir)
+    main_folder = engine / ("elsewhere" if "elsewhere" in env_data_dir else "data")
+    main_folder.mkdir()
+    # Through a symlink, as the engine compares real paths.
+    link = engine.parent / "linked-data"
+    link.symlink_to(main_folder)
+    row = _stored("p-main", link)
+    engine_state.record_run(row.id, "x", True, [])
+    for start in (main.start_processing, main.start_model_run):
+        with pytest.raises(HTTPException) as refused:
+            start(row.id)
+        assert refused.value.status_code == 400
+        assert "engine's own data folder" in refused.value.detail
+    assert _up_calls(ready_engine) == []
+
+
+def test_creating_a_project_on_the_engine_data_folder_is_refused(ready_engine, engine):
+    from fastapi import HTTPException
+
+    from app.models import NewProjectPayload
+
+    (engine / "data").mkdir()
+    with pytest.raises(HTTPException) as refused:
+        main.create_project(NewProjectPayload(name="X", meshId="dane_colombia",
+                                              outFolder=str(engine / "data" / ".")))
+    assert refused.value.status_code == 400
+    assert "engine's own data folder" in refused.value.detail
+    assert store.read_projects() == []
+
+
+def test_a_folder_of_its_own_is_not_refused(ready_engine, state_file, tmp_path):
+    row = _stored("p-own", tmp_path / "own")
+    with pytest.raises(_Started):
+        main.start_processing(row.id)
+
+
+def test_processing_and_the_model_bring_the_container_up_the_same_way(
+    ready_engine, state_file, tmp_path, monkeypatch
+):
+    """
+    compose recreates the app container whenever its configuration changes,
+    and `DATABASE_URL` is part of it. `run_full.sh` brings the containers up
+    with the URL it is given, the project's; `compose_up` has to use the same
+    one, or every switch between processing and the model recreates it.
+    """
+    from app import settings as project_settings
+
+    row = _stored("p-same", tmp_path / "same")
+    engine_state.record_run(row.id, "x", True, [])
+    with pytest.raises(_Started):
+        main.start_model_run(row.id)
+    model_up = _up_calls(ready_engine)
+    assert len(model_up) == 1
+    wanted = pipeline.project_database_env(row.id)["DATABASE_URL"]
+    assert model_up[0]["env"]["DATABASE_URL"] == wanted
+    # What run_full.sh is handed, and so brings the containers up with.
+    full = pipeline.run_full_env(extra=main._engine_env(row))
+    assert full["DATABASE_URL"] == wanted
+    assert model_up[0]["env"]["DATA_DIR"] == str(tmp_path / "same")
+
+    # Processing after a change of resolution brings them up itself, the same way.
+    monkeypatch.setattr(project_settings, "apply_to_engine", lambda project: True)
+    with pytest.raises(_Started):
+        main.start_processing(row.id)
+    process_up = _up_calls(ready_engine)[1:]
+    assert len(process_up) == 1 and process_up[0]["env"]["DATABASE_URL"] == wanted
+
+
+def test_stage_commands_use_the_project_database(engine):
+    stage = next(stage for stage in pipeline.STAGES if stage.needs_db)
+    command = pipeline.stage_command(stage, "2026-11-20_10-00_rf_001", "p-abc123")
+    assert "DATABASE_URL=" + pipeline.database_url("sigdb_maphex_abc123") in command
+    assert not any(part.endswith("/sigdb") for part in command)
+
+
+# ── the record is read, changed and written under a lock ──────────────────
+
+
+def test_concurrent_writes_to_the_record_lose_nothing(state_file, monkeypatch):
+    """
+    `record_run` (a run finishing) and `mark_stale` (a variable removed) can
+    happen at once. Without a lock both read the file, and the second write
+    drops what the first added.
+    """
+    import threading
+
+    original = engine_state._write_all
+    first_writing = threading.Event()
+    second_done = threading.Event()
+
+    def slow_first_write(states):
+        if threading.current_thread().name == "first":
+            first_writing.set()
+            # Without a lock the second finishes in here; with one it waits
+            # for this write, so this only times out.
+            second_done.wait(timeout=0.5)
+        original(states)
+
+    monkeypatch.setattr(engine_state, "_write_all", slow_first_write)
+    first = threading.Thread(name="first",
+                             target=lambda: engine_state.record_run("p-a", "x", True, []))
+    first.start()
+    assert first_writing.wait(timeout=5)
+
+    def second():
+        engine_state.mark_stale("p-b")
+        second_done.set()
+
+    other = threading.Thread(name="second", target=second)
+    other.start()
+    first.join(timeout=5)
+    other.join(timeout=5)
+    assert engine_state.read("p-a") is not None
+    assert engine_state.read("p-b") is not None and engine_state.read("p-b").stale
+
+
+# ── deleting a project ────────────────────────────────────────────────────
+
+
+def test_deleting_a_project_drops_nothing_in_the_engine(ready_engine, tmp_path):
+    """No database is touched: maphex has no route into the db container."""
+    row = _stored("p-gone", tmp_path / "gone")
+    main.delete_project(row.id)
+    assert store.find_project(row.id) is None
+    assert ready_engine == []

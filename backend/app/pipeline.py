@@ -322,7 +322,7 @@ def _compose_db_name(fallback: str) -> str:
 
 
 def compose_up(
-    data_dir: Path | None = None, *, recreate: bool = False
+    data_dir: Path | None = None, *, recreate: bool = False, project_id: str = ""
 ) -> subprocess.CompletedProcess[str] | None:
     """
     Bring up Postgres and the idle app container, mounted on `data_dir`.
@@ -330,8 +330,17 @@ def compose_up(
     The folders are made first: this is the call that would otherwise have
     Docker create them as root. See `prepare_host_folders`.
 
-    The mount matters for anything using `compose exec` — the model runner
-    does — because the container holds whichever project was mounted last.
+    The mount matters for anything using `compose exec` (the model runner
+    does), because the container holds whichever project was mounted last.
+
+    `project_id` is the project the containers are brought up for. compose
+    interpolates `DATABASE_URL` into the app container's configuration, and
+    `run_full.sh` brings the containers up with the URL it was handed, the
+    project's own (`project_database_env`). Bringing them up here with any
+    other URL is a configuration change to compose, which recreates the
+    container: every switch between processing and a model run would do it.
+    With the project's URL both agree, and only a change of project (which
+    changes the `/data` mount anyway) recreates it.
 
     `recreate` is for when `.env` has changed. Compose loads it with
     `env_file:` at container-creation time, so a running container keeps the
@@ -339,13 +348,16 @@ def compose_up(
     than depend on compose noticing, the caller that changed the file says so.
     """
     prepare_host_folders(data_dir)
-    env = run_full_env(extra={"DATA_DIR": str(data_dir)} if data_dir else None)
+    extra = {"DATA_DIR": str(data_dir)} if data_dir else {}
+    if project_id:
+        extra.update(project_database_env(project_id))
+    env = run_full_env(extra=extra or None)
     env.update(machine_fit(env))
     # `POSTGRES_DB` only reaches the db service (its first database and its
-    # healthcheck); the app reads `DATABASE_URL`, worked out above for this
-    # project's database. Handing compose the project's name instead would
-    # change the db service's configuration and recreate Postgres for nothing,
-    # stopping whatever else was using it. The engine's run_full.sh does the same.
+    # healthcheck); the app reads `DATABASE_URL`, set above to this project's
+    # database. Handing compose the project's name instead would change the
+    # db service's configuration and recreate Postgres for nothing, stopping
+    # whatever else was using it. The engine's run_full.sh does the same.
     env["POSTGRES_DB"] = _compose_db_name(env.get("POSTGRES_DB", ""))
     command = ["docker", "compose", "up", "-d"]
     if recreate:
@@ -550,17 +562,21 @@ def _base_database_url() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 
-def stage_command(stage: Stage, execution_id: str, settings: dict[str, str] | None = None) -> list[str]:
+def stage_command(
+    stage: Stage, execution_id: str, project_id: str, settings: dict[str, str] | None = None
+) -> list[str]:
     """
-    The exact command for one stage.
+    The exact command for one stage of a project's run.
 
     Built rather than run so it can be shown, logged and tested without
     starting anything — the pipeline takes hours, and a wrong command is
-    cheaper to catch here.
+    cheaper to catch here. A stage that touches Postgres is pointed at the
+    project's own database (`project_database`), never the main one: the
+    engine refuses to load a project folder there.
     """
     command = ["docker", "compose", "exec", "-T", "-e", f"EXECUTION_ID={execution_id}"]
     if stage.needs_db:
-        command += ["-e", f"DATABASE_URL={database_url()}"]
+        command += ["-e", f"DATABASE_URL={database_url(project_database(project_id))}"]
     for name, value in (settings or {}).items():
         command += ["-e", f"{name}={value}"]
     command += [APP_SERVICE, "python", stage.script, *stage.args]
@@ -797,6 +813,40 @@ def engine_data_dir() -> Path:
     if env.get("TOYTEST") == "1":
         return PIPELINE_DIR / "toytest" / "data"
     return PIPELINE_DIR / "data"
+
+
+def main_data_dir() -> Path:
+    """
+    The engine's main data folder, which belongs to its main database.
+
+    As the engine works it out for the rule it enforces on every run
+    (`project_require_own_folder` in its `app/tools/project_env.sh`): the
+    `DATA_DIR` of its `.env`, relative to its checkout unless absolute, or
+    `./data` when `.env` sets none. Not `engine_data_dir`, which is what an
+    older engine processes whatever it is given.
+    """
+    raw = read_env_file().get("DATA_DIR", "").strip()
+    if not raw:
+        return PIPELINE_DIR / "data"
+    if raw.startswith("/"):
+        return Path(raw)
+    return PIPELINE_DIR / (raw[2:] if raw.startswith("./") else raw)
+
+
+def is_main_data_dir(folder: Path) -> bool:
+    """
+    Whether `folder` is the engine's main data folder, symlinks followed.
+
+    Every project here runs on a database of its own, and the engine refuses
+    a run whose database is not the main one but whose folder is the main
+    one (its master and model status would land in the production data). It
+    says so in Spanish halfway through the run; this lets the app say it
+    first. Compared on real paths, as the engine does with `realpath -m`.
+    """
+    try:
+        return folder.resolve() == main_data_dir().resolve()
+    except (OSError, RuntimeError):
+        return False
 
 
 def reload_env(*, reset: bool, rebuild_everything: bool = False) -> dict[str, str]:

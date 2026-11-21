@@ -318,7 +318,7 @@ export function NewProjectScreen() {
                   style={{ flex: 1, minWidth: 0 }}
                 >
                   <option value="">Code: find it automatically</option>
-                  {(picked.columns ?? []).map((column) => (
+                  {(picked.codeColumns ?? picked.columns ?? []).map((column) => (
                     <option key={column} value={column}>
                       Code: {column}
                     </option>
@@ -327,7 +327,8 @@ export function NewProjectScreen() {
               </div>
               <p className="field-hint muted-55">
                 {picked.featureCount ?? 0} area{picked.featureCount === 1 ? '' : 's'} in this{' '}
-                {picked.format || 'file'}. The columns that name and code each one are optional.
+                {picked.format || 'file'}. The columns that name and code each one are optional; a code
+                column needs a value for every area, none repeated.
                 {(picked.notes ?? []).map((note) => ` ${note}`).join('')}
               </p>
             </div>

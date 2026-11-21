@@ -3,7 +3,8 @@
  *
  * Colombia (DANE) comes first; a Natural Earth country offers geoBoundaries
  * detail only when it has an ISO code, with the attribution and the note
- * that the first run downloads it; an uploaded outline offers its columns.
+ * that the first run downloads it; an uploaded outline offers its columns,
+ * and as the code only those with a value for every area and none repeated.
  * A project created on a mesh other than DANE says on the Data screen that
  * it has no sea, and refuses a sea fill on the server.
  *
@@ -23,10 +24,19 @@ const OUTLINE = {
   features: [
     {
       type: 'Feature',
-      properties: { nombre: 'Norte', codigo: 'N1' },
+      properties: { nombre: 'Norte', codigo: 'N1', zona: 'A' },
       geometry: {
         type: 'Polygon',
         coordinates: [[[-74, 4], [-73, 4], [-73, 5], [-74, 5], [-74, 4]]],
+      },
+    },
+    {
+      type: 'Feature',
+      // `zona` repeats, so it can name an area but not code one.
+      properties: { nombre: 'Sur', codigo: 'S1', zona: 'A' },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[-73, 4], [-72, 4], [-72, 5], [-73, 5], [-73, 4]]],
       },
     },
   ],
@@ -97,6 +107,12 @@ export async function run() {
       columns.join(', '));
     check('the name column is suggested',
       (await page.locator('#project-mesh-name').inputValue()) === 'nombre');
+    const codes = await page.locator('#project-mesh-code option').allInnerTexts();
+    check('a repeated column is not offered as the code',
+      codes.includes('Code: codigo') && !codes.includes('Code: zona') && columns.includes('Name: zona'),
+      codes.join(', '));
+    check('the code column is suggested',
+      (await page.locator('#project-mesh-code').inputValue()) === 'codigo');
 
     const projectName = `Mesh check ${Date.now()}`;
     await page.locator('#project-name').fill(projectName);

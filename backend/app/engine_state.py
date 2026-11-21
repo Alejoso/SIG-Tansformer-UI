@@ -29,8 +29,10 @@ database.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,6 +40,34 @@ from . import outputs, pipeline, store
 
 #: Beside the CSVs, for the same reason: you can open it and read it.
 STATE_FILE = store.DATA_DIR / "engine_state.json"
+
+
+@contextmanager
+def _locked():
+    """
+    Hold the record while it is read, changed and written back.
+
+    A run finishing (`record_run`, on the run's thread) and a variable being
+    removed (`mark_stale`, on a request) can happen at the same moment: both
+    would read the file, and the second write would drop what the first
+    added. The lock is on a file beside it rather than on the record itself,
+    which is replaced on every write, and `flock` holds across processes as
+    well as threads (each call opens its own descriptor).
+    """
+    lock_path = STATE_FILE.with_name(STATE_FILE.name + ".lock")
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = lock_path.open("a")
+    except OSError:
+        # No lock is no worse than before; the record is never essential.
+        yield
+        return
+    with handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 @dataclass
@@ -54,6 +84,12 @@ class ProjectState:
     #: a result removed outside this app would otherwise stay in the master
     #: table with nothing behind it.
     lastOutputs: list[str] = field(default_factory=list)
+    #: A run on the project's database has finished at least once, so the
+    #: database exists and holds a master. The engine creates the database on
+    #: the first processing run and the model runner does not, so a model run
+    #: without this would fail on "database does not exist". Kept through a
+    #: later failed run or a removed variable: neither drops the database.
+    processed: bool = False
 
 
 def _read_all() -> dict[str, ProjectState]:
@@ -71,10 +107,14 @@ def _read_all() -> dict[str, ProjectState]:
     for project_id, item in projects.items():
         if not isinstance(item, dict):
             continue
+        stale = bool(item.get("stale", False))
         states[str(project_id)] = ProjectState(
             lastExecutionId=str(item.get("lastExecutionId", "")),
-            stale=bool(item.get("stale", False)),
+            stale=stale,
             lastOutputs=[str(x) for x in item.get("lastOutputs", [])],
+            # A record from before this flag: only a run that finished leaves
+            # one that is not stale.
+            processed=bool(item.get("processed", not stale)),
         )
     return states
 
@@ -99,11 +139,18 @@ def _write_all(states: dict[str, ProjectState]) -> None:
 
 def mark_stale(project_id: str) -> None:
     """Record that this project needs its tables cleared before loading again."""
-    states = _read_all()
-    state = states.setdefault(project_id, ProjectState())
-    if not state.stale:
-        state.stale = True
-        _write_all(states)
+    with _locked():
+        states = _read_all()
+        state = states.setdefault(project_id, ProjectState())
+        if not state.stale:
+            state.stale = True
+            _write_all(states)
+
+
+def is_processed(project_id: str) -> bool:
+    """Whether the project's own database exists: see `ProjectState.processed`."""
+    state = read(project_id)
+    return state is not None and state.processed
 
 
 def output_set(project: store.ProjectRow) -> list[str]:
@@ -182,10 +229,13 @@ def record_run(
     stopped halfway through, and a needless clear next time costs seconds
     where a wrong master table costs a result nobody questions.
     """
-    states = _read_all()
-    states[project_id] = ProjectState(
-        lastExecutionId=execution_id,
-        stale=not succeeded,
-        lastOutputs=loaded if loaded is not None else [],
-    )
-    _write_all(states)
+    with _locked():
+        states = _read_all()
+        before = states.get(project_id)
+        states[project_id] = ProjectState(
+            lastExecutionId=execution_id,
+            stale=not succeeded,
+            lastOutputs=loaded if loaded is not None else [],
+            processed=succeeded or (before is not None and before.processed),
+        )
+        _write_all(states)

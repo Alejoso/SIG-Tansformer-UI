@@ -80,8 +80,11 @@ class Mesh(BaseModel):
     # An upload's own description, empty for the rest.
     format: str = ""
     featureCount: int | None = None
-    #: Its text columns, any of which can name or code each feature.
+    #: Its columns of text or whole numbers, any of which can name each feature.
     columns: list[str] = Field(default_factory=list)
+    #: Those that can also code each one: a value for every feature, none
+    #: repeated (the engine's rule). Only these are offered as the code.
+    codeColumns: list[str] = Field(default_factory=list)
     #: The columns that look like a name and a code, as suggestions.
     nameField: str = ""
     codeField: str = ""

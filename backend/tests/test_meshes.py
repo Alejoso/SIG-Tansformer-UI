@@ -159,7 +159,7 @@ def test_upload_geojson(data_dir):
     assert record["featureCount"] == 2
     assert set(record["columns"]) == {"nombre", "codigo"}
     assert record["nameField"] == "nombre" and record["codeField"] == "codigo"
-    assert (folder / "mis_zonas.geojson").is_file() and (folder / "mesh.json").is_file()
+    assert (folder / "mis_zonas.geojson").is_file() and (folder / meshes.RECORD_FILE).is_file()
     # Nothing was written where the name tried to point.
     assert not (data_dir.parent / "Mis Zonas.geojson").exists()
     spec = meshes.resolve(f"file:{record['id']}", name_field="nombre")
@@ -308,7 +308,7 @@ def test_mesh_env_for_each_source(data_dir, fields, expected):
 
 @pytest.mark.parametrize("old_id, expected", [
     ("colombia", "dane_colombia"),
-    ("uruguay", "natural_earth:URY"),
+    ("uruguay", "dane_colombia"),
     ("ireland_5km_mesh.geojson", "dane_colombia"),
     ("", "dane_colombia"),
     ("natural_earth:URY", "natural_earth:URY"),
@@ -325,12 +325,6 @@ def test_legacy_colombia_project_runs_as_before(data_dir, engine_countries, monk
     project = main._to_project(row)
     assert project.meshId == "dane_colombia" and project.meshHasSea is True
     assert project.meshLabel == "Colombia (DANE)"
-
-
-def test_legacy_project_on_another_country(data_dir, engine_countries):
-    row = _row(mesh_id="uruguay", mesh_label="Uruguay")
-    assert meshes.env_for(row)["MESH_COUNTRY"] == "URY"
-    assert meshes.has_sea(row) is False
 
 
 # ── what a mesh without a sea refuses ─────────────────────────────────────
@@ -423,3 +417,175 @@ def test_preparing_another_mesh_is_step_three_of_the_run():
     assert scripts == {"normalize_dane_mgn", "prepare_mesh"}
     assert any(marker == "preparando la malla" and key == "normalize_dane"
                for marker, key, _ in pipeline.STAGE_LOG_MARKERS)
+
+
+# ── an upload named like the record ───────────────────────────────────────
+
+
+@pytest.mark.parametrize("filename", ["mesh.json", "MESH.JSON", "Mesh.json"])
+def test_an_upload_named_like_the_record_keeps_its_geometry(data_dir, tmp_path, filename):
+    body = _geojson([_polygon_feature("Norte", "N1"), _polygon_feature("Sur", "S1", -73.0)])
+    record = meshes.save_upload(filename, io.BytesIO(body))
+    kept = meshes.upload_root() / record["id"] / record["file"]
+    # Still the outline that was uploaded, not the record about it.
+    assert json.loads(kept.read_text(encoding="utf-8"))["type"] == "FeatureCollection"
+    assert meshes.read_upload(record["id"])["id"] == record["id"]
+    folder = tmp_path / "project"
+    row = _row(out_folder=str(folder), **meshes.store_fields(
+        meshes.resolve(f"file:{record['id']}")))
+    assert meshes.materialise(row) == ""
+    copied = folder / "mesh" / record["file"]
+    assert json.loads(copied.read_text(encoding="utf-8"))["type"] == "FeatureCollection"
+
+
+def test_an_upload_from_before_the_record_was_renamed_still_reads(data_dir):
+    body = _geojson([_polygon_feature("Norte", "N1")])
+    record = meshes.save_upload("zones.geojson", io.BytesIO(body))
+    folder = meshes.upload_root() / record["id"]
+    (folder / meshes.RECORD_FILE).rename(folder / "mesh.json")
+    assert meshes.read_upload(record["id"])["file"] == "zones.geojson"
+
+
+def test_an_old_upload_whose_file_the_record_overwrote_is_gone(data_dir):
+    upload_id = "u-0123456789ab"
+    folder = meshes.upload_root() / upload_id
+    folder.mkdir(parents=True)
+    (folder / "mesh.json").write_text(json.dumps(
+        {"id": upload_id, "file": "mesh.json", "files": ["mesh.json"], "columns": []}),
+        encoding="utf-8")
+    assert meshes.read_upload(upload_id) is None
+    with pytest.raises(meshes.MeshError, match="gone"):
+        meshes.resolve(f"file:{upload_id}")
+
+
+# ── every old slug ran on Colombia (DANE) ─────────────────────────────────
+
+
+@pytest.mark.parametrize("old_id", ["uruguay", "dem_rep_congo", "france", "Colombia"])
+def test_every_legacy_slug_is_colombia_dane(engine_countries, old_id):
+    assert meshes.legacy_id(old_id) == "dane_colombia"
+
+
+def test_a_legacy_project_on_another_slug_runs_as_before(data_dir, engine_countries):
+    row = _row(mesh_id="uruguay", mesh_label="Uruguay")
+    assert meshes.env_for(row) == {**EMPTY, "MESH_SOURCE": "dane_colombia"}
+    assert meshes.has_sea(row) is True
+
+
+# ── the code column ───────────────────────────────────────────────────────
+
+
+def _feature(properties: dict, x: float = -74.0) -> dict:
+    return {"type": "Feature", "properties": properties,
+            "geometry": {"type": "Polygon", "coordinates": _square(x)}}
+
+
+def test_only_columns_that_can_code_every_area_are_suggested(data_dir):
+    body = _geojson([
+        _feature({"nombre": "Norte", "codigo": "A", "id": "1", "cod": "X"}),
+        _feature({"nombre": "Sur", "codigo": "A", "id": "", "cod": "Y"}, -73.0),
+    ])
+    record = meshes.save_upload("zones.geojson", io.BytesIO(body))
+    # `codigo` repeats and `id` has an empty value: neither can code the areas.
+    assert record["codeField"] == "cod"
+    assert "codigo" not in record["codeColumns"] and "id" not in record["codeColumns"]
+    assert {"codigo", "id"} <= set(record["columns"])
+    mesh = meshes.as_mesh(record)
+    assert mesh["codeColumns"] == record["codeColumns"]
+
+
+def test_no_code_is_suggested_when_no_column_qualifies(data_dir):
+    body = _geojson([_feature({"codigo": "A"}), _feature({"codigo": "A"}, -73.0)])
+    record = meshes.save_upload("zones.geojson", io.BytesIO(body))
+    assert record["codeField"] == "" and record["codeColumns"] == []
+
+
+def test_picking_a_code_column_with_repeats_or_blanks_is_refused(data_dir, engine_countries):
+    body = _geojson([
+        _feature({"nombre": "Norte", "codigo": "A", "id": None}),
+        _feature({"nombre": "Sur", "codigo": "A", "id": "2"}, -73.0),
+    ])
+    record = meshes.save_upload("zones.geojson", io.BytesIO(body))
+    with pytest.raises(meshes.MeshError, match="repeated.*A"):
+        meshes.resolve(f"file:{record['id']}", code_field="codigo")
+    with pytest.raises(meshes.MeshError, match="empty"):
+        meshes.resolve(f"file:{record['id']}", code_field="id")
+    with pytest.raises(HTTPException) as refused:
+        main.create_project(NewProjectPayload(name="X", meshId=f"file:{record['id']}",
+                                              meshCodeField="codigo"))
+    assert refused.value.status_code == 400 and "codigo" in refused.value.detail
+    # A name column may repeat: two areas can share a name.
+    assert meshes.resolve(f"file:{record['id']}", name_field="nombre").name_field == "nombre"
+
+
+def test_an_upload_recorded_before_code_columns_were_checked_is_checked_on_pick(data_dir):
+    body = _geojson([_feature({"codigo": "A"}), _feature({"codigo": "A"}, -73.0)])
+    record = meshes.save_upload("zones.geojson", io.BytesIO(body))
+    path = meshes.upload_root() / record["id"] / meshes.RECORD_FILE
+    old = json.loads(path.read_text(encoding="utf-8"))
+    for key in ("codeColumns", "codeProblems"):
+        old.pop(key, None)
+    path.write_text(json.dumps(old), encoding="utf-8")
+    with pytest.raises(meshes.MeshError, match="repeated"):
+        meshes.resolve(f"file:{record['id']}", code_field="codigo")
+
+
+def test_integer_columns_can_name_and_code(data_dir, engine_countries):
+    body = _geojson([
+        _feature({"nombre": "Norte", "dane": 5001, "real": 5001.0, "ratio": 0.5}),
+        _feature({"nombre": "Sur", "dane": 5002, "real": 5002.0, "ratio": 1.5}, -73.0),
+    ])
+    record = meshes.save_upload("zones.geojson", io.BytesIO(body))
+    assert {"dane", "real"} <= set(record["columns"])
+    assert {"dane", "real"} <= set(record["codeColumns"])
+    # A column of fractions is a measure, not a name or a code.
+    assert "ratio" not in record["columns"]
+    assert meshes.resolve(f"file:{record['id']}", code_field="dane").code_field == "dane"
+
+
+def test_integer_valued_floats_read_without_a_trailing_zero(data_dir):
+    import geopandas as gpd
+
+    body = _geojson([
+        _feature({"real": 5001.0}),
+        _feature({"real": 5002.0}, -73.0),
+    ])
+    record = meshes.save_upload("zones.geojson", io.BytesIO(body))
+    kept = meshes.upload_root() / record["id"] / record["file"]
+    # The engine reads each code as `str(value)`: from the kept copy that is
+    # "5001", not "5001.0".
+    frame = gpd.read_file(kept)
+    assert [str(value) for value in frame["real"]] == ["5001", "5002"]
+    assert meshes.cell_text(5001.0) == "5001" and meshes.cell_text(float("nan")) == ""
+    assert meshes.cell_text(" N1 ") == "N1" and meshes.cell_text(None) == ""
+
+
+def test_repeated_integer_codes_are_named_without_a_trailing_zero(data_dir):
+    body = _geojson([_feature({"real": 7.0}), _feature({"real": 7.0}, -73.0)])
+    record = meshes.save_upload("zones.geojson", io.BytesIO(body))
+    with pytest.raises(meshes.MeshError) as refused:
+        meshes.resolve(f"file:{record['id']}", code_field="real")
+    assert "(7)" in str(refused.value) and "7.0" not in str(refused.value)
+
+
+# ── deleting a project ────────────────────────────────────────────────────
+
+
+def test_deleting_a_project_removes_its_upload(data_dir, tmp_path, engine_countries, monkeypatch):
+    monkeypatch.setattr(main.inputs, "scan", lambda row: [])
+    body = _geojson([_polygon_feature("Norte", "N1")])
+    record = meshes.save_upload("zones.geojson", io.BytesIO(body))
+    first = main.create_project(NewProjectPayload(
+        name="One", meshId=f"file:{record['id']}", outFolder=str(tmp_path / "one")))
+    second = main.create_project(NewProjectPayload(
+        name="Two", meshId=f"file:{record['id']}", outFolder=str(tmp_path / "two")))
+    folder = meshes.upload_root() / record["id"]
+
+    main.delete_project(first.id)
+    # Still used by the other project.
+    assert folder.is_dir()
+    main.delete_project(second.id)
+    assert not folder.exists()
+    # The copies in the projects' own folders are the user's, and stay.
+    assert (tmp_path / "one" / "mesh" / "zones.geojson").is_file()
+    assert (tmp_path / "two" / "mesh" / "zones.geojson").is_file()

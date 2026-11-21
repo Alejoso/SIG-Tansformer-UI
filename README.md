@@ -180,7 +180,10 @@ Worth knowing before pointing it at an engine you care about:
   (Colombia does); one that leaves them out takes whatever Maphex last wrote.
 - **the engine's container, left on this project.** Processing and model runs
   recreate it mounted on the project's folder and database, and nothing puts
-  it back. The engine's `./MCDA/run_mcda.sh` does not start the containers,
+  it back. Both bring it up with the same configuration for a project (its
+  folder and its own `DATABASE_URL`, as `run_full.sh` does), so going from
+  processing to a model run and back does not recreate it; a change of
+  project does. The engine's `./MCDA/run_mcda.sh` does not start the containers,
   so after a run here it has to check what it finds before scoring.
 - **the project's folder**: `in/`, `out/`, `model/model.yaml`,
   `config/transform.yaml`, `MCDA/runs/`, and `mesh/` for a project created on
@@ -196,9 +199,11 @@ Worth knowing before pointing it at an engine you care about:
   project (`runs.csv`). The engine's logs do not say which project a run was
   for, so after a restart that list is how the Data screen tells its own last
   run from one started in a terminal, a model run, or another project's.
-  Uploaded meshes are kept under `data/meshes/<id>/`, one folder each with a
-  `mesh.json` saying what was found in it; a project uses its own copy, so an
-  upload no project was created on can be deleted by hand.
+  Uploaded meshes are kept under `data/meshes/<id>/`, one folder each with an
+  `upload-record.json` saying what was found in it (a name no upload can
+  take; uploads from before it kept theirs in `mesh.json`). A project uses
+  its own copy, so an upload no project was created on can be deleted by
+  hand, and deleting the last project on an upload deletes the upload.
 
 A project counts as processed (the projects list says *Processed* and opens
 on the map) once any of its variables has a map under `out/`, whoever drew
@@ -877,8 +882,9 @@ read**. When one has gone:
 
 - the project card says how many are missing,
 - the data screen offers **Locate…** to point it at its new home,
-- or **Remove project**, which deletes the CSV rows and *nothing else*. The
-  folders are the user's data; forgetting a project never touches disk.
+- or **Remove project**, which deletes the CSV rows, and the app's own copy
+  of an uploaded mesh no other project is on, and *nothing else*. The
+  folders are the user's data; forgetting a project never touches them.
 
 **Browse** opens a real folder chooser. `POST /api/fs/pick-folder` tries, in
 order: `zenity`, `kdialog`, Python's `tkinter`, and then — under WSL — the
@@ -939,9 +945,14 @@ GeoPandas: it has to be readable, hold at least one Polygon or MultiPolygon
 coordinate system. One without is accepted only when every coordinate is a
 longitude and a latitude: EPSG:4326 is assumed, written into the kept copy
 (a `.prj` for a shapefile) so the engine reads the same thing, and the answer
-says so. The answer lists the file's text columns, and the screen offers them
-as the name and code columns (`MESH_NAME_FIELD`, `MESH_CODE_FIELD`), both
-optional: left empty, the engine finds them.
+says so. The answer lists the file's columns of text or whole numbers, and
+the screen offers them as the name and code columns (`MESH_NAME_FIELD`,
+`MESH_CODE_FIELD`), both optional: left empty, the engine finds them. Only a
+column with a value for every polygon and no value repeated can be the code
+(the engine's own rule, which it would otherwise apply at step 3): only those
+are offered and suggested, and picking another is refused, saying which values
+are empty or repeated. A column of whole numbers stored as floats is written
+back to the kept copy as integers, so a code reads `5001` and not `5001.0`.
 
 Nothing about where an upload is written comes from the upload. The file is
 kept under a name built from the last part of what the browser sent, spelled
@@ -968,12 +979,12 @@ Onshore and offshore need two projects: one on Colombia (DANE) for the sea,
 or one per mesh. The Data screen says the mesh has no sea beside its name.
 
 **Projects made before meshes reached the engine** stored a slug of the
-110m name (`colombia`) and all ran on the DANE boundaries. They are read
-without rewriting the store (`meshes.legacy_id`): `colombia` is
-`dane_colombia`, so they keep running exactly as before; another slug is that
-country from Natural Earth when the 110m file has it; anything else (an empty
-id, a name the old mocked upload made up) is `dane_colombia`, which is what it
-ran on. Their card now says *Colombia (DANE)*.
+110m name (`colombia`, `uruguay`) and all ran on the DANE boundaries, whatever
+the slug said: the mesh never reached the engine. They are read without
+rewriting the store (`meshes.legacy_id`), and every one of them, whatever its
+slug (or an empty id, or a name the old mocked upload made up), is
+`dane_colombia`, so they keep running exactly as before. Their card now says
+*Colombia (DANE)*.
 
 **One database per project.** Every project runs on a database of its own,
 `<main>_maphex_<project id>` next to the engine's main one (`sigdb_maphex_...`
@@ -983,9 +994,14 @@ on the project's first run. So projects never share a master table: switching
 between projects, or between meshes, rebuilds nothing, and a project can
 neither merge its variables into another's nor delete them. The engine also
 refuses to load a project folder into its main database, which belongs to
-its main data folder only. A project's first run after this change builds
-its database from scratch. Deleting a project here does not drop its
-database.
+its main data folder only, and so refuses a project whose folder is its main
+data folder (the `DATA_DIR` of its `.env`, or `./data`): the app says so
+first, in creating the project and before processing or a model run,
+following symlinks as the engine does. A project's first run after this
+change builds its database from scratch, and until a processing run has
+finished on it there is no database for the model, so a model run is refused
+with "Run Process first". Deleting a project here does not drop its database:
+the app has no way into the engine's db container.
 
 ## Working with the current engine
 
@@ -1164,7 +1180,7 @@ No component changes.
 | `listProjects` | `GET /api/projects` | **live** |
 | `getProject` | `GET /api/projects/{id}` | **live** |
 | `createProject` | `POST /api/projects` | **live** |
-| `deleteProject` | `DELETE /api/projects/{id}` | **live** — CSV rows only, never the folders |
+| `deleteProject` | `DELETE /api/projects/{id}` | **live**: CSV rows, and its upload in `data/meshes/` once unused; never the folders |
 | `listMeshes` | `GET /api/meshes` | **live**: Colombia (DANE), then the engine's Natural Earth 10m countries |
 | `uploadMesh` | `POST /api/meshes` | **live**: multipart `file`; checked, kept in `data/meshes/`, answers with a `Mesh` |
 | `pickFolder` | `POST /api/fs/pick-folder` | **live** — zenity / kdialog / tkinter / Windows-under-WSL |

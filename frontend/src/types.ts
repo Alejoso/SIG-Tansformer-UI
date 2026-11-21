@@ -85,8 +85,13 @@ export interface Mesh {
   /** An upload's own description; empty or absent for the rest. */
   format?: string;
   featureCount?: number | null;
-  /** Its text columns, any of which can name or code each feature. */
+  /** Its columns of text or whole numbers, any of which can name each feature. */
   columns?: string[];
+  /**
+   * Those that can also code each one: a value for every feature and none
+   * repeated. Only these are offered as the code; picking another is refused.
+   */
+  codeColumns?: string[];
   /** The columns that look like a name and a code. */
   nameField?: string;
   codeField?: string;

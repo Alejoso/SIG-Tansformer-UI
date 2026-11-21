@@ -50,8 +50,9 @@ export const createProject = (payload: NewProjectPayload): Promise<Project> =>
   request('/projects', { method: 'POST', body: JSON.stringify(payload) });
 
 /**
- * Forget a project. Removes its rows from the CSVs and nothing else — the
- * folders it pointed at are the user's data and are left where they are.
+ * Forget a project. Removes its rows from the CSVs, and the app's own copy of
+ * the mesh it was uploaded on once no other project uses it. The folders it
+ * pointed at are the user's data and are left where they are.
  */
 export const deleteProject = (id: string): Promise<void> =>
   request(`/projects/${id}`, { method: 'DELETE' });

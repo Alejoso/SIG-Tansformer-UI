@@ -10,6 +10,7 @@ being pretend.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -136,6 +137,27 @@ def _require_project(project_id: str) -> store.ProjectRow:
     return row
 
 
+def _main_folder_refusal(folder: Path) -> str:
+    return (
+        f"This project's folder ({folder}) is the engine's own data folder, which belongs "
+        "to the engine's main database. Every project here runs on a database of its own, "
+        "and the engine refuses to write a project's master and results into its main "
+        "folder. Point the project at a folder of its own."
+    )
+
+
+def _refuse_main_folder(folder: Path | None) -> None:
+    """
+    Refuse a project on the engine's main data folder, before anything runs.
+
+    Only where the engine takes the folder it is given: an older one
+    processes its own folder whatever it is handed, and there a project has
+    to point at it (see `start_processing`).
+    """
+    if folder is not None and pipeline.honours_data_dir() and pipeline.is_main_data_dir(folder):
+        raise HTTPException(status_code=400, detail=_main_folder_refusal(folder))
+
+
 @app.get("/api/health")
 def health() -> dict[str, object]:
     return {"ok": True, "store": str(store.DATA_DIR)}
@@ -187,6 +209,11 @@ def create_project(payload: NewProjectPayload) -> Project:
         mesh = meshes.resolve(payload.meshId, payload.meshNameField, payload.meshCodeField)
     except meshes.MeshError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    # Read the way a run will read it (`outputs.data_dir`).
+    if payload.outFolder.strip():
+        _refuse_main_folder(
+            Path(os.path.expandvars(os.path.expanduser(payload.outFolder.strip())))
+        )
     row = store.ProjectRow(
         id=store.new_id("p"),
         name=payload.name,
@@ -217,13 +244,21 @@ def delete_project(project_id: str) -> None:
     """
     Forget a project.
 
-    This removes rows from the CSVs and nothing else. The folders it pointed
-    at are the user's data and are left exactly where they are.
+    This removes its rows from the CSVs, and the uploaded mesh it was created
+    on once no other project uses it: that copy is this app's, in its own
+    data folder. The folders the project pointed at are the user's data and
+    are left exactly where they are, its copy of the mesh among them.
+
+    Its own database in the engine (`pipeline.project_database`) is left
+    too: this app has no way into the engine's db container, only into the
+    app container through the engine's runners.
     """
-    if not store.delete_project(project_id):
+    row = store.find_project(project_id)
+    if row is None or not store.delete_project(project_id):
         raise HTTPException(status_code=404, detail=f"No project {project_id}")
     variable_settings.forget_project(project_id)
     value_columns.forget_project(project_id)
+    meshes.forget_upload(row)
 
 
 # ── the rendered layers ───────────────────────────────────────────────────
@@ -462,6 +497,8 @@ def start_processing(project_id: str, payload: ProcessPayload | None = None) -> 
                 ),
             )
 
+    _refuse_main_folder(folder)
+
     # An uploaded mesh has to be in the project's folder before the engine
     # looks for it there.
     _require_mesh(project)
@@ -476,7 +513,8 @@ def start_processing(project_id: str, payload: ProcessPayload | None = None) -> 
     # container already running keeps the environment it started with — so a
     # change means recreating it before the run can see it.
     if project_settings.apply_to_engine(project):
-        up = pipeline.compose_up(folder if pipeline.honours_data_dir() else None, recreate=True)
+        up = pipeline.compose_up(folder if pipeline.honours_data_dir() else None, recreate=True,
+                                 project_id=project.id)
         if up is not None and up.returncode != 0:
             detail = (up.stderr or up.stdout or "").strip()[-400:]
             raise HTTPException(
@@ -880,6 +918,20 @@ def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> 
                 "pipeline produced, so run Process first."
             ),
         )
+    _refuse_main_folder(folder)
+    # The model scores the master in the project's own database, which the
+    # engine creates on the project's first processing run; the model runner
+    # does not, and would stop on "database does not exist". A project
+    # processed before each had a database of its own has none yet either.
+    if not engine_state.is_processed(project.id):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This project's database has not been built yet. Each project runs on a "
+                "database of its own, made by its first processing run, and the model "
+                "scores the hexagons in it. Run Process first, then the model."
+            ),
+        )
 
     options = payload or ModelRunPayload()
     _require_mesh(project)
@@ -890,7 +942,7 @@ def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> 
     # container, and `run_mcda.sh` forwards nothing but the execution id.
     recreate = project_settings.apply_to_engine(project)
     up = pipeline.compose_up(
-        folder if pipeline.honours_data_dir() else None, recreate=recreate
+        folder if pipeline.honours_data_dir() else None, recreate=recreate, project_id=project.id
     )
     if up is None or up.returncode != 0:
         detail = (up.stderr or up.stdout or "").strip()[-400:] if up else ""
