@@ -17,6 +17,7 @@ import type {
   ImportPlan,
   InputVariable,
   Removal,
+  EngineConfig,
   LayerTree,
   Mesh,
   ModelExample,
@@ -579,6 +580,13 @@ export const removeModelRun = (
  * New project screen needs them before there is anything to attach them to.
  */
 export const getEngineSettings = (): Promise<ProjectSettings> => request('/settings');
+
+/** Every setting of the engine's `.env`, with its default. */
+export const getEngineConfig = (): Promise<EngineConfig> => request('/engine/config');
+
+/** Write these into the engine's `.env`; null puts the engine's default back. */
+export const saveEngineConfig = (changes: Record<string, string | null>): Promise<EngineConfig> =>
+  request('/engine/config', { method: 'PUT', body: JSON.stringify({ changes }) });
 
 /**
  * LIVE: GET /api/projects/{id}/settings

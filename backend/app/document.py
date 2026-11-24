@@ -377,7 +377,8 @@ LEGEND = """
     var seen = {};
     var classes = [];
     var read = { classes: classes, excluded: 0, used: 0, numeric: true,
-                 min: Infinity, max: -Infinity, overflow: false };
+                 min: Infinity, max: -Infinity, overflow: false,
+                 missing: 0, missingColor: null };
     var count = Math.min(rows.length, SAMPLE);
     for (var i = 0; i < count; i += 1) {
       var row = rows[i];
@@ -387,7 +388,13 @@ LEGEND = """
       if (color === null) { continue; }
       /* value !== value catches NaN, which arrives as null in JSON but not
          when the rows are read off a live layer. */
-      if (value === null || value === undefined || value !== value) { continue; }
+      if (value === null || value === undefined || value !== value) {
+        /* A cell with no value the engine still drew (in grey): it needs a
+           row of its own, or the grey on screen goes unexplained. */
+        read.missing += 1;
+        if (!read.missingColor) { read.missingColor = color; }
+        continue;
+      }
       if (same(color, EXCLUDED)) { read.excluded += 1; continue; }
       read.used += 1;
       if (typeof value === 'number') {
@@ -509,6 +516,9 @@ LEGEND = """
 
   if (read.used && read.excluded) {
     body.appendChild(row(EXCLUDED, 'Excluded'));
+  }
+  if (read.used && read.missing && read.missingColor) {
+    body.appendChild(row(read.missingColor, 'No data'));
   }
   if (chosen.outline) {
     /* The MCDA's combined map draws the score and rings the cells it flags.

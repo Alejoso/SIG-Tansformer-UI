@@ -782,3 +782,52 @@ export const MAX_H3_RESOLUTION = 15;
 
 /** Path into the variable tree: child indices from the root down. */
 export type ModelPath = number[];
+
+
+/* ── the engine's own configuration (its .env) ─────────────────────────── */
+
+export type EngineSettingKind =
+  | 'int'
+  | 'float'
+  | 'flag'
+  | 'dockerSize'
+  | 'pgSize'
+  | 'pgDuration'
+  | 'choice'
+  | 'path'
+  | 'text';
+
+/** One setting of the engine's `.env`: what it is now and by default. */
+export interface EngineSetting {
+  key: string;
+  label: string;
+  description: string;
+  kind: EngineSettingKind;
+  choices: string[];
+  minimum: number | null;
+  maximum: number | null;
+  /** Blank allowed: the engine works it out (the workers of a stage). */
+  optional: boolean;
+  /** Why it is shown and not offered; empty when it can be changed. */
+  readOnly: string;
+  /** The password: never sent, only whether it is set. */
+  secret: boolean;
+  value: string;
+  isSet: boolean;
+  /** The engine's default; empty for one that is off or worked out by default. */
+  default: string;
+  isDefault: boolean;
+}
+
+export interface EngineSection {
+  title: string;
+  /** When a change here takes effect. */
+  applies: string;
+  settings: EngineSetting[];
+}
+
+export interface EngineConfig {
+  envFile: string;
+  envExists: boolean;
+  sections: EngineSection[];
+}

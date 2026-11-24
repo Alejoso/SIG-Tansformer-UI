@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import (
+    engine_config,
     document,
     engine_state,
     fsutil,
@@ -37,6 +38,8 @@ from . import (
     variable_settings,
 )
 from .models import (
+    EngineConfig,
+    SaveEngineConfigPayload,
     AbortResult,
     ImportCandidate,
     ImportManyPayload,
@@ -1266,6 +1269,31 @@ def get_engine_settings() -> ProjectSettings:
         # to redo.
         hasResults=False,
     )
+
+
+@app.get("/api/engine/config")
+def get_engine_config() -> EngineConfig:
+    """Every setting of the engine's `.env`, with its default (see `engine_config`)."""
+    return EngineConfig(**engine_config.describe())
+
+
+@app.put("/api/engine/config")
+def save_engine_config(payload: SaveEngineConfigPayload) -> EngineConfig:
+    """
+    Write the settings changed into the engine's `.env`.
+
+    Not while anything is running: the runners read the file as they start,
+    and the database settings recreate its container on the next run.
+    """
+    if runs.anything_running():
+        raise HTTPException(
+            status_code=409,
+            detail="A run is going. Change the engine's settings once it has finished.",
+        )
+    try:
+        return EngineConfig(**engine_config.save(payload.changes))
+    except engine_config.ConfigError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.get("/api/projects/{project_id}/settings")

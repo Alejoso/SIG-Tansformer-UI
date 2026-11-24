@@ -10,10 +10,10 @@ database each makes that impossible, and lets every project keep its master
 between runs.
 
 Within its own database a project still runs incrementally, and this module
-keeps, per project, what its database was last loaded with, so a run clears
-the project's tables (`RESET_FILES=1`, which truncates `archivos`,
-`variables` and `archivo_valores` and leaves the master alone) only when it
-has to:
+keeps, per project, what its database was last loaded with, so a run reloads
+the project's tables (`H3_VALUES_FULL_REBUILD=1`, which empties `variables`
+and `archivo_valores` and loads every result again, leaving the master and
+the converted files alone) only when it has to:
 
 * nothing is recorded for the project (its first run here, or a record from
   before projects had a database each);

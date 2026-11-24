@@ -837,3 +837,30 @@
 
 /* Dimension names are folder names, not code: the text face, capitalised. */
 .dimension-name.mono { font-family: var(--font-body); }
+
+/* ── engine settings (the engine's .env) ────────────────────────────────── */
+
+/* A long list in a dialog: the dialog keeps its head and buttons, the list
+   scrolls between them. */
+.engine-settings { display: flex; flex-direction: column; gap: 12px; max-height: min(86vh, 900px); }
+.engine-settings-filter { flex: none; }
+.engine-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 4px;
+}
+.engine-section { gap: 12px; }
+.engine-applies { margin: -4px 0 0; }
+.engine-setting { display: flex; flex-direction: column; gap: 5px; }
+.engine-setting .field-hint { margin: 0; }
+.engine-setting-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.engine-setting-key { font-size: 11px; }
+.engine-setting-control { display: flex; align-items: center; gap: 8px; }
+.engine-setting-control .input { flex: 1; min-width: 0; }
+.engine-setting-reset { flex: none; font-size: 12px; }
+.engine-setting.is-edited .input { border-color: var(--color-accent); }
+.engine-flag { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+.projects-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }

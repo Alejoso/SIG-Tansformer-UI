@@ -3,6 +3,7 @@ import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import type { Project } from '../../types';
 import { Icon } from '../ui/Icon';
+import { EngineSettingsDialog } from './EngineSettingsDialog';
 
 /** A flat hexagon in the data ink: the product's mark, not a decoration. */
 const SWATCH = 'var(--color-accent-2-900)';
@@ -45,6 +46,19 @@ export function ProjectsScreen() {
   const [failed, setFailed] = useState<{ attempt: number; message: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const failure = failed?.attempt === attempt ? failed.message : null;
+  /** The engine's own settings: machine-wide, so here and not inside a project. */
+  const [engineOpen, setEngineOpen] = useState(false);
+  const engineButton = (
+    <button
+      type="button"
+      className="btn btn-secondary engine-settings-open"
+      onClick={() => setEngineOpen(true)}
+    >
+      <Icon name="sliders" size={15} />
+      Engine settings
+    </button>
+  );
+  const engineDialog = engineOpen && <EngineSettingsDialog onClose={() => setEngineOpen(false)} />;
 
   useEffect(() => {
     let live = true;
@@ -131,11 +145,19 @@ export function ProjectsScreen() {
             >
               Create your first project
             </button>
+            <div style={{ marginTop: 10 }}>{engineButton}</div>
           </div>
         ) : (
           <>
-            <h1 className="projects-title">Your projects</h1>
-            <p className="projects-lede muted">Pick up where you left off, or start something new.</p>
+            <div className="projects-head">
+              <div>
+                <h1 className="projects-title">Your projects</h1>
+                <p className="projects-lede muted">
+                  Pick up where you left off, or start something new.
+                </p>
+              </div>
+              {engineButton}
+            </div>
 
             <div className="projects-grid">
               {projects.map((project) => {
@@ -194,6 +216,7 @@ export function ProjectsScreen() {
           </>
         )}
       </div>
+      {engineDialog}
     </div>
   );
 }

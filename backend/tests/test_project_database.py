@@ -365,3 +365,24 @@ def test_deleting_a_project_drops_nothing_in_the_engine(ready_engine, tmp_path):
     main.delete_project(row.id)
     assert store.find_project(row.id) is None
     assert ready_engine == []
+
+
+# ── what a reload asks of the engine ──────────────────────────────────────
+
+
+def test_a_reload_clears_the_database_but_reuses_the_converted_files():
+    """`RESET_FILES=1` also forces the engine to ingest, sample and convert every file
+    again (it empties `archivos`, the record of what each output was made from), so a
+    project whose last run died reprocessed everything on the next one, which was then
+    more likely to die too. Reloading the database is `H3_VALUES_FULL_REBUILD=1`: it
+    empties the project's variables and loads every result again, and the engine still
+    skips the files whose outputs are current."""
+    env = pipeline.reload_env(reset=True)
+    assert env["H3_VALUES_FULL_REBUILD"] == "1"
+    assert env.get("RESET_FILES", "0") == "0"
+    for flag in ("FORCE_REPROCESS", "FORCE_H3_REBUILD"):
+        assert env.get(flag, "0") == "0"
+    assert env["FORCE_MASTER_REBUILD"] == "0"
+    # nothing to clear: an incremental load
+    quiet = pipeline.reload_env(reset=False)
+    assert quiet.get("H3_VALUES_FULL_REBUILD", "0") == "0" and quiet.get("RESET_FILES", "0") == "0"
