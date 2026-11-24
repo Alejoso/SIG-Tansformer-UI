@@ -27,6 +27,33 @@ def expand(raw: str) -> Path:
     return Path(os.path.expandvars(os.path.expanduser(raw.strip()))).resolve()
 
 
+class FolderError(ValueError):
+    """
+    A refusal worded for whoever typed the path, which the UI shows as it is.
+
+    Its own class so that a route answers 400 with this sentence only, and
+    never with whatever Python said underneath ("embedded null byte").
+    """
+
+
+#: Python's refusal of a path holding a NUL, which no file system allows.
+_NUL_PATH = "A path cannot contain a NUL character."
+
+
+def _expand_typed(raw: str) -> Path:
+    """
+    `expand`, refusing what no path can hold with a sentence of our own.
+
+    Messages built on the result must still name `raw`, as typed: `expand`
+    fills in `$VARIABLES`, and echoing `/$SECRET` back expanded would hand
+    the variable's value to whoever asked.
+    """
+    try:
+        return expand(raw)
+    except ValueError as error:
+        raise FolderError(_NUL_PATH) from error
+
+
 def measure(path: Path) -> tuple[int, int]:
     """(file count, total bytes), capped so a huge tree cannot stall us."""
     files = 0
@@ -47,24 +74,29 @@ def measure(path: Path) -> tuple[int, int]:
 
 def inspect(raw: str) -> InspectResult:
     """Check one path and describe what is wrong with it, if anything."""
-    if not raw.strip():
+    typed = raw.strip()
+    if not typed:
         return InspectResult(
             path=raw, exists=False, isDirectory=False, problem="Enter a folder path"
         )
 
-    path = expand(raw)
+    # A problem names the path as it was typed, not expanded (`_expand_typed`).
+    try:
+        path = _expand_typed(raw)
+    except FolderError as error:
+        return InspectResult(path=typed, exists=False, isDirectory=False, problem=str(error))
 
     if not path.exists():
         return InspectResult(
-            path=str(path), exists=False, isDirectory=False, problem="No such folder"
+            path=typed, exists=False, isDirectory=False, problem="No such folder"
         )
     if not path.is_dir():
         return InspectResult(
-            path=str(path), exists=True, isDirectory=False, problem="That is a file, not a folder"
+            path=typed, exists=True, isDirectory=False, problem="That is a file, not a folder"
         )
     if not os.access(path, os.R_OK):
         return InspectResult(
-            path=str(path), exists=True, isDirectory=True, problem="That folder is not readable"
+            path=typed, exists=True, isDirectory=True, problem="That folder is not readable"
         )
 
     files, size = measure(path)
@@ -76,7 +108,7 @@ def inspect(raw: str) -> InspectResult:
 def folder_exists(raw: str) -> bool:
     try:
         return expand(raw).is_dir()
-    except OSError:
+    except (OSError, ValueError):
         return False
 
 
@@ -242,7 +274,10 @@ def pick_folder(start_at: str | None = None) -> PickFolderResult:
     can open, the UI still has its paste-a-path field.
     """
     start = Path(start_at).expanduser() if start_at else Path.home()
-    if not start.is_dir():
+    try:
+        if not start.is_dir():
+            start = Path.home()
+    except ValueError:  # a NUL in it: no folder to start at
         start = Path.home()
 
     for strategy in (_pick_with_zenity, _pick_with_kdialog, _pick_with_tk, _pick_with_windows):
@@ -250,13 +285,13 @@ def pick_folder(start_at: str | None = None) -> PickFolderResult:
             result = strategy(start)
         except subprocess.TimeoutExpired:
             return PickFolderResult(
-                unavailable="The folder dialog was left open too long — try again."
+                unavailable="The folder dialog was left open too long: try again."
             )
         if result is not None:
             return result
 
     return PickFolderResult(
-        unavailable="No folder dialog on this machine — paste the path instead.",
+        unavailable="No folder dialog on this machine: paste the path instead.",
         browse=True,
     )
 
@@ -266,15 +301,18 @@ def pick_folder(start_at: str | None = None) -> PickFolderResult:
 
 def browse_root() -> Path:
     """
-    The top of what the in-app browser shows.
+    The top of what the in-app browser shows, and where it may make folders.
 
     In Docker only the host folder mounted at its own path is real to the
-    engine — a folder elsewhere in the container would be picked and then not
-    exist for the daemon — so docker-compose.yml sets MAPHEX_BROWSE_ROOT to
-    it. Outside Docker the whole filesystem is fair game.
+    engine (a folder elsewhere in the container would be picked and then not
+    exist for the daemon), so docker-compose.yml sets MAPHEX_BROWSE_ROOT to
+    it. Outside Docker it is the home folder of whoever runs the server:
+    data and results live there, and a browser that can make folders should
+    not reach `/etc` or another user's home on behalf of any page that can
+    talk to this server. MAPHEX_BROWSE_ROOT widens it when needed.
     """
     raw = os.environ.get("MAPHEX_BROWSE_ROOT", "").strip()
-    return Path(raw).resolve() if raw else Path("/")
+    return Path(raw).resolve() if raw else Path.home().resolve()
 
 
 def _within(path: Path, root: Path) -> bool:
@@ -285,14 +323,16 @@ def list_folders(raw: str | None) -> FolderListing:
     """
     The subfolders of one folder, for the browser to show a level at a time.
 
-    Anything that cannot be listed — missing, a file, outside the root —
-    falls back to the nearest sensible place rather than failing, because the
-    usual input is whatever half-typed path is already in the field.
+    Anything that cannot be listed (missing, a file, outside the root) falls
+    back to the nearest sensible place rather than failing, because the
+    usual input is whatever half-typed path is already in the field. Only a
+    path no file system could hold, one with a NUL in it, raises a
+    `FolderError`.
     """
     root = browse_root()
     start = Path.home() if _within(Path.home().resolve(), root) else root
     try:
-        path = expand(raw) if raw and raw.strip() else start
+        path = _expand_typed(raw) if raw and raw.strip() else start
     except (OSError, RuntimeError):
         path = start
     while not path.is_dir() and path != path.parent:
@@ -329,31 +369,41 @@ def create_folder(parent_raw: str, name_raw: str) -> FolderListing:
     Make one new folder inside `parent` and return it, opened.
 
     A single name, not a path: the browser creates where it is standing, so
-    anything with a separator or `..` in it is a mistake or an escape. Raises
-    ValueError with a sentence the UI can show as it is.
+    anything with a separator or `..` in it is a mistake or an escape. A
+    control character (a line break, a tab, an escape) is refused too: the
+    name would be made, and then show as something else in every list, log
+    and shell that prints it. Raises `FolderError` with a sentence the UI
+    can show as it is, naming the parent as it was typed (`_expand_typed`).
     """
     name = name_raw.strip()
     if not name:
-        raise ValueError("Give the folder a name.")
-    if name in {".", ".."} or "/" in name or "\\" in name or "\0" in name:
-        raise ValueError("A folder name cannot contain / or \\, or be . or ..")
+        raise FolderError("Give the folder a name.")
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in name):
+        raise FolderError("A folder name cannot contain a line break, a tab or another "
+                          "control character.")
+    if name in {".", ".."} or "/" in name or "\\" in name:
+        raise FolderError("A folder name cannot contain / or \\, or be . or ..")
     if name.startswith("."):
-        raise ValueError("A name starting with a dot would be hidden here — choose another.")
+        raise FolderError("A name starting with a dot would be hidden here: choose another.")
     if len(name.encode("utf-8")) > 255:
-        raise ValueError("That name is too long.")
+        raise FolderError("That name is too long.")
 
+    typed = parent_raw.strip()
     root = browse_root()
-    parent = expand(parent_raw)
+    parent = _expand_typed(parent_raw)
     if not _within(parent, root) or not parent.is_dir():
-        raise ValueError(f"Cannot create a folder in {parent}.")
+        raise FolderError(f"Cannot create a folder in {typed}.")
 
     target = parent / name
     if target.exists():
-        raise ValueError(f"{name} already exists here.")
+        raise FolderError(f"{name} already exists here.")
     try:
         target.mkdir()
     except PermissionError as error:
-        raise ValueError(f"No permission to create a folder in {parent}.") from error
+        raise FolderError(f"No permission to create a folder in {typed}.") from error
     except OSError as error:
-        raise ValueError(f"Could not create {name}: {error.strerror or error}.") from error
+        # `strerror` only: the error's full text carries the expanded path.
+        raise FolderError(
+            f"Could not create {name}: {error.strerror or 'the system refused'}."
+        ) from error
     return list_folders(str(target))

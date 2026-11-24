@@ -312,7 +312,7 @@ class VariableProblem:
     dimension: str
     code: str
     #: `error` when the engine said so, `unfinished` when it simply never got
-    #: to the end — no render, and nothing claiming to have failed — and
+    #: to the end (no render, and nothing claiming to have failed), and
     #: `missing` when it left nothing at all (see `run_health`), `notBuilt` when
     #: the engine's step 10.5 was to build it and did not.
     status: str
@@ -327,7 +327,8 @@ class VariableProblem:
     source: str
     executionId: str
     #: Why, when it can be told from the run rather than from the variable:
-    #: `memory` when the system killed the engine's workers in that run.
+    #: `memory` when the system killed the engine's workers in that run, or
+    #: when the variable's own error says its worker died even alone.
     cause: str = ""
 
 

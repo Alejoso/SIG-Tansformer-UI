@@ -1,7 +1,7 @@
 /**
  * The in-app folder browser: "Choose" with no native dialog (in Docker).
  *
- * Only meaningful against a server that has no dialog — run with
+ * Only meaningful against a server that has no dialog: run with
  * MAPHEX_APP=http://127.0.0.1:8765 against `docker compose up`. Elsewhere the
  * real dialog would open and wait, so it is skipped.
  */
@@ -81,8 +81,30 @@ export async function run() {
 
     await dialog.getByRole('button', { name: 'New folder' }).click();
     await dialog.getByLabel('New folder name').fill(fresh);
+    // Held until checked: while the folder is being made, a click on a row
+    // would move the browser and the new folder would open somewhere else.
+    let release = () => {};
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/api/fs/folders', async (route) => {
+      if (route.request().method() === 'POST') await held;
+      await route.continue();
+    });
     await dialog.getByLabel('New folder name').press('Enter');
+    await dialog.getByRole('button', { name: 'Creating…' }).waitFor();
+    const rows = dialog.locator('.folder-browser-row');
+    const rowsLive = (await rows.count()) > 0
+      ? await rows.evaluateAll((all) => all.filter((row) => !row.disabled).length)
+      : -1;
+    check(
+      'the rows wait while the folder is made',
+      rowsLive === 0 && (await dialog.getByRole('button', { name: 'Up' }).isDisabled()),
+      rowsLive < 0 ? 'no rows here to check' : `${rowsLive} still clickable`,
+    );
+    release();
     await page.waitForTimeout(500);
+    await page.unroute('**/api/fs/folders');
     check('creates it and goes in', (await dialog.locator('.folder-browser-current').textContent()) === made);
     await dialog.getByRole('button', { name: 'Use this folder' }).click();
     check('the new folder fills the field', (await page.getByPlaceholder(/results/i).inputValue()) === made);

@@ -42,8 +42,12 @@ services:
       MAPHEX_ENGINE_DIR: ${SIG_TRANSFORMER_DIR:-../SIG-Transformer}
       MAPHEX_HOST_ROOT: ${MAPHEX_HOST_ROOT:-${HOME}}
       # There is no native folder dialog in here, so the UI browses folders
-      # itself — only within what is shared with the host (see volumes).
+      # itself, only within what is shared with the host (see volumes).
       MAPHEX_BROWSE_ROOT: ${MAPHEX_HOST_ROOT:-${HOME}}
+      # The port below answers on localhost and 127.0.0.1 only, the names the
+      # backend accepts by default. Reached by another name (a reverse proxy,
+      # a LAN address), list it here, comma-separated.
+      MAPHEX_ALLOWED_HOSTS: ${MAPHEX_ALLOWED_HOSTS:-}
       # The backend's `docker compose` calls must find this same project.
       COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-sig-transformer}
       HOME: ${HOME}

@@ -365,15 +365,16 @@ def compose_up(
     return _run(command, cwd=PIPELINE_DIR, timeout=600, env=env)
 
 
-def read_env_file() -> dict[str, str]:
+def read_env_file(env_path: Path | None = None) -> dict[str, str]:
     """
     The pipeline's own `.env`, parsed.
 
-    Compose loads this for the container, but values we need to *compute* —
-    DATABASE_URL in particular — are not in it.
+    Compose loads this for the container, but values we need to *compute*
+    (DATABASE_URL in particular) are not in it. `env_path` reads another file
+    of the same shape instead: a run's `effective_config.env`, say.
     """
     values: dict[str, str] = {}
-    env_path = PIPELINE_DIR / ".env"
+    env_path = env_path or PIPELINE_DIR / ".env"
     if not env_path.exists():
         return values
     for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():

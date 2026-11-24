@@ -194,6 +194,12 @@ MAPHEX_PORT=9000 ./run.sh          # in backend/
 MAPHEX_PORT=9000 npm run dev       # in frontend/
 ```
 
+The backend answers only requests addressed to `localhost`, `127.0.0.1` or
+`[::1]`, so a web page elsewhere cannot reach it by pointing its own name at
+this machine. Served under another name (a reverse proxy, a LAN address), add
+it to `MAPHEX_ALLOWED_HOSTS`, comma-separated. Outside Docker, the in-app
+folder browser stays inside your home folder; `MAPHEX_BROWSE_ROOT` moves it.
+
 `npm run build` emits `frontend/dist`, which the backend serves at `/` when it
 is present. It is a snapshot: after pulling, build again (or delete `dist/`),
 or `:8765/` keeps serving the interface as it was the day it was built. In

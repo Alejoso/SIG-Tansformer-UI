@@ -16,6 +16,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -95,6 +96,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+#: The names this server is reached by: the browser on this machine, straight
+#: or through Vite's proxy (which sends 127.0.0.1, `changeOrigin`), and Docker's
+#: published port, which docker-compose.yml binds to 127.0.0.1 only. IPv6's
+#: loopback arrives bracketed in a Host header, as `[::1]:8765`.
+DEFAULT_ALLOWED_HOSTS = ("localhost", "127.0.0.1", "[::1]", "::1")
+
+
+def allowed_hosts() -> list[str]:
+    """
+    The Host headers this server answers: the defaults, and any listed in
+    MAPHEX_ALLOWED_HOSTS (comma-separated; `*` for any), for a server reached
+    by another name.
+
+    Not left open because this API reads and makes folders and starts the
+    engine, and CORS alone does not stop a page elsewhere from talking to it:
+    a site can point its own name at 127.0.0.1 (DNS rebinding) and its
+    requests are then same-origin. They still say that site's name as their
+    Host, and that is what this refuses.
+    """
+    extra = os.environ.get("MAPHEX_ALLOWED_HOSTS", "")
+    return [*DEFAULT_ALLOWED_HOSTS, *(host.strip() for host in extra.split(",") if host.strip())]
+
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts())
+
 
 def _mesh_label(row: store.ProjectRow) -> str:
     """
@@ -724,15 +751,20 @@ def list_problems(project_id: str) -> list[VariableProblem]:
     it.
     """
     project = _require_project(project_id)
-    found = outputs.scan_problems(project) + run_health.missing_problems(project)
-    # A variable that stopped partway in the very run that lost workers to
-    # the system most likely stopped for that. One whose log is from an
-    # earlier run stopped for some other reason, and is not blamed on it.
-    crash = run_health.memory_crash(project) if found else None
-    if crash:
-        for problem in found:
-            if problem.status == "unfinished" and problem.executionId == crash.executionId:
-                problem.cause = "memory"
+    # Read once: it walks every log of the last run.
+    crash = run_health.memory_crash(project)
+    found = outputs.scan_problems(project) + run_health.missing_problems(project, crash)
+    for problem in found:
+        # The current engine says so in the variable's own log, whichever run
+        # it was: the file's worker died even when it ran alone.
+        if problem.status == "error" and run_health.KILLED_ALONE in problem.reason:
+            problem.cause = "memory"
+        # A variable that stopped partway in the very run that lost workers to
+        # the system most likely stopped for that. One whose log is from an
+        # earlier run stopped for some other reason, and is not blamed on it.
+        elif (crash and problem.status == "unfinished"
+              and problem.executionId == crash.executionId):
+            problem.cause = "memory"
     found.sort(key=lambda problem: problem.id)
     return [VariableProblem(**vars(problem)) for problem in found]
 
@@ -741,10 +773,11 @@ def list_problems(project_id: str) -> list[VariableProblem]:
 def memory_crash(project_id: str) -> MemoryCrash | None:
     """
     Whether the last run lost files to the system killing the engine's
-    processes — for memory, nearly always — and what to change about it.
+    processes (for memory, nearly always), and what to change about it.
 
-    The engine words that as "A process in the process pool was terminated
-    abruptly", once per file it gave up on, naming none of them, and reports
+    The current engine names each file whose worker died even when it ran
+    alone; an older one wrote "A process in the process pool was terminated
+    abruptly" once per file it gave up on, naming none of them, and reported
     the stage as a success. Null when the last run had none of it.
     """
     crash = run_health.memory_crash(_require_project(project_id))
@@ -1444,17 +1477,26 @@ def list_folders(path: str | None = None) -> FolderListing:
     """
     One level of the in-app folder browser: the subfolders of `path`.
 
-    For when `pick-folder` says there is no dialog here — in Docker, notably.
+    For when `pick-folder` says there is no dialog here (in Docker, notably).
     """
-    return fsutil.list_folders(path)
+    try:
+        return fsutil.list_folders(path)
+    except fsutil.FolderError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.post("/api/fs/folders")
 def create_folder(payload: CreateFolderPayload) -> FolderListing:
-    """Make a new folder from the in-app browser, and open it."""
+    """
+    Make a new folder from the in-app browser, and open it.
+
+    Only `FolderError` becomes a 400 with its text: that is the sentence
+    written for the dialog. Anything else is a bug, and its text is not for
+    the browser.
+    """
     try:
         return fsutil.create_folder(payload.parent, payload.name)
-    except ValueError as error:
+    except fsutil.FolderError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 

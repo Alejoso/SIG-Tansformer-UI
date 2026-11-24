@@ -7,8 +7,8 @@ import { Icon } from '../ui/Icon';
 interface EngineSettingsDialogProps {
   onClose: () => void;
   /**
-   * Open on just these settings, with the reason they are shown — from a
-   * problem that names what to change. The rest is one click away.
+   * Open on just these settings, with the reason they are shown (from a
+   * problem that names what to change). The rest is one click away.
    */
   focus?: { keys: string[]; reason: string };
 }

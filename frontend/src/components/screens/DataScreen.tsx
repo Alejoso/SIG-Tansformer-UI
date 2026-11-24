@@ -21,6 +21,7 @@ import { sourceLabel } from '../../lib/value-columns';
 import { describeSettings, settingsOf } from '../../lib/variable-settings';
 import { formatSize } from '../../lib/format';
 import * as modelRun from '../../lib/model-run';
+import { runOutcome } from '../../lib/run-outcome';
 import { FolderBrowser } from '../ui/FolderBrowser';
 import { Icon } from '../ui/Icon';
 import { EngineSettingsDialog } from './EngineSettingsDialog';
@@ -170,6 +171,12 @@ export function DataScreen() {
    * after a reload.
    */
   const [problems, setProblems] = useState<VariableProblem[]>([]);
+  /**
+   * The problems request failed, so `problems` is empty for want of an
+   * answer rather than because nothing is wrong: the screen says it could
+   * not check instead of reading that as "All done".
+   */
+  const [problemsUnknown, setProblemsUnknown] = useState(false);
   /** The last run lost files to the system killing the engine's workers. */
   const [memoryCrash, setMemoryCrash] = useState<MemoryCrash | null>(null);
   /** The reload the problems above came from: older ones predate the last run. */
@@ -302,14 +309,15 @@ export function DataScreen() {
     Promise.all([
       api.listInputs(projectId),
       api.listDimensions(projectId),
-      api.listProblems(projectId).catch(() => [] as VariableProblem[]),
+      api.listProblems(projectId).catch(() => null),
       api.getMemoryCrash(projectId).catch(() => null),
     ])
       .then(([list, dims, found, crash]) => {
         if (!live) return;
         setVariables(list);
         setDimensions(dims);
-        setProblems(found);
+        setProblems(found ?? []);
+        setProblemsUnknown(found === null);
         setMemoryCrash(crash);
         setProblemsToken(reloadToken);
         // Default to the dimension already in use, so the common case —
@@ -324,6 +332,10 @@ export function DataScreen() {
       .catch((error: unknown) => {
         if (live) {
           showToast(error instanceof Error ? error.message : 'Could not read this project’s data');
+          // Answered, if not well: the finish dialog says it could not check
+          // rather than "Checking…" for good.
+          setProblemsUnknown(true);
+          setProblemsToken(reloadToken);
         }
       });
     return () => {
@@ -405,10 +417,28 @@ export function DataScreen() {
   // While a run is going, what has not finished yet is not a problem yet.
   const shownProblems = running ? problems.filter((p) => p.status === 'error') : problems;
   const shownCrash = running ? null : memoryCrash;
+  /**
+   * Files the engine named as having died even when read alone: the current
+   * engine retries what a dead worker left behind one at a time, and says
+   * which did not fit. An older one named none of them.
+   */
+  const namedMemory = shownProblems.filter((p) => p.status === 'error' && p.cause === 'memory');
+  /** The memory advice shows for a crash in the last run, or for a file named as above. */
+  const showMemory = shownCrash !== null || namedMemory.length > 0;
+  /**
+   * The settings to open on. Without the run's crash, from the reasons: the
+   * engine names the stage's setting in each, as `(INGEST_WORKERS=1)`.
+   */
+  const memorySettings =
+    shownCrash?.settings ??
+    [
+      'APP_MEM_LIMIT',
+      ...namedMemory.flatMap((p) => /\(([A-Z0-9_]+)=1\)/.exec(p.reason)?.[1] ?? []),
+    ].filter((key, index, all) => all.indexOf(key) === index);
   /** The biggest of what the crash cost, which is usually what caused it. */
-  const crashVictims = shownCrash
+  const crashVictims = showMemory
     ? shownProblems
-        .filter((p) => p.cause === 'memory' && p.status !== 'error')
+        .filter((p) => p.cause === 'memory')
         .map((p) => ({ problem: p, size: variables.find((v) => v.id === p.id)?.sizeBytes ?? 0 }))
         .sort((a, b) => b.size - a.size)
     : [];
@@ -433,17 +463,15 @@ export function DataScreen() {
    */
   const problemsCurrent = problemsToken === reloadToken;
   /**
-   * The run finished, but not with everything — counted in variables, from
-   * the problems list. The run's own `erroredFiles` is files, not variables:
-   * when the engine runs out of memory every file left in its pool counts,
-   * including ones whose results from an earlier run are still there.
+   * What the finish dialog says: counted in variables this run left out,
+   * from the problems list, and "Checking…" until that list is from after
+   * the run (see `runOutcome`). The run's own `erroredFiles` is files, not
+   * variables: when the engine runs out of memory every file left in its
+   * pool counts, including ones whose results from an earlier run are still
+   * there. It is only the fallback when the list could not be read.
    */
-  const failedVariables = problemsCurrent ? problems.length : 0;
-  // Until the list is back, a run that dropped files is assumed to have left
-  // something out, so the dialog does not open on "All done" and then flip.
-  const someFailed = problemsCurrent ? failedVariables > 0 : (run?.erroredFiles ?? 0) > 0;
-  /** Of those, the ones the engine running out of memory cost. */
-  const memoryVictims = problemsCurrent ? problems.filter((p) => p.cause === 'memory').length : 0;
+  const outcome = runOutcome(run, problemsUnknown ? null : problems, problemsCurrent);
+  const { someFailed, failed: failedVariables, memory: memoryVictims } = outcome;
   /**
    * The variables, under the dimension each belongs to.
    *
@@ -1740,6 +1768,13 @@ export function DataScreen() {
             starts the next one directly beneath it. The run only ever
             reported a count, which named nothing and was gone by the next
             run; the reason has been sitting in the output folder all along. */}
+        {/* Not an empty panel: nothing listed would read as nothing wrong. */}
+        {problemsUnknown && !running && (
+          <p className="muted-55" role="status">
+            Could not check which variables did not make it through. Reload the page to try
+            again.
+          </p>
+        )}
         {shownProblems.length > 0 && (
           <div className="problem-panel">
           <div className="folder-alert is-problem">
@@ -1772,6 +1807,13 @@ export function DataScreen() {
                           ? 'stopped partway through: the engine ran out of memory.'
                           : 'stopped partway through, with nothing saying why: the run may ' +
                             'have been interrupted. Processing again is the thing to try.'}
+                      </span>
+                    ) : problem.cause === 'memory' ? (
+                      <span className="problem-why">
+                        could not be read while {problem.stageLabel}: the system stopped the
+                        engine&apos;s process for it even when it read this file alone, almost
+                        always for want of memory.{' '}
+                        <span className="problem-reason">{problem.reason}</span>
                       </span>
                     ) : (
                       <span className="problem-why">
@@ -1810,23 +1852,30 @@ export function DataScreen() {
               </span>
             </div>
           </div>
-          {shownCrash && (
+          {showMemory && (
             <div className="folder-alert is-problem memory-alert">
               <div className="folder-alert-body">
-                <strong>The engine ran out of memory in the last run</strong>
-                {shownCrash.stages.map((stage) => (
+                <strong>
+                  {shownCrash
+                    ? 'The engine ran out of memory in the last run'
+                    : 'The engine ran out of memory'}
+                </strong>
+                {shownCrash?.stages.map((stage) => (
                   <span key={stage.script}>
                     While “{stage.label}”, the system stopped the engine&apos;s worker processes
                     and {stage.failed} {stage.failed === 1 ? 'file' : 'files'} could not be read
                     {stage.workers !== null && (
                       <>
                         {' '}
-                        — it was reading {stage.workers} at a time with {shownCrash.memoryLimit} of
-                        memory
+                        (it was reading {stage.workers} at a time with {shownCrash.memoryLimit} of
+                        memory)
                       </>
                     )}
-                    . The engine does not say which. Those with results from an earlier run
-                    keep them; the ones listed above as having produced nothing never had any.
+                    .{' '}
+                    {namedMemory.length > 0
+                      ? 'They are listed above.'
+                      : 'The engine does not say which. Those with results from an earlier run ' +
+                        'keep them; the ones listed above as having produced nothing never had any.'}
                   </span>
                 ))}
                 {crashVictims.length > 0 && (
@@ -1843,8 +1892,8 @@ export function DataScreen() {
                   </span>
                 )}
                 <span className="muted-55">
-                  Give the engine more memory, or have it read fewer files at once (1, or 0 for
-                  one at a time), then process again.
+                  Give the engine more memory, or have it read fewer files at once (1 reads one
+                  file at a time), then process again.
                 </span>
               </div>
               <button
@@ -1862,9 +1911,9 @@ export function DataScreen() {
           <EngineSettingsDialog
             onClose={() => setEngineSettingsOpen(false)}
             focus={
-              shownCrash
+              showMemory
                 ? {
-                    keys: shownCrash.settings,
+                    keys: memorySettings,
                     reason:
                       'The settings that decide how much memory a run has and how much it ' +
                       'uses at once.',
@@ -1926,15 +1975,19 @@ export function DataScreen() {
               The engine carries on past a bad file, so this is the only
               moment anything says so. */}
           <div className={`complete-icon${someFailed ? ' is-warning' : ''}`}>
-            <Icon
-              name={someFailed ? 'close' : 'check'}
-              size={26}
-              color={someFailed ? 'var(--color-accent-800)' : 'var(--color-accent-2-800)'}
-              strokeWidth={3}
-            />
+            {outcome.state === 'checking' ? (
+              <Icon name="spinner" size={22} color="var(--color-accent)" className="spin" />
+            ) : (
+              <Icon
+                name={someFailed ? 'close' : 'check'}
+                size={26}
+                color={someFailed ? 'var(--color-accent-800)' : 'var(--color-accent-2-800)'}
+                strokeWidth={3}
+              />
+            )}
           </div>
           <div className="dialog-title" id="complete-title">
-            {someFailed ? 'Done, with some left out' : 'All done'}
+            {outcome.title}
           </div>
           {/* Deliberately not "N folders converted": the folder count is our
               own record, not what the engine did with it — one folder can
@@ -1945,9 +1998,11 @@ export function DataScreen() {
             {run?.hexagonCount
               ? `Your data is on ${run.hexagonCount.toLocaleString()} hexagons. `
               : 'Your data has been converted. '}
-            {someFailed
-              ? 'The rest is ready to explore on the map.'
-              : 'Every variable is ready to explore on the map.'}
+            {outcome.state !== 'known'
+              ? ''
+              : someFailed
+                ? 'The rest is ready to explore on the map.'
+                : 'Every variable is ready to explore on the map.'}
           </p>
           {failedVariables > 0 && (
             <p className="complete-failed">
@@ -1963,9 +2018,18 @@ export function DataScreen() {
               {failedVariables === 1 ? 'it' : 'them'}, is on the page behind this.
             </p>
           )}
-          {!problemsCurrent && (run?.erroredFiles ?? 0) > 0 && (
+          {outcome.state === 'checking' && (
             <p className="muted-55" style={{ margin: 0 }}>
               Checking which variables were left out…
+            </p>
+          )}
+          {outcome.state === 'unknown' && (
+            <p className="complete-failed">
+              Could not check which variables were left out.
+              {(run?.erroredFiles ?? 0) > 0 &&
+                ` The engine could not process ${run?.erroredFiles} ${
+                  run?.erroredFiles === 1 ? 'file' : 'files'
+                }.`}
             </p>
           )}
           <div className="dialog-actions" style={{ alignSelf: 'stretch' }}>

@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "node tests/run.mjs"
+    "test": "node tests/run.mjs",
+    "test:unit": "node --test tests/unit/"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",

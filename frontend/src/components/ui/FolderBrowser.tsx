@@ -2,7 +2,7 @@
  * Choosing a folder without a native dialog.
  *
  * The server opens the machine's own folder chooser when it can. In Docker it
- * cannot — there is no desktop in a container — so this walks the server's
+ * cannot (there is no desktop in a container), so this walks the server's
  * folders one level at a time instead. The paths are the server's, which in
  * Docker are the host's own (they are mounted at the same place).
  */
@@ -76,7 +76,7 @@ export function FolderBrowser({ startAt, onPick, onClose }: FolderBrowserProps) 
           type="button"
           className="btn btn-secondary"
           onClick={() => listing?.parent && void open(listing.parent)}
-          disabled={loading || !listing?.parent}
+          disabled={loading || creating || !listing?.parent}
         >
           Up
         </button>
@@ -146,7 +146,9 @@ export function FolderBrowser({ startAt, onPick, onClose }: FolderBrowserProps) 
             type="button"
             className="folder-browser-row"
             onClick={() => void open(folder.path)}
-            disabled={loading}
+            // Not while a folder is being made: the browser would move, and
+            // the new folder would then open over whatever it moved to.
+            disabled={loading || creating}
           >
             <Icon name="folder" size={15} />
             <span className="folder-browser-name">{folder.name}</span>
