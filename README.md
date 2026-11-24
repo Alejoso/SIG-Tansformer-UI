@@ -117,14 +117,21 @@ you say so:
 MAPHEX_PIPELINE_DIR=/path/to/SIG-Transformer ./run.sh   # in backend/
 ```
 
-**Use the engine's `main`, from 2026-11-03 on.** It carries what this app
+**Use the engine's `main`, from 2026-11-18 on.** It carries what this app
 needs: the lint leaves the pipeline's own outputs alone, `pyarrow` is held
 below 26, `run_full.sh` honours the `DATA_DIR` it is given, step 13.5 fills
 each variable's gaps from a `transform.yaml`, and every run writes a
-`run_report.yaml`. Its outputs and settings are in English since then (the
-model's maps are under `criteria/`, `RESET_FILES` replaced `RESET_ARCHIVOS`);
-see [Working with the current engine](#working-with-the-current-engine). The
-old `fix/compatibilidad-maphex` branch is no longer needed, except for its
+`run_report.yaml` (2026-11-03); the value column of a file with several
+(`app/tools/value_columns.py`), the model's status
+(`MCDA/engine/model_status.py`) and container sizes fitted to the machine
+(`app/tools/machine_resources.py`) (2026-11-05); and the map tooltip with the
+hexagon's H3 code, which the legend reads (2026-11-18). An older engine still
+runs, but those parts go quiet: no value-column dialog, no status notice, no
+fitting, and a legend titled from the data instead of the tooltip. Its outputs
+and settings are in English since 2026-11-03 (the model's maps are under
+`criteria/`, `RESET_FILES` replaced `RESET_ARCHIVOS`); see
+[Working with the current engine](#working-with-the-current-engine). The old
+`fix/compatibilidad-maphex` branch is no longer needed, except for its
 dependency lock.
 
 Then its configuration and its data:
@@ -156,8 +163,10 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ./run.sh
 ```
 
-Python 3.12. Every version in `requirements.txt` is exact, including the
-resolved ones — see the note at the bottom of that file before changing any.
+Python 3.12 or newer: a clean install with 3.14 (what a current Arch ships as
+`python3`) works as written. Every version in `requirements.txt` is exact,
+including the resolved ones; see the note at the bottom of that file before
+changing any.
 
 ### 3. The frontend
 
@@ -179,7 +188,9 @@ MAPHEX_PORT=9000 npm run dev       # in frontend/
 ```
 
 `npm run build` emits `frontend/dist`, which the backend serves at `/` when it
-is present.
+is present. It is a snapshot: after pulling, build again (or delete `dist/`),
+or `:8765/` keeps serving the interface as it was the day it was built. In
+development use `:5173`, which is always the current code.
 
 ### 4. The first project
 
@@ -203,14 +214,30 @@ Worth knowing before pointing it at an engine you care about:
 - **the engine's `.env`** — `H3_RES` and `RENDER_H3_RES`, set from the
   project's settings before a run, and the app container recreated when they
   change. See [Settings reach the engine](#settings-reach-the-engine-through-its-env).
+  Only the value is replaced: the line's comment and an `export` stay, and the
+  file is swapped in whole (it holds the engine's credentials) with its
+  permissions kept. The engine's own projects are not affected as long as
+  they set `h3_resolution` and `map_resolution` in their `project.yaml`
+  (Colombia does); one that leaves them out takes whatever Maphex last wrote.
+- **the engine's container, left on this project.** Processing and model runs
+  recreate it mounted on the project's folder and database, and nothing puts
+  it back. The engine's `./MCDA/run_mcda.sh` does not start the containers,
+  so after a run here it has to check what it finds before scoring.
 - **the project's folder**: `in/`, `out/`, `model/model.yaml`,
   `config/transform.yaml`, `MCDA/runs/`. All of it the engine's doing except
   the model file and `config/transform.yaml`, which is rewritten from each
   variable's fill before every run.
 - **`data/*.csv` here**: the project list, where each variable was copied
   from, each variable's fill when changed from the default
-  (`variable_settings.csv`), and the value column chosen for a file with
-  several (`value_columns.csv`).
+  (`variable_settings.csv`), the value column chosen for a file with
+  several (`value_columns.csv`), and the processing runs started for each
+  project (`runs.csv`). The engine's logs do not say which project a run was
+  for, so after a restart that list is how the Data screen tells its own last
+  run from one started in a terminal, a model run, or another project's.
+
+A project counts as processed (the projects list says *Processed* and opens
+on the map) once any of its variables has a map under `out/`, whoever drew
+it.
 
 Every pipeline run exports another master table into `out/maestro/`; the
 engine's model runner takes the newest one itself, so nothing is moved.
@@ -677,6 +704,14 @@ anyway, because the document carries colours per cell rather than the scale
 they came from. So the legend is derived from the hexagons themselves, which
 means every swatch is a colour that is actually on screen and a layer
 rendered months ago gets a legend as well.
+
+The tooltip comes in two forms, and the legend reads both. Layers rendered
+before 2026-11-18 have it as text, `global: {global} | alerta: {alert}`.
+Since then the engine writes HTML, one item per line, with the code of the
+hexagon under the cursor first:
+`<b>H3 (res 6):</b> {h3_index}<br/><b>global:</b> {global}<br/><b>alert:</b> {alert}`.
+Either way the column is the first `label: {column}` item that is not
+`h3_index`, and its label titles the legend.
 
 What it draws follows the shape of the column, which is the engine's own rule
 (`render_html` treats an integer column with more than twelve distinct values

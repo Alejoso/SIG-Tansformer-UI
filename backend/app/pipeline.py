@@ -295,6 +295,27 @@ def unwritable_host_folders() -> list[Path]:
     return blocked
 
 
+def _compose_db_name(fallback: str) -> str:
+    """
+    The `POSTGRES_DB` the engine's db container was created with.
+
+    Then the engine's `.env`, then `fallback`: what compose would have been
+    given anyway when there is no container yet.
+    """
+    found = _run(["docker", "compose", "ps", "-aq", "db"], cwd=PIPELINE_DIR, timeout=30)
+    container = (found.stdout.split() or [""])[0] if found and found.returncode == 0 else ""
+    if container:
+        inspected = _run(
+            ["docker", "inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", container],
+            cwd=PIPELINE_DIR, timeout=30,
+        )
+        if inspected and inspected.returncode == 0:
+            for line in inspected.stdout.splitlines():
+                if line.startswith("POSTGRES_DB=") and line[len("POSTGRES_DB="):]:
+                    return line[len("POSTGRES_DB="):]
+    return read_env_file().get("POSTGRES_DB") or fallback
+
+
 def compose_up(
     data_dir: Path | None = None, *, recreate: bool = False
 ) -> subprocess.CompletedProcess[str] | None:
@@ -315,6 +336,12 @@ def compose_up(
     prepare_host_folders(data_dir)
     env = run_full_env(extra={"DATA_DIR": str(data_dir)} if data_dir else None)
     env.update(machine_fit(env))
+    # `POSTGRES_DB` only reaches the db service (its first database and its
+    # healthcheck); the app reads `DATABASE_URL`, worked out above for this
+    # project's database. Handing compose the project's name instead would
+    # change the db service's configuration and recreate Postgres for nothing,
+    # stopping whatever else was using it. The engine's run_full.sh does the same.
+    env["POSTGRES_DB"] = _compose_db_name(env.get("POSTGRES_DB", ""))
     command = ["docker", "compose", "up", "-d"]
     if recreate:
         command.append("--force-recreate")
@@ -337,7 +364,10 @@ def read_env_file() -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         name, _, value = line.partition("=")
-        values[name.strip()] = _shell_value(value.strip(), values)
+        name = name.strip()
+        if name.startswith("export "):  # bash sources `export NAME=value` too
+            name = name[len("export "):].strip()
+        values[name] = _shell_value(value.strip(), values)
     return values
 
 
@@ -366,6 +396,15 @@ def _shell_value(raw: str, known: dict[str, str]) -> str:
                                 os.environ.get(match.group(1) or match.group(2), "")),
         raw,
     )
+
+
+#: One `NAME=value` line of a `.env`: what comes before the name (indentation,
+#: `export `), the name, the value, and a trailing ` # comment` if any. A `#`
+#: inside quotes is part of the value, as bash reads it.
+_ENV_LINE = re.compile(
+    r"^(?P<lead>\s*(?:export\s+)?)(?P<name>[A-Za-z_][A-Za-z0-9_]*)="
+    r"(?P<value>'[^']*'|\"[^\"]*\"|[^#]*?)(?P<comment>\s+#.*)?\s*$"
+)
 
 
 def write_env_values(values: dict[str, str]) -> bool:
@@ -400,15 +439,16 @@ def write_env_values(values: dict[str, str]) -> bool:
     changed = False
 
     for index, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
+        match = _ENV_LINE.match(line)
+        if match is None or match.group("name") not in remaining:
             continue
-        name = stripped.partition("=")[0].strip()
-        if name not in remaining:
-            continue
-        wanted = remaining.pop(name)
-        if stripped != f"{name}={wanted}":
-            lines[index] = f"{name}={wanted}"
+        wanted = remaining.pop(match.group("name"))
+        # Only the value is ours: the indentation, an `export` and a comment
+        # after the value are whoever wrote the line, and stay.
+        edited = (f"{match.group('lead')}{match.group('name')}={wanted}"
+                  f"{match.group('comment') or ''}")
+        if edited != line:
+            lines[index] = edited
             changed = True
 
     # A key the file never had goes at the end, said plainly — someone
@@ -420,7 +460,14 @@ def write_env_values(values: dict[str, str]) -> bool:
         lines += [f"{name}={value}" for name, value in remaining.items()]
 
     if changed:
-        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        # Written beside it and swapped in: the file holds the engine's
+        # credentials, and a write cut off halfway would leave it truncated.
+        # The permissions it had are kept (the default for a new file would
+        # make it readable by everyone).
+        temporary = env_path.with_name(f".{env_path.name}.maphex-tmp")
+        temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        shutil.copymode(env_path, temporary)
+        os.replace(temporary, env_path)
     return changed
 
 

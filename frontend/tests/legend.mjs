@@ -61,10 +61,21 @@ function describe() {
   const fill = json.layers.find((l) => l.data && l.data.length && l.filled !== false);
   if (!fill) return null;
 
-  const text = (tip && tip.text) || '';
-  const placeholder = /\{([^}]+)\}/.exec(text);
-  const field = placeholder ? placeholder[1] : null;
-  const label = text.split(':')[0].trim();
+  /* The engine's tooltip, as text ('global: {global} | alerta: {alert}') or,
+     since 2026-11-18, as HTML with the cell's code first
+     ('<b>H3 (res 6):</b> {h3_index}<br/><b>global:</b> {global}'): the first
+     "label: {column}" item that is not the H3 cell. */
+  const template = (tip && (tip.html || tip.text)) || '';
+  const items = template.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').split(/\n|\|/);
+  let field = null;
+  let label = '';
+  for (const item of items) {
+    const placeholder = /\{([^}]+)\}/.exec(item);
+    if (!placeholder || placeholder[1] === 'h3_index') continue;
+    field = placeholder[1];
+    label = item.slice(0, placeholder.index).trim().replace(/:$/, '').trim();
+    break;
+  }
 
   const usable = (c) =>
     Array.isArray(c) && c.length >= 3 && c.every((n) => Number.isFinite(n) && n >= 0 && n <= 255);
@@ -271,12 +282,15 @@ async function readSynthetic(browser, errors, html) {
   }
 }
 
-function synthetic(block, layers, tooltipText) {
+/** A tooltip given as a string is the engine's old text form; an object is
+    used as it is (the HTML form, `{ html }`). */
+function synthetic(block, layers, tooltip) {
+  const tip = typeof tooltip === 'string' ? { text: tooltip } : tooltip;
   return (
     '<!DOCTYPE html><html><head><meta charset="utf-8"><title>synthetic</title></head>' +
     '<body><div id="deck-container"></div></body><script>\n' +
     `const jsonInput = ${JSON.stringify({ layers })};\n` +
-    `const tooltip = ${JSON.stringify({ text: tooltipText })};\n` +
+    `const tooltip = ${JSON.stringify(tip)};\n` +
     '</script>' +
     block +
     '</html>'
@@ -314,8 +328,9 @@ function scoreWithAlert() {
   ];
 }
 
-/** A classified layer: integer codes the engine's legend sidecar names. */
-function classified() {
+/** A classified layer: integer codes the engine's legend sidecar names, the
+    names in `labels` (`_categoria` before 2026-11-18, `_category` since). */
+function classified(labels = '_categoria') {
   const palette = [
     [31, 119, 180, 200],
     [255, 127, 14, 200],
@@ -328,7 +343,7 @@ function classified() {
         _color: palette[i % 3],
         h3_index: cell(i),
         clase: 11 + (i % 3),
-        _categoria: names[i % 3],
+        [labels]: names[i % 3],
       })),
     },
   ];
@@ -446,6 +461,27 @@ export async function run(workspace) {
       check('a classified layer: the labels, not the codes',
         codes.rows.map((row) => row.label).join(',') === '3C,4A,4B',
         JSON.stringify(codes.rows.map((row) => row.label)));
+
+      // The tooltip as the engine writes it since 2026-11-18: HTML, one item
+      // per line, the H3 cell first and its alert as yes/no. The legend has to
+      // skip the cell and title itself with the score, not with the alert.
+      const htmlScore = await readSynthetic(browser, errors, synthetic(block, scoreWithAlert(), {
+        html: '<b>H3 (res 6):</b> {h3_index}<br/><b>global:</b> {global}<br/><b>alert:</b> {alert}',
+        style: { whiteSpace: 'nowrap' },
+      }));
+      check('an HTML tooltip: titled with the score, not the H3 cell or the alert',
+        htmlScore.title === 'global', htmlScore.title);
+      check('an HTML tooltip: the ramp is the score\'s',
+        htmlScore.scale.length === 3 && sameNumber(htmlScore.scale[0], 1)
+          && sameNumber(htmlScore.scale[2], 3.95),
+        JSON.stringify(htmlScore.scale));
+
+      const htmlCodes = await readSynthetic(browser, errors, synthetic(block, classified('_category'), {
+        html: '<b>H3 (res 6):</b> {h3_index}<br/><b>clase:</b> {_category}',
+      }));
+      check('an HTML tooltip on a classified layer: the labels, not the codes',
+        htmlCodes.title === 'clase' && htmlCodes.rows.map((row) => row.label).join(',') === '3C,4A,4B',
+        JSON.stringify({ title: htmlCodes.title, rows: htmlCodes.rows.map((row) => row.label) }));
 
       // A column that is entirely null reaches the render as NaN and is cast
       // to int, so every channel of every cell is int64's floor. There is no
