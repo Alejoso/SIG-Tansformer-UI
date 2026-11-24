@@ -427,10 +427,12 @@ export interface VariableProblem {
   dimension: string;
   code: string;
   /**
-   * `error` when the engine said so, `unfinished` when it just stopped, and
-   * `missing` when it was in the last run and left nothing at all.
+   * `error` when the engine said so, `unfinished` when it just stopped,
+   * `missing` when it was in the last run and left nothing at all, and
+   * `notBuilt` when the engine's corrections step (10.5) was to build it and
+   * did not.
    */
-  status: 'error' | 'unfinished' | 'missing';
+  status: 'error' | 'unfinished' | 'missing' | 'notBuilt';
   /** The stage it stopped at, in the engine's own word for it. */
   stage: string;
   /** And in English. */

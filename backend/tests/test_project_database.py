@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 from app import engine_state, main, pipeline, store
 
@@ -386,3 +387,58 @@ def test_a_reload_clears_the_database_but_reuses_the_converted_files():
     # nothing to clear: an incremental load
     quiet = pipeline.reload_env(reset=False)
     assert quiet.get("H3_VALUES_FULL_REBUILD", "0") == "0" and quiet.get("RESET_FILES", "0") == "0"
+
+
+# ── an engine too old for the project's mesh ──────────────────────────────
+
+
+def _on_mesh(row: store.ProjectRow, **mesh) -> store.ProjectRow:
+    rows = store.read_projects()
+    for stored in rows:
+        if stored.id == row.id:
+            for key, value in mesh.items():
+                setattr(stored, key, value)
+    store.write_projects(rows)
+    return store.find_project(row.id)
+
+
+def test_an_engine_without_meshes_is_refused_for_another_mesh(engine, ready_engine, state_file, tmp_path):
+    """
+    An engine checked out before meshes ignores MESH_* and builds Colombia
+    (DANE) whatever the project says: a Peru project then drew Colombian data
+    in Colombia, and Greek data on a Greek project read as outside the mesh.
+    Said before anything runs, with what to do.
+    """
+    row = _on_mesh(_stored("p-per", tmp_path / "per"), mesh_id="natural_earth:PER",
+                   mesh_source="natural_earth", mesh_country="PER")
+    engine_state.record_run(row.id, "x", True, [])
+    for start in (main.start_processing, main.start_model_run):
+        with pytest.raises(HTTPException) as refused:
+            start(row.id)
+        assert refused.value.status_code == 400
+        assert "does not know meshes" in refused.value.detail
+        assert "Colombia (DANE)" in refused.value.detail
+    # an engine with meshes runs it
+    (engine / "app" / "pipeline").mkdir(parents=True, exist_ok=True)
+    (engine / "app" / "pipeline" / "prepare_mesh.py").write_text("# meshes\n")
+    with pytest.raises(_Started):
+        main.start_processing(row.id)
+
+
+def test_colombia_dane_runs_on_any_engine(ready_engine, state_file, tmp_path):
+    row = _stored("p-col", tmp_path / "col")
+    with pytest.raises(_Started):
+        main.start_processing(row.id)
+
+
+def test_a_sea_needs_an_engine_that_knows_it(engine, ready_engine, state_file, tmp_path):
+    row = _on_mesh(_stored("p-grc", tmp_path / "grc"), mesh_id="natural_earth:GRC:eez",
+                   mesh_source="natural_earth", mesh_country="GRC", mesh_sea="eez")
+    (engine / "app" / "pipeline").mkdir(parents=True, exist_ok=True)
+    (engine / "app" / "pipeline" / "prepare_mesh.py").write_text("# meshes, no sea\n")
+    with pytest.raises(HTTPException) as refused:
+        main.start_processing(row.id)
+    assert "its sea" in refused.value.detail
+    (engine / "app" / "pipeline" / "prepare_mesh.py").write_text("EEZ_WFS = 'x'\n")
+    with pytest.raises(_Started):
+        main.start_processing(row.id)

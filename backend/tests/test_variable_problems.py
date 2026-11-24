@@ -39,3 +39,22 @@ def test_an_error_before_a_later_successful_map_is_history(tmp_path):
     log = _log(tmp_path / "y.pipeline.jsonl",
                ("RENDER_HTML", "ok", {}), ("MALLA", "error", {"error": "ninguna"}))
     assert outputs._problem_from_log(log)[0] == "error"
+
+
+def test_a_variable_left_to_the_corrections_step_says_so(tmp_path):
+    """The ingest and the H3 conversion leave five variables to the engine's step 10.5 and
+    say so in the variable's log. When that step then did not build it (the run stopped
+    before, or an engine that could not find its source), the panel said "stopped partway,
+    with nothing saying why"; now it says which step was to build it."""
+    for stage, motivo in (("INGESTA", "lo construye la etapa 10.5 (apply_variable_fixes, presencia)"),
+                          ("CONVERSION_H3", "la convierte la etapa 10.5 (apply_variable_fixes)")):
+        log = _log(tmp_path / f"{stage}.pipeline.jsonl", ("INGESTA", "ok", {}),
+                   (stage, "skip", {"motivo": motivo}))
+        status, stage_seen, _, _, _ = outputs._problem_from_log(log)
+        assert (status, stage_seen) == ("notBuilt", "CORRECCIONES")
+    # and when the step failed, its own error wins
+    log = _log(tmp_path / "failed.pipeline.jsonl",
+               ("INGESTA", "skip", {"motivo": "lo construye la etapa 10.5 (apply_variable_fixes, columna x)"}),
+               ("CORRECCIONES", "error", {"error": "la litologia del paso 10.5 necesita la columna 'clasificac'"}))
+    status, stage_seen, reason, _, _ = outputs._problem_from_log(log)
+    assert (status, stage_seen) == ("error", "CORRECCIONES") and "clasificac" in reason

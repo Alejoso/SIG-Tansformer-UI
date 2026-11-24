@@ -809,6 +809,32 @@ def honours_data_dir() -> bool:
     return 'DATA_DIR="${DATA_DIR:-' in text
 
 
+#: The engine's step that prepares a mesh other than Colombia (DANE). An
+#: engine without it ignores `MESH_*` and builds Colombia whatever it is given.
+MESH_SCRIPT = Path("app") / "pipeline" / "prepare_mesh.py"
+
+
+def engine_knows_meshes() -> bool:
+    """
+    Whether the engine builds the mesh it is given (`MESH_SOURCE`).
+
+    Read from its checkout, as `honours_data_dir` is, because the failure is
+    silent: an engine from before meshes builds Colombia (DANE) whatever the
+    project says, so a Peru project draws Colombian data in Colombia and
+    Greek data reads as outside the mesh.
+    """
+    return (PIPELINE_DIR / MESH_SCRIPT).is_file()
+
+
+def engine_knows_sea() -> bool:
+    """Whether the engine can add a country's sea (`MESH_SEA=eez`)."""
+    try:
+        text = (PIPELINE_DIR / MESH_SCRIPT).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return "EEZ_WFS" in text
+
+
 def engine_data_dir() -> Path:
     """
     The folder the engine will actually process. Not the project's.

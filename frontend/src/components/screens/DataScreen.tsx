@@ -1760,6 +1760,12 @@ export function DataScreen() {
                           : 'produced nothing in the last run, and the engine did not say why. ' +
                             'Processing again is the thing to try.'}
                       </span>
+                    ) : problem.status === 'notBuilt' ? (
+                      <span className="problem-why">
+                        is built by the engine&apos;s per-variable corrections step, which did
+                        not build it in the last run. Process again; if the step fails on it,
+                        its reason shows here.
+                      </span>
                     ) : problem.status === 'unfinished' ? (
                       <span className="problem-why">
                         {problem.cause === 'memory'

@@ -1100,13 +1100,25 @@ country's exclusive economic zone from Marine Regions on the first run
 (CC BY 4.0) and builds the master with it, so the project has a sea: the
 `sea` fill domain and the offshore model are offered, as on Colombia (DANE).
 
+### An engine that does not know meshes
+
+An engine checked out from before meshes ignores `MESH_*` and builds
+Colombia (DANE) whatever the project says: a Peru project then drew
+Colombian data in Colombia, and Greek data on a Greek project read as outside
+the mesh. Processing and the model are refused up front on a mesh other than
+Colombia (DANE) when the engine has no `app/pipeline/prepare_mesh.py`, and on
+a country with its sea when that script cannot add one, saying to update the
+engine. Read from the checkout, as `honours_data_dir` is.
+
 ### Data of another area
 
 The engine draws only the cells inside the project's mesh. A variable with
 none (Colombian data on a Greek mesh) is not loaded or drawn, and the
 problems panel says so under *checking it against the mesh*, with the
 engine's reason. A variable the engine's per-variable corrections could not
-build says so under *applying its corrections*. An error that a successful
+build says so under *applying its corrections*. One it was to build and did not (the run
+stopped before that step, or an engine that could not find its source) says
+which step that was, instead of "stopped partway, with nothing saying why". An error that a successful
 map came after is history: the variable was fixed since.
 
 ## Working with the current engine

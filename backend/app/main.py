@@ -505,6 +505,7 @@ def start_processing(project_id: str, payload: ProcessPayload | None = None) -> 
             )
 
     _refuse_main_folder(folder)
+    _refuse_engine_without_mesh(project)
 
     # An uploaded mesh has to be in the project's folder before the engine
     # looks for it there.
@@ -574,6 +575,34 @@ def _engine_env(project: store.ProjectRow) -> dict[str, str]:
         # Its own database: see `pipeline.project_database`.
         **pipeline.project_database_env(project.id),
     }
+
+
+def _refuse_engine_without_mesh(project: store.ProjectRow) -> None:
+    """
+    Refuse a run the engine would quietly do on Colombia (DANE): a project on
+    another mesh, on an engine from before meshes; or one that takes its sea,
+    on an engine that cannot add it.
+    """
+    spec = meshes.spec_of(project)
+    if spec.source != meshes.DANE and not pipeline.engine_knows_meshes():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The engine at {pipeline.PIPELINE_DIR} does not know meshes yet: it is an "
+                "older version, and it would build Colombia (DANE) whatever this project's "
+                f"mesh is ({project.mesh_label or spec.id}). Update the engine to its latest "
+                "main branch, then run again."
+            ),
+        )
+    if spec.sea and not pipeline.engine_knows_sea():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The engine at {pipeline.PIPELINE_DIR} cannot add a country's sea yet: it "
+                "is an older version. Update the engine to its latest main branch, or "
+                "create the project without its sea."
+            ),
+        )
 
 
 def _require_mesh(project: store.ProjectRow) -> None:
@@ -952,6 +981,7 @@ def start_model_run(project_id: str, payload: ModelRunPayload | None = None) -> 
             ),
         )
     _refuse_main_folder(folder)
+    _refuse_engine_without_mesh(project)
     # The model scores the master in the project's own database, which the
     # engine creates on the project's first processing run; the model runner
     # does not, and would stop on "database does not exist". A project

@@ -313,7 +313,8 @@ class VariableProblem:
     code: str
     #: `error` when the engine said so, `unfinished` when it simply never got
     #: to the end — no render, and nothing claiming to have failed — and
-    #: `missing` when it left nothing at all (see `run_health`).
+    #: `missing` when it left nothing at all (see `run_health`), `notBuilt` when
+    #: the engine's step 10.5 was to build it and did not.
     status: str
     #: The stage it stopped at, in the engine's own word for it.
     stage: str
@@ -371,6 +372,13 @@ def _problem_from_log(log_path: Path) -> tuple[str, str, str, str, str]:
             return "error", stage, reason, source, execution_id
 
     rendered = latest.get("RENDER_HTML", {}).get("status") == "ok"
+    if not rendered:
+        # left to the engine's step 10.5 (the ingest and the H3 conversion say so), which
+        # then did not build it: say which step was to, rather than "nothing saying why"
+        for entry in latest.values():
+            motivo = str((entry.get("details") or {}).get("motivo") or "")
+            if entry.get("status") == "skip" and "etapa 10.5" in motivo:
+                return "notBuilt", "CORRECCIONES", "", "", execution_id
     return ("ok" if rendered else "unfinished"), "", "", "", execution_id
 
 
