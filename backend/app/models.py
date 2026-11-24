@@ -209,8 +209,8 @@ class PruneRunsPayload(BaseModel):
 
 class ProjectOptions(BaseModel):
     """
-    Switches passed to the engine with every run. Off unless turned on: each
-    costs disk or time and none changes a result. See `settings.Options`.
+    Switches passed to the engine with every run. None changes a result; the
+    ones that cost disk or time are off by default. See `settings.Options`.
     """
 
     #: The master table as CSV too (`EXPORT_CSV`).
@@ -219,6 +219,10 @@ class ProjectOptions(BaseModel):
     modelTablesCsv: bool = False
     #: Keep the machine awake while a run is going (`KEEP_AWAKE`).
     keepAwake: bool = False
+    #: Score statistics per model run (`MCDA_STATS_CSV`).
+    scoreStatsCsv: bool = False
+    #: The H3 code in the map tooltips (`MAP_TOOLTIP_H3`); on by default.
+    mapTooltipH3: bool = True
 
 
 class ProjectSettings(BaseModel):

@@ -32,7 +32,7 @@ const inRange = (value: number) =>
  * The project's switches, each with what it costs. Off unless turned on:
  * none of them changes a result, and each costs disk or time.
  */
-const OPTIONS: { key: keyof ProjectOptions; label: string; hint: string }[] = [
+const OPTIONS: { key: keyof ProjectOptions; label: string; hint: string; on?: boolean }[] = [
   {
     key: 'masterCsv',
     label: 'Master table as CSV',
@@ -48,6 +48,22 @@ const OPTIONS: { key: keyof ProjectOptions; label: string; hint: string }[] = [
       'megabytes and some seconds per run.',
   },
   {
+    key: 'scoreStatsCsv',
+    label: 'Score statistics',
+    hint:
+      'Each model run also writes the statistics of its scores (count, range, mean, ' +
+      'deviation and quartiles of the global score, each criterion and subcriterion) as ' +
+      'a small CSV.',
+  },
+  {
+    key: 'mapTooltipH3',
+    label: 'H3 code in the map tooltips',
+    hint:
+      'The tooltip of every map names the hexagon under the cursor by its H3 code, a ' +
+      'reference to find it again. Changing this redraws the maps on the next run.',
+    on: true,
+  },
+  {
     key: 'keepAwake',
     label: 'Keep the computer awake during runs',
     hint:
@@ -56,8 +72,9 @@ const OPTIONS: { key: keyof ProjectOptions; label: string; hint: string }[] = [
   },
 ];
 
+/** Any switch away from its default: on for most, off for the one on by default. */
 const anyOption = (options: ProjectOptions | undefined) =>
-  !!options && OPTIONS.some(({ key }) => options[key]);
+  !!options && OPTIONS.some(({ key, on }) => Boolean(options[key]) !== Boolean(on));
 
 const sameOptions = (a: ProjectOptions | undefined, b: ProjectOptions | undefined) =>
   OPTIONS.every(({ key }) => Boolean(a?.[key]) === Boolean(b?.[key]));
@@ -139,7 +156,7 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
   const canSave = !!settings && processingValid && mapValid && !saving;
   /**
    * Whether anything here is this project's own rather than the defaults:
-   * pinned resolutions, or a switch turned on. "Default values" undoes both.
+   * pinned resolutions, or a switch away from its default. "Default values" undoes both.
    */
   const ownSettings = !!settings && (!settings.followingEngine || anyOption(saved?.options));
 
@@ -378,7 +395,7 @@ export function SettingsDialog({ projectId, chosen, onChoose, onClose }: Setting
                   </label>
                 ))}
                 <p className="field-hint muted-55" style={{ margin: 0 }}>
-                  Off unless turned on. They change no result, and take effect from the next run.
+                  None of them changes a result. They take effect from the next run.
                 </p>
               </fieldset>
             )}

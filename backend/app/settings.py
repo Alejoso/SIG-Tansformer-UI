@@ -53,8 +53,9 @@ class Resolutions:
 @dataclass(frozen=True)
 class Options:
     """
-    The switches a project passes to the engine with every run. All off by
-    default: each costs disk or time, and none changes a result.
+    The switches a project passes to the engine with every run. None changes
+    a result. The ones that cost disk or time are off by default; the H3 code
+    in the tooltips is on, as the engine has drawn its maps since 2026-11-20.
     """
 
     #: The master table as CSV beside its parquet (`EXPORT_CSV`). Gigabytes
@@ -67,20 +68,38 @@ class Options:
     #: itself under `systemd-inhibit` where there is one. A laptop that
     #: suspends halfway through a load leaves it stopped until it wakes.
     keepAwake: bool = False
+    #: Each model run also writes the statistics of its scores
+    #: (`aggregate/stats.csv`: n, min, max, mean, deviation, quartiles of the
+    #: global score, each criterion and subcriterion; `MCDA_STATS_CSV`).
+    scoreStatsCsv: bool = False
+    #: Every map's tooltip shows the H3 code of the hexagon under the cursor
+    #: (`MAP_TOOLTIP_H3`). Turning it either way redraws the maps on the next
+    #: run.
+    mapTooltipH3: bool = True
 
 
-#: Each option, its column in `projects.csv` and the variable the engine reads.
+#: Each option, its column in `projects.csv`, the variable the engine reads,
+#: and its default.
 OPTION_FIELDS = (
-    ("masterCsv", "export_csv", "EXPORT_CSV"),
-    ("modelTablesCsv", "mcda_tables_csv", "MCDA_TABLES_CSV"),
-    ("keepAwake", "keep_awake", "KEEP_AWAKE"),
+    ("masterCsv", "export_csv", "EXPORT_CSV", False),
+    ("modelTablesCsv", "mcda_tables_csv", "MCDA_TABLES_CSV", False),
+    ("keepAwake", "keep_awake", "KEEP_AWAKE", False),
+    ("scoreStatsCsv", "mcda_stats_csv", "MCDA_STATS_CSV", False),
+    ("mapTooltipH3", "map_tooltip_h3", "MAP_TOOLTIP_H3", True),
 )
 
 
+def _stored(raw: str, default: bool) -> bool:
+    """A switch as stored: `1` on, `0` off, blank (or anything else) its default."""
+    value = (raw or "").strip()
+    return True if value == "1" else False if value == "0" else default
+
+
 def options_of(project: store.ProjectRow) -> Options:
-    """This project's switches. Anything but `1` in the store is off."""
+    """This project's switches: as stored, or each one's default."""
     return Options(**{
-        name: getattr(project, column).strip() == "1" for name, column, _ in OPTION_FIELDS
+        name: _stored(getattr(project, column), default)
+        for name, column, _, default in OPTION_FIELDS
     })
 
 
@@ -89,8 +108,10 @@ def save_options(project: store.ProjectRow, options: Options) -> store.ProjectRo
     rows = store.read_projects()
     for row in rows:
         if row.id == project.id:
-            for name, column, _ in OPTION_FIELDS:
-                setattr(row, column, "1" if getattr(options, name) else "")
+            for name, column, _, default in OPTION_FIELDS:
+                # its default as blank, so a change of default reaches it
+                wanted = getattr(options, name)
+                setattr(row, column, "" if wanted == default else "1" if wanted else "0")
             row.updated_at = store.now()
     store.write_projects(rows)
     saved = store.find_project(project.id)
@@ -107,7 +128,8 @@ def option_env(project: store.ProjectRow) -> dict[str, str]:
     """
     options = options_of(project)
     return {
-        variable: "1" if getattr(options, name) else "0" for name, _, variable in OPTION_FIELDS
+        variable: "1" if getattr(options, name) else "0"
+        for name, _, variable, _ in OPTION_FIELDS
     }
 
 
@@ -187,9 +209,9 @@ def clear(project: store.ProjectRow) -> store.ProjectRow:
         if row.id == project.id:
             row.h3_res = ""
             row.render_h3_res = ""
-            # The switches go back to off with them: "Default values" is the
-            # whole dialog.
-            for _, column, _ in OPTION_FIELDS:
+            # The switches go back to their defaults with them: "Default
+            # values" is the whole dialog.
+            for _, column, _, _ in OPTION_FIELDS:
                 setattr(row, column, "")
             row.updated_at = store.now()
     store.write_projects(rows)
