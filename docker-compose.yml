@@ -41,6 +41,9 @@ services:
       MAPHEX_UI_HOST_DIR: ${PWD:-}
       MAPHEX_ENGINE_DIR: ${SIG_TRANSFORMER_DIR:-../SIG-Transformer}
       MAPHEX_HOST_ROOT: ${MAPHEX_HOST_ROOT:-${HOME}}
+      # There is no native folder dialog in here, so the UI browses folders
+      # itself — only within what is shared with the host (see volumes).
+      MAPHEX_BROWSE_ROOT: ${MAPHEX_HOST_ROOT:-${HOME}}
       # The backend's `docker compose` calls must find this same project.
       COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-sig-transformer}
       HOME: ${HOME}

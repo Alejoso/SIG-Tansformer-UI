@@ -56,6 +56,7 @@ from .models import (
     ProjectOptions,
     ProjectSettings,
     NewProjectPayload,
+    FolderListing,
     PickFolderPayload,
     PickFolderResult,
     ModelRunPayload,
@@ -1349,6 +1350,16 @@ def pick_folder(payload: PickFolderPayload | None = None) -> PickFolderResult:
     worker thread, so the rest of the API keeps serving meanwhile.
     """
     return fsutil.pick_folder(payload.startAt if payload else None)
+
+
+@app.get("/api/fs/folders")
+def list_folders(path: str | None = None) -> FolderListing:
+    """
+    One level of the in-app folder browser: the subfolders of `path`.
+
+    For when `pick-folder` says there is no dialog here — in Docker, notably.
+    """
+    return fsutil.list_folders(path)
 
 
 # ── the built frontend ────────────────────────────────────────────────────

@@ -27,6 +27,7 @@ import type {
   NewProjectPayload,
   PipelineReadiness,
   PipelineRun,
+  FolderListing,
   PickedFolder,
   Project,
   ProjectOptions,
@@ -100,6 +101,15 @@ export const pickFolder = (startAt?: string): Promise<PickedFolder> =>
     method: 'POST',
     body: JSON.stringify({ startAt: startAt?.trim() || null }),
   });
+
+/**
+ * LIVE: GET /api/fs/folders?path=
+ *
+ * The subfolders of one folder, for the in-app browser that stands in for
+ * the dialog when `pickFolder` says there is none (in Docker).
+ */
+export const listFolders = (path?: string): Promise<FolderListing> =>
+  request(`/fs/folders${path ? `?path=${encodeURIComponent(path)}` : ''}`);
 
 /* ── the data the engine will read ─────────────────────────────────────── */
 

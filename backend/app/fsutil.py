@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .models import InspectResult, PickFolderResult
+from .models import FolderEntry, FolderListing, InspectResult, PickFolderResult
 
 #: Stop walking a folder after this many files. A data folder can hold
 #: hundreds of thousands; the UI only wants a rough size, and an exact count
@@ -256,5 +256,69 @@ def pick_folder(start_at: str | None = None) -> PickFolderResult:
             return result
 
     return PickFolderResult(
-        unavailable="No folder dialog on this machine — paste the path instead."
+        unavailable="No folder dialog on this machine — paste the path instead.",
+        browse=True,
+    )
+
+
+# ── the in-app browser, for when there is no dialog ───────────────────────
+
+
+def browse_root() -> Path:
+    """
+    The top of what the in-app browser shows.
+
+    In Docker only the host folder mounted at its own path is real to the
+    engine — a folder elsewhere in the container would be picked and then not
+    exist for the daemon — so docker-compose.yml sets MAPHEX_BROWSE_ROOT to
+    it. Outside Docker the whole filesystem is fair game.
+    """
+    raw = os.environ.get("MAPHEX_BROWSE_ROOT", "").strip()
+    return Path(raw).resolve() if raw else Path("/")
+
+
+def _within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def list_folders(raw: str | None) -> FolderListing:
+    """
+    The subfolders of one folder, for the browser to show a level at a time.
+
+    Anything that cannot be listed — missing, a file, outside the root —
+    falls back to the nearest sensible place rather than failing, because the
+    usual input is whatever half-typed path is already in the field.
+    """
+    root = browse_root()
+    start = Path.home() if _within(Path.home().resolve(), root) else root
+    try:
+        path = expand(raw) if raw and raw.strip() else start
+    except (OSError, RuntimeError):
+        path = start
+    while not path.is_dir() and path != path.parent:
+        path = path.parent
+    if not _within(path, root):
+        path = start
+
+    folders: list[FolderEntry] = []
+    try:
+        with os.scandir(path) as entries:
+            for entry in entries:
+                # Hidden folders are noise for picking data, and following a
+                # symlink could leave the root.
+                if entry.name.startswith(".") or entry.is_symlink():
+                    continue
+                try:
+                    if entry.is_dir():
+                        folders.append(FolderEntry(name=entry.name, path=str(path / entry.name)))
+                except OSError:
+                    continue
+    except OSError:
+        pass  # unreadable: shown as empty, and the user can still go up
+    folders.sort(key=lambda folder: folder.name.lower())
+
+    return FolderListing(
+        path=str(path),
+        parent=str(path.parent) if path != root and path != path.parent else None,
+        folders=folders,
     )

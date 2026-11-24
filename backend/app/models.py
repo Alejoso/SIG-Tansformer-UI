@@ -322,6 +322,23 @@ class PickFolderResult(BaseModel):
     #: Set when no native dialog could be opened, so the UI can say why
     #: instead of silently doing nothing.
     unavailable: str | None = None
+    #: True when there is simply no dialog here (in Docker, say), as opposed to
+    #: one that failed: the UI then opens its own folder browser instead.
+    browse: bool = False
+
+
+class FolderEntry(BaseModel):
+    name: str
+    path: str
+
+
+class FolderListing(BaseModel):
+    """One level of the in-app folder browser."""
+
+    path: str
+    #: None at the top of what can be browsed.
+    parent: str | None = None
+    folders: list[FolderEntry] = Field(default_factory=list)
 
 
 class PipelineStageState(BaseModel):

@@ -106,6 +106,16 @@ export interface PickedFolder {
   path: string | null;
   /** Set when no dialog could be opened, so the UI can say why. */
   unavailable: string | null;
+  /** No dialog exists here at all (Docker): use the in-app browser. */
+  browse?: boolean;
+}
+
+/** One level of the in-app folder browser. */
+export interface FolderListing {
+  path: string;
+  /** Null at the top of what can be browsed. */
+  parent: string | null;
+  folders: { name: string; path: string }[];
 }
 
 /**

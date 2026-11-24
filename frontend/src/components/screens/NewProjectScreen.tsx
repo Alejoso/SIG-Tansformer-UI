@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
 import type { GeoBoundariesLevel, Mesh, Resolutions } from '../../types';
+import { FolderBrowser } from '../ui/FolderBrowser';
 import { Icon } from '../ui/Icon';
 import { SearchableSelect } from '../ui/SearchableSelect';
 import { SettingsDialog } from './SettingsDialog';
@@ -37,6 +38,7 @@ export function NewProjectScreen() {
   const [creating, setCreating] = useState(false);
   /** The folder dialog blocks this request for as long as it is open. */
   const [choosing, setChoosing] = useState(false);
+  const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   /**
    * Resolutions chosen before the project exists, written to it once it
@@ -110,6 +112,8 @@ export function NewProjectScreen() {
     try {
       const picked = await api.pickFolder(outFolder);
       if (picked.path) setOutFolder(picked.path);
+      // No dialog here at all (Docker): browse in the app instead.
+      else if (picked.browse) setFolderBrowserOpen(true);
       else if (picked.unavailable) showToast(picked.unavailable);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not open a folder chooser');
@@ -399,6 +403,16 @@ export function NewProjectScreen() {
           chosen={resolutions}
           onChoose={setResolutions}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+      {folderBrowserOpen && (
+        <FolderBrowser
+          startAt={outFolder}
+          onPick={(path) => {
+            setOutFolder(path);
+            setFolderBrowserOpen(false);
+          }}
+          onClose={() => setFolderBrowserOpen(false)}
         />
       )}
     </div>

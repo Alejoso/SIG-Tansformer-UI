@@ -20,6 +20,7 @@ import { sourceLabel } from '../../lib/value-columns';
 import { describeSettings, settingsOf } from '../../lib/variable-settings';
 import { formatSize } from '../../lib/format';
 import * as modelRun from '../../lib/model-run';
+import { FolderBrowser } from '../ui/FolderBrowser';
 import { Icon } from '../ui/Icon';
 import { SettingsDialog } from './SettingsDialog';
 
@@ -195,6 +196,7 @@ export function DataScreen() {
   const [adding, setAdding] = useState(false);
   /** The folder dialog blocks this request for as long as it is open. */
   const [browsing, setBrowsing] = useState(false);
+  const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
 
   /** Where the new variable will go. Both are editable before adding. */
   const [dimension, setDimension] = useState('');
@@ -616,6 +618,8 @@ export function DataScreen() {
     try {
       const picked = await api.pickFolder(draftPath);
       if (picked.path) setDraftPath(picked.path);
+      // No dialog here at all (Docker): browse in the app instead.
+      else if (picked.browse) setFolderBrowserOpen(true);
       else if (picked.unavailable) showToast(picked.unavailable);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not open a folder chooser');
@@ -1950,6 +1954,16 @@ export function DataScreen() {
 
       {showSettings && project && (
         <SettingsDialog projectId={project.id} onClose={() => setShowSettings(false)} />
+      )}
+      {folderBrowserOpen && (
+        <FolderBrowser
+          startAt={draftPath}
+          onPick={(path) => {
+            setDraftPath(path);
+            setFolderBrowserOpen(false);
+          }}
+          onClose={() => setFolderBrowserOpen(false)}
+        />
       )}
     </div>
   );
