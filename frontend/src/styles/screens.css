@@ -864,3 +864,12 @@
 .engine-setting.is-edited .input { border-color: var(--color-accent); }
 .engine-flag { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
 .projects-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+
+/* The last run ran out of memory: what happened and where to change it. */
+.memory-alert { margin-top: 10px; align-items: flex-start; }
+.memory-alert .folder-alert-body { gap: 6px; }
+.engine-settings-focus {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+  padding: 8px 12px; border-radius: var(--radius-md);
+  background: var(--color-neutral-200); font-size: 13px;
+}

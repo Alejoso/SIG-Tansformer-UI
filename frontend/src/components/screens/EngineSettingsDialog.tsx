@@ -6,6 +6,11 @@ import { Icon } from '../ui/Icon';
 
 interface EngineSettingsDialogProps {
   onClose: () => void;
+  /**
+   * Open on just these settings, with the reason they are shown — from a
+   * problem that names what to change. The rest is one click away.
+   */
+  focus?: { keys: string[]; reason: string };
 }
 
 /**
@@ -31,7 +36,7 @@ const isOn = (value: string) => value === '1';
  * out of its database, start an empty one, or fight each project's own
  * resolution.
  */
-export function EngineSettingsDialog({ onClose }: EngineSettingsDialogProps) {
+export function EngineSettingsDialog({ onClose, focus }: EngineSettingsDialogProps) {
   const [config, setConfig] = useState<EngineConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Edits not saved yet: the new value, or null for "the engine's default". */
@@ -39,6 +44,7 @@ export function EngineSettingsDialog({ onClose }: EngineSettingsDialogProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [filter, setFilter] = useState('');
+  const [focused, setFocused] = useState(Boolean(focus?.keys.length));
 
   useEffect(() => {
     let live = true;
@@ -102,7 +108,10 @@ export function EngineSettingsDialog({ onClose }: EngineSettingsDialogProps) {
 
   const needle = filter.trim().toLowerCase();
   const matches = (setting: EngineSetting) =>
-    !needle ||
+    needle
+      ? matchesText(setting)
+      : !focused || !focus || focus.keys.includes(setting.key);
+  const matchesText = (setting: EngineSetting) =>
     setting.label.toLowerCase().includes(needle) ||
     setting.key.toLowerCase().includes(needle) ||
     setting.description.toLowerCase().includes(needle);
@@ -147,6 +156,15 @@ export function EngineSettingsDialog({ onClose }: EngineSettingsDialogProps) {
               .env.example first (it holds the database credentials), or point this app at
               the engine&apos;s folder with MAPHEX_PIPELINE_DIR.
             </p>
+          )}
+
+          {focused && focus && (
+            <div className="engine-settings-focus">
+              <span>{focus.reason}</span>
+              <button type="button" className="btn btn-ghost" onClick={() => setFocused(false)}>
+                Show all settings
+              </button>
+            </div>
           )}
 
           <input

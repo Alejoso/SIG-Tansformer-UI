@@ -426,8 +426,11 @@ export interface VariableProblem {
   id: string;
   dimension: string;
   code: string;
-  /** `error` when the engine said so, `unfinished` when it just stopped. */
-  status: 'error' | 'unfinished';
+  /**
+   * `error` when the engine said so, `unfinished` when it just stopped, and
+   * `missing` when it was in the last run and left nothing at all.
+   */
+  status: 'error' | 'unfinished' | 'missing';
   /** The stage it stopped at, in the engine's own word for it. */
   stage: string;
   /** And in English. */
@@ -440,6 +443,30 @@ export interface VariableProblem {
   /** The file it was reading. */
   source: string;
   executionId: string;
+  /** `memory` when that run lost worker processes to the system. */
+  cause?: string;
+}
+
+/** One engine stage that lost worker processes to the system. */
+export interface KilledStage {
+  script: string;
+  label: string;
+  /** Files it gave up on because of it. */
+  failed: number;
+  /** How many it read at once, when its log says. */
+  workers: number | null;
+  /** The engine setting that lowers that. */
+  workersSetting: string | null;
+}
+
+/** The last run lost files to the system killing the engine's processes. */
+export interface MemoryCrash {
+  executionId: string;
+  stages: KilledStage[];
+  /** The engine's memory as set now. */
+  memoryLimit: string;
+  /** Engine settings worth changing, in the order to try them. */
+  settings: string[];
 }
 
 export interface LayerNode {

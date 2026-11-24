@@ -29,6 +29,7 @@ import type {
   PipelineReadiness,
   PipelineRun,
   FolderListing,
+  MemoryCrash,
   PickedFolder,
   Project,
   ProjectOptions,
@@ -147,6 +148,17 @@ export const listDimensions = (projectId: string): Promise<string[]> =>
  */
 export const listProblems = (projectId: string): Promise<VariableProblem[]> =>
   request(`/projects/${projectId}/problems`);
+
+/**
+ * LIVE: GET /api/projects/{id}/memory-crash
+ *
+ * Whether the last run lost files to the system killing the engine's worker
+ * processes (for memory, nearly always), and which settings to change. Null
+ * when it did not. The engine itself only logs "terminated abruptly", once
+ * per file, naming none, and reports the stage as fine.
+ */
+export const getMemoryCrash = (projectId: string): Promise<MemoryCrash | null> =>
+  request(`/projects/${projectId}/memory-crash`);
 
 /**
  * ENDPOINT: POST /api/projects/{id}/inputs/plan

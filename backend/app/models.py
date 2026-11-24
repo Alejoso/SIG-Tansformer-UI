@@ -152,7 +152,7 @@ class VariableProblem(BaseModel):
     dimension: str
     code: str
     #: `error` when the engine said so, `unfinished` when it simply never got
-    #: to the end.
+    #: to the end, `missing` when it was in the last run and left nothing.
     status: str
     stage: str = ""
     stageLabel: str = ""
@@ -161,6 +161,26 @@ class VariableProblem(BaseModel):
     reason: str = ""
     source: str = ""
     executionId: str = ""
+    #: `memory` when that run lost workers to the system (see `MemoryCrash`).
+    cause: str = ""
+
+
+class KilledStage(BaseModel):
+    script: str
+    label: str
+    failed: int
+    workers: int | None = None
+    workersSetting: str | None = None
+
+
+class MemoryCrash(BaseModel):
+    """The last run lost files to the system killing the engine's workers."""
+
+    executionId: str
+    stages: list[KilledStage] = Field(default_factory=list)
+    memoryLimit: str = "8g"
+    #: Engine settings to change, in the order to try them.
+    settings: list[str] = Field(default_factory=list)
 
 
 class LayerTree(BaseModel):

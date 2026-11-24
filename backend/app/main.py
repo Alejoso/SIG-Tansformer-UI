@@ -31,6 +31,7 @@ from . import (
     model_store,
     outputs,
     pipeline,
+    run_health,
     runs,
     settings as project_settings,
     store,
@@ -39,6 +40,7 @@ from . import (
 )
 from .models import (
     EngineConfig,
+    MemoryCrash,
     SaveEngineConfigPayload,
     AbortResult,
     ImportCandidate,
@@ -693,7 +695,33 @@ def list_problems(project_id: str) -> list[VariableProblem]:
     it.
     """
     project = _require_project(project_id)
-    return [VariableProblem(**vars(problem)) for problem in outputs.scan_problems(project)]
+    found = outputs.scan_problems(project) + run_health.missing_problems(project)
+    # A variable that stopped partway in the very run that lost workers to
+    # the system most likely stopped for that. One whose log is from an
+    # earlier run stopped for some other reason, and is not blamed on it.
+    crash = run_health.memory_crash(project) if found else None
+    if crash:
+        for problem in found:
+            if problem.status == "unfinished" and problem.executionId == crash.executionId:
+                problem.cause = "memory"
+    found.sort(key=lambda problem: problem.id)
+    return [VariableProblem(**vars(problem)) for problem in found]
+
+
+@app.get("/api/projects/{project_id}/memory-crash")
+def memory_crash(project_id: str) -> MemoryCrash | None:
+    """
+    Whether the last run lost files to the system killing the engine's
+    processes — for memory, nearly always — and what to change about it.
+
+    The engine words that as "A process in the process pool was terminated
+    abruptly", once per file it gave up on, naming none of them, and reports
+    the stage as a success. Null when the last run had none of it.
+    """
+    crash = run_health.memory_crash(_require_project(project_id))
+    if crash is None:
+        return None
+    return MemoryCrash(**{**vars(crash), "stages": [vars(stage) for stage in crash.stages]})
 
 
 @app.post("/api/projects/{project_id}/inputs/plan")

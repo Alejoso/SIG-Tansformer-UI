@@ -306,7 +306,8 @@ class VariableProblem:
     dimension: str
     code: str
     #: `error` when the engine said so, `unfinished` when it simply never got
-    #: to the end — no render, and nothing claiming to have failed.
+    #: to the end — no render, and nothing claiming to have failed — and
+    #: `missing` when it left nothing at all (see `run_health`).
     status: str
     #: The stage it stopped at, in the engine's own word for it.
     stage: str
@@ -318,6 +319,9 @@ class VariableProblem:
     #: The file it was reading.
     source: str
     executionId: str
+    #: Why, when it can be told from the run rather than from the variable:
+    #: `memory` when the system killed the engine's workers in that run.
+    cause: str = ""
 
 
 def _problem_from_log(log_path: Path) -> tuple[str, str, str, str, str]:

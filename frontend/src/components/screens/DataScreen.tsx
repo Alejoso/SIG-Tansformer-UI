@@ -5,6 +5,7 @@ import type {
   ImportCandidate,
   ImportPlan,
   InputVariable,
+  MemoryCrash,
   ValueColumnSource,
   ValueColumnsState,
   VariableProblem,
@@ -22,6 +23,7 @@ import { formatSize } from '../../lib/format';
 import * as modelRun from '../../lib/model-run';
 import { FolderBrowser } from '../ui/FolderBrowser';
 import { Icon } from '../ui/Icon';
+import { EngineSettingsDialog } from './EngineSettingsDialog';
 import { SettingsDialog } from './SettingsDialog';
 
 /* The mockup said "up to ten", and that was right when the list was a record
@@ -168,6 +170,9 @@ export function DataScreen() {
    * after a reload.
    */
   const [problems, setProblems] = useState<VariableProblem[]>([]);
+  /** The last run lost files to the system killing the engine's workers. */
+  const [memoryCrash, setMemoryCrash] = useState<MemoryCrash | null>(null);
+  const [engineSettingsOpen, setEngineSettingsOpen] = useState(false);
 
   /**
    * Files with several value columns, as the engine's own check sees them:
@@ -296,12 +301,14 @@ export function DataScreen() {
       api.listInputs(projectId),
       api.listDimensions(projectId),
       api.listProblems(projectId).catch(() => [] as VariableProblem[]),
+      api.getMemoryCrash(projectId).catch(() => null),
     ])
-      .then(([list, dims, found]) => {
+      .then(([list, dims, found, crash]) => {
         if (!live) return;
         setVariables(list);
         setDimensions(dims);
         setProblems(found);
+        setMemoryCrash(crash);
         // Default to the dimension already in use, so the common case —
         // another variable alongside the others — needs no choice at all.
         // Not `|| ''`: a select whose value matches no option still *shows*
@@ -392,7 +399,16 @@ export function DataScreen() {
   // A variable not finished yet while a run is going is one the run has not
   // reached: the per-variable fixes and the render come late, so mid-run every
   // variable they build would read as stopped partway. Only a finished run says so.
-  const shownProblems = running ? problems.filter((p) => p.status !== 'unfinished') : problems;
+  // While a run is going, what has not finished yet is not a problem yet.
+  const shownProblems = running ? problems.filter((p) => p.status === 'error') : problems;
+  const shownCrash = running ? null : memoryCrash;
+  /** The biggest of what the crash cost, which is usually what caused it. */
+  const crashVictims = shownCrash
+    ? shownProblems
+        .filter((p) => p.cause === 'memory' && p.status !== 'error')
+        .map((p) => ({ problem: p, size: variables.find((v) => v.id === p.id)?.sizeBytes ?? 0 }))
+        .sort((a, b) => b.size - a.size)
+    : [];
   const phase = running ? 'processing' : run?.status === 'done' ? 'done' : 'empty';
   /**
    * A model run counts as the engine being busy too.
@@ -1717,10 +1733,19 @@ export function DataScreen() {
                 {shownProblems.map((problem) => (
                   <li key={problem.id}>
                     <span className="problem-code mono">{problem.code}</span>
-                    {problem.status === 'unfinished' ? (
+                    {problem.status === 'missing' ? (
                       <span className="problem-why">
-                        stopped partway through, with nothing saying why: the run may have
-                        been interrupted. Processing again is the thing to try.
+                        {problem.cause === 'memory'
+                          ? 'produced nothing: the engine ran out of memory before it got to it.'
+                          : 'produced nothing in the last run, and the engine did not say why. ' +
+                            'Processing again is the thing to try.'}
+                      </span>
+                    ) : problem.status === 'unfinished' ? (
+                      <span className="problem-why">
+                        {problem.cause === 'memory'
+                          ? 'stopped partway through: the engine ran out of memory.'
+                          : 'stopped partway through, with nothing saying why: the run may ' +
+                            'have been interrupted. Processing again is the thing to try.'}
                       </span>
                     ) : (
                       <span className="problem-why">
@@ -1759,7 +1784,68 @@ export function DataScreen() {
               </span>
             </div>
           </div>
+          {shownCrash && (
+            <div className="folder-alert is-problem memory-alert">
+              <div className="folder-alert-body">
+                <strong>The engine ran out of memory in the last run</strong>
+                {shownCrash.stages.map((stage) => (
+                  <span key={stage.script}>
+                    While “{stage.label}”, the system stopped the engine&apos;s worker processes
+                    and {stage.failed} {stage.failed === 1 ? 'file' : 'files'} could not be read
+                    {stage.workers !== null && (
+                      <>
+                        {' '}
+                        — it was reading {stage.workers} at a time with {shownCrash.memoryLimit} of
+                        memory
+                      </>
+                    )}
+                    . The engine does not say which. Those with results from an earlier run
+                    keep them; the ones listed above as having produced nothing never had any.
+                  </span>
+                ))}
+                {crashVictims.length > 0 && (
+                  <span>
+                    The largest files are the usual cause:{' '}
+                    {crashVictims.slice(0, 4).map(({ problem, size }, index) => (
+                      <span key={problem.id}>
+                        {index > 0 && ', '}
+                        <span className="mono">{problem.code}</span>
+                        {size > 0 && ` (${formatSize(size)})`}
+                      </span>
+                    ))}
+                    .
+                  </span>
+                )}
+                <span className="muted-55">
+                  Give the engine more memory, or have it read fewer files at once (1, or 0 for
+                  one at a time), then process again.
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary problem-fix"
+                onClick={() => setEngineSettingsOpen(true)}
+              >
+                Open engine settings
+              </button>
+            </div>
+          )}
           </div>
+        )}
+        {engineSettingsOpen && (
+          <EngineSettingsDialog
+            onClose={() => setEngineSettingsOpen(false)}
+            focus={
+              shownCrash
+                ? {
+                    keys: shownCrash.settings,
+                    reason:
+                      'The settings that decide how much memory a run has and how much it ' +
+                      'uses at once.',
+                  }
+                : undefined
+            }
+          />
         )}
 
         <div className="process-actions">
