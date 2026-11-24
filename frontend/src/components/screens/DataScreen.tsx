@@ -172,6 +172,8 @@ export function DataScreen() {
   const [problems, setProblems] = useState<VariableProblem[]>([]);
   /** The last run lost files to the system killing the engine's workers. */
   const [memoryCrash, setMemoryCrash] = useState<MemoryCrash | null>(null);
+  /** The reload the problems above came from: older ones predate the last run. */
+  const [problemsToken, setProblemsToken] = useState(-1);
   const [engineSettingsOpen, setEngineSettingsOpen] = useState(false);
 
   /**
@@ -309,6 +311,7 @@ export function DataScreen() {
         setDimensions(dims);
         setProblems(found);
         setMemoryCrash(crash);
+        setProblemsToken(reloadToken);
         // Default to the dimension already in use, so the common case —
         // another variable alongside the others — needs no choice at all.
         // Not `|| ''`: a select whose value matches no option still *shows*
@@ -424,8 +427,23 @@ export function DataScreen() {
     applying?.projectId === projectId &&
     (applying.run.status === 'starting' || applying.run.status === 'running');
   const locked = running || modelRunning;
-  /** The run finished, but not with everything. */
-  const someFailed = (run?.erroredFiles ?? 0) > 0;
+  /**
+   * The problems are from after the run: the reload it triggers has come
+   * back. Until then the list is the one from before it started.
+   */
+  const problemsCurrent = problemsToken === reloadToken;
+  /**
+   * The run finished, but not with everything — counted in variables, from
+   * the problems list. The run's own `erroredFiles` is files, not variables:
+   * when the engine runs out of memory every file left in its pool counts,
+   * including ones whose results from an earlier run are still there.
+   */
+  const failedVariables = problemsCurrent ? problems.length : 0;
+  // Until the list is back, a run that dropped files is assumed to have left
+  // something out, so the dialog does not open on "All done" and then flip.
+  const someFailed = problemsCurrent ? failedVariables > 0 : (run?.erroredFiles ?? 0) > 0;
+  /** Of those, the ones the engine running out of memory cost. */
+  const memoryVictims = problemsCurrent ? problems.filter((p) => p.cause === 'memory').length : 0;
   /**
    * The variables, under the dimension each belongs to.
    *
@@ -1678,9 +1696,11 @@ export function DataScreen() {
                 {run.erroredFiles > 0 && (
                   <>
                     {run.erroredFiles} {run.erroredFiles === 1 ? 'file' : 'files'} could not be
-                    processed; the engine carried on without{' '}
+                    read; the engine carried on without{' '}
                     {run.erroredFiles === 1 ? 'it' : 'them'}
-                    {shownProblems.length > 0 ? ', and which ones is listed above.' : '.'}{' '}
+                    {shownProblems.length > 0
+                      ? `. ${shownProblems.length} ${shownProblems.length === 1 ? 'variable is' : 'variables are'} left without results, listed above.`
+                      : '.'}{' '}
                   </>
                 )}
                 {run.skippedFiles > 0 && (
@@ -1923,16 +1943,23 @@ export function DataScreen() {
               ? 'The rest is ready to explore on the map.'
               : 'Every variable is ready to explore on the map.'}
           </p>
-          {someFailed && run && (
+          {failedVariables > 0 && (
             <p className="complete-failed">
               <strong>
-                {run.erroredFiles} {run.erroredFiles === 1 ? 'variable' : 'variables'} could not
+                {failedVariables} {failedVariables === 1 ? 'variable' : 'variables'} could not
                 be processed.
               </strong>{' '}
-              {shownProblems.length > 0
-                ? `Which ${shownProblems.length === 1 ? 'one' : 'ones'}, and what the engine said
-                   about ${shownProblems.length === 1 ? 'it' : 'them'}, is on the page behind this.`
-                : 'The engine carried on without them.'}
+              {memoryVictims > 0 &&
+                (memoryVictims === failedVariables
+                  ? 'The engine ran out of memory. '
+                  : `${memoryVictims} of them because the engine ran out of memory. `)}
+              Which {failedVariables === 1 ? 'one' : 'ones'}, and what the engine said about{' '}
+              {failedVariables === 1 ? 'it' : 'them'}, is on the page behind this.
+            </p>
+          )}
+          {!problemsCurrent && (run?.erroredFiles ?? 0) > 0 && (
+            <p className="muted-55" style={{ margin: 0 }}>
+              Checking which variables were left out…
             </p>
           )}
           <div className="dialog-actions" style={{ alignSelf: 'stretch' }}>
