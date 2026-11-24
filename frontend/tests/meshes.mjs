@@ -87,6 +87,14 @@ export async function run() {
     check('geoBoundaries is attributed', /geoBoundaries \(CC BY 4\.0\)/.test(body));
     check('and its download is announced', /first run/.test(body) && /internet/.test(body));
 
+    /* ── with its sea ─────────────────────────────────────────────────── */
+    const sea = page.locator('#project-mesh-sea');
+    check('a country can take its sea', (await sea.count()) === 1 && !(await sea.isChecked()));
+    await sea.check();
+    check('then the no-sea hint goes', (await page.getByTestId('mesh-no-sea').count()) === 0);
+    check('Marine Regions is attributed',
+      /Marine Regions \(CC BY 4\.0\)/.test(await page.locator('.setup-card').innerText()));
+
     /* ── one without ─────────────────────────────────────────────────── */
     await pickMesh(page, 'France', 'France');
     const adm1 = page.locator('#project-mesh-detail option[value="ADM1"]');
@@ -95,6 +103,7 @@ export async function run() {
     /* ── DANE ─────────────────────────────────────────────────────────── */
     await pickMesh(page, 'DANE', 'Colombia (DANE)');
     check('DANE has no detail level', (await page.locator('#project-mesh-detail').count()) === 0);
+    check('nor a sea to add: it has its own', (await page.locator('#project-mesh-sea').count()) === 0);
     check('nor the no-sea hint', (await page.getByTestId('mesh-no-sea').count()) === 0);
 
     /* ── an upload ────────────────────────────────────────────────────── */

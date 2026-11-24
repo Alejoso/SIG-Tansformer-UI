@@ -294,6 +294,12 @@ STAGE_LABELS = {
     "RASTER_H3": "converting the raster to hexagons",
     "CARGA_DB": "loading into the database",
     "RENDER_HTML": "drawing the map",
+    # Written by the engine's render when no cell of the variable is inside the
+    # project's mesh: data of another area.
+    "MALLA": "checking it against the mesh",
+    # Written by the engine's step 10.5 when it cannot build a variable it owns
+    # (the lithology without the ingest's GeoParquet, say).
+    "CORRECCIONES": "applying its corrections",
 }
 
 
@@ -330,11 +336,16 @@ def _problem_from_log(log_path: Path) -> tuple[str, str, str, str, str]:
 
     The last entry per stage wins: a variable that failed and was then fixed
     and re-run appends to the same file, so the earlier failure is history
-    rather than news.
+    rather than news. So is an error that a successful map came after: the
+    error's stage may not run again once the variable is fixed (the mesh
+    check, `MALLA`, writes only when there is something wrong).
     """
     latest: dict[str, dict] = {}
+    #: Where in the log each stage's last entry is.
+    position: dict[str, int] = {}
     execution_id = ""
-    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+    lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    for index, line in enumerate(lines):
         line = line.strip()
         if not line:
             continue
@@ -345,10 +356,13 @@ def _problem_from_log(log_path: Path) -> tuple[str, str, str, str, str]:
         execution_id = entry.get("execution_id", execution_id) or execution_id
         stage = str(entry.get("stage", "")) or "?"
         latest[stage] = entry
+        position[stage] = index
 
+    rendered_at = (position["RENDER_HTML"]
+                   if latest.get("RENDER_HTML", {}).get("status") == "ok" else -1)
     for stage in (*STAGE_ORDER, *sorted(set(latest) - set(STAGE_ORDER))):
         entry = latest.get(stage)
-        if entry is None:
+        if entry is None or position[stage] < rendered_at:
             continue
         if entry.get("status") in ("error", "fail", "failed"):
             details = entry.get("details") or {}

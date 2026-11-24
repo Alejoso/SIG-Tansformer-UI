@@ -722,6 +722,10 @@ export interface ProjectOptions {
   modelTablesCsv: boolean;
   /** Hold off sleep while a run is going (`KEEP_AWAKE`). */
   keepAwake: boolean;
+  /** Each model run also writes the statistics of its scores (`MCDA_STATS_CSV`). */
+  scoreStatsCsv: boolean;
+  /** The H3 code of the hexagon under the cursor in every map's tooltip (`MAP_TOOLTIP_H3`). On by default. */
+  mapTooltipH3: boolean;
 }
 
 export interface ProjectSettings {

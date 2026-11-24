@@ -31,6 +31,8 @@ export function NewProjectScreen() {
   /** The row picked in the list. The id sent is `meshId`, which adds the detail. */
   const [pickedId, setPickedId] = useState('');
   const [detail, setDetail] = useState<Detail>('outline');
+  /** A country can take its sea too: its exclusive economic zone (`:eez`). */
+  const [withSea, setWithSea] = useState(false);
   const [nameField, setNameField] = useState('');
   const [codeField, setCodeField] = useState('');
   const [outFolder, setOutFolder] = useState('');
@@ -69,15 +71,18 @@ export function NewProjectScreen() {
 
   const picked = [...uploads, ...meshes].find((mesh) => mesh.id === pickedId) ?? null;
   // A country picked at geoBoundaries detail is its own mesh to the engine.
-  const meshId =
+  const landId =
     picked && picked.source === 'natural_earth' && picked.geoboundaries && detail !== 'outline'
       ? api.geoboundariesMeshId(picked.iso, detail)
       : pickedId;
+  const canTakeSea = picked?.source === 'natural_earth';
+  const meshId = canTakeSea && withSea ? `${landId}:eez` : landId;
   const countryCount = meshes.filter((mesh) => mesh.source === 'natural_earth').length;
 
   const pick = (id: string) => {
     setPickedId(id);
     setDetail('outline');
+    setWithSea(false);
     const mesh = [...uploads, ...meshes].find((m) => m.id === id);
     // Suggested, not imposed: the engine finds them itself when left empty.
     setNameField(mesh?.nameField ?? '');
@@ -243,13 +248,16 @@ export function NewProjectScreen() {
                 .shx, .dbf and .prj.
               </p>
             )}
-            {picked && !picked.hasSea && (
+            {picked && !picked.hasSea && !(canTakeSea && withSea) && (
               <p className="field-hint muted-55" data-testid="mesh-no-sea">
                 {picked.source === 'natural_earth' && picked.country === 'COL'
                   ? 'For Colombia, Colombia (DANE) is the recommended mesh: it has the municipalities and the sea. '
                   : ''}
                 This mesh has no sea, so fills cover the whole area and the model has no offshore
-                site. Onshore and offshore need two projects.
+                site.{' '}
+                {canTakeSea
+                  ? 'Include its sea below to add its exclusive economic zone.'
+                  : 'Onshore and offshore need two projects.'}
               </p>
             )}
           </div>
@@ -291,6 +299,28 @@ export function NewProjectScreen() {
                   </p>
                 )
               )}
+            </div>
+          )}
+
+          {canTakeSea && (
+            <div className="field">
+              <label className="settings-option" htmlFor="project-mesh-sea">
+                <input
+                  id="project-mesh-sea"
+                  type="checkbox"
+                  checked={withSea}
+                  onChange={(e) => setWithSea(e.target.checked)}
+                />
+                <span>
+                  <span className="settings-option-label">Include its sea</span>
+                  <span className="field-hint muted-55">
+                    Adds the country&apos;s exclusive economic zone, so fills can use the sea and
+                    the model can score offshore. The engine downloads it on the first run
+                    (needs internet). Maritime boundaries: Marine Regions (CC BY 4.0),
+                    www.marineregions.org.
+                  </span>
+                </span>
+              </label>
             </div>
           )}
 

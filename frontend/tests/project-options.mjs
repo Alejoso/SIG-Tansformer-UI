@@ -15,7 +15,10 @@ import { api, captureFailure, goToScreen, open, openProject, suite } from './har
 
 export const name = 'Project options';
 
-const KEYS = ['masterCsv', 'modelTablesCsv', 'keepAwake'];
+const KEYS = ['masterCsv', 'modelTablesCsv', 'keepAwake', 'scoreStatsCsv', 'mapTooltipH3'];
+/** Each switch's default: off, but for the H3 code in the tooltips. */
+const DEFAULTS = { masterCsv: false, modelTablesCsv: false, keepAwake: false, scoreStatsCsv: false,
+  mapTooltipH3: true };
 
 export async function run({ project }) {
   const { check, results } = suite(name);
@@ -28,7 +31,7 @@ export async function run({ project }) {
   };
 
   try {
-    check('the server reports all three', KEYS.every((key) => typeof before.options?.[key] === 'boolean'),
+    check('the server reports every switch', KEYS.every((key) => typeof before.options?.[key] === 'boolean'),
       JSON.stringify(before.options));
 
     await openProject(page, project.name);
@@ -43,23 +46,28 @@ export async function run({ project }) {
       check(`${key} shows what is stored`, (await box.isChecked()) === before.options[key]);
     }
 
-    // Start from all off, the default.
+    // Start from the defaults.
     await api(`/projects/${project.id}/settings/options`, {
       method: 'PUT',
-      body: JSON.stringify({ masterCsv: false, modelTablesCsv: false, keepAwake: false }),
+      body: JSON.stringify(DEFAULTS),
     });
     await page.getByRole('button', { name: /^cancel$/i }).click();
     await page.waitForTimeout(300);
     await openDialog();
 
     /* ── turned on and saved, the resolutions left alone ────────────── */
+    check('the H3 code in the tooltips starts on',
+      await page.locator('#option-mapTooltipH3').isChecked());
     await page.locator('#option-masterCsv').check();
     await page.locator('#option-keepAwake').check();
+    await page.locator('#option-scoreStatsCsv').check();
+    await page.locator('#option-mapTooltipH3').uncheck();
     await page.getByRole('button', { name: /save settings/i }).click();
     await page.waitForTimeout(1200);
     const saved = await api(`/projects/${project.id}/settings`);
     check('the boxes ticked are stored',
-      saved.options.masterCsv && saved.options.keepAwake && !saved.options.modelTablesCsv,
+      saved.options.masterCsv && saved.options.keepAwake && !saved.options.modelTablesCsv
+        && saved.options.scoreStatsCsv && !saved.options.mapTooltipH3,
       JSON.stringify(saved.options));
     check('and the resolutions are not pinned by it',
       saved.followingEngine === before.followingEngine &&
@@ -78,11 +86,12 @@ export async function run({ project }) {
     await page.getByRole('button', { name: /default values/i }).click();
     await page.waitForTimeout(900);
     const cleared = await api(`/projects/${project.id}/settings`);
-    check('"Default values" turns every switch off',
-      KEYS.every((key) => cleared.options[key] === false), JSON.stringify(cleared.options));
+    check('"Default values" puts every switch on its default',
+      KEYS.every((key) => cleared.options[key] === DEFAULTS[key]), JSON.stringify(cleared.options));
     check('and the boxes follow',
       !(await page.locator('#option-masterCsv').isChecked()) &&
-        !(await page.locator('#option-keepAwake').isChecked()));
+        !(await page.locator('#option-keepAwake').isChecked()) &&
+        (await page.locator('#option-mapTooltipH3').isChecked()));
     await page.getByRole('button', { name: /^cancel$/i }).click();
 
     check('no console errors', errors.length === 0, errors.slice(0, 2).join(' | '));

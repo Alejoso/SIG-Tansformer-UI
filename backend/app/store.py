@@ -52,6 +52,8 @@ PROJECT_FIELDS = [
     "mesh_file",
     "mesh_name_field",
     "mesh_code_field",
+    # `eez` when a country mesh takes its sea (blank in a store written before).
+    "mesh_sea",
     "description",
     "out_folder",
     # The engine's two resolution knobs, kept beside the folder they apply
@@ -61,11 +63,13 @@ PROJECT_FIELDS = [
     # exactly the right answer for a project nobody has set them on.
     "h3_res",
     "render_h3_res",
-    # Three switches passed to the engine with every run, `1` when on and
-    # blank when off, which is the default. See `settings.Options`.
+    # Switches passed to the engine with every run. Blank is the switch's
+    # default, `1` on and `0` off. See `settings.Options`.
     "export_csv",
     "mcda_tables_csv",
     "keep_awake",
+    "mcda_stats_csv",
+    "map_tooltip_h3",
     "created_at",
     "updated_at",
 ]
@@ -90,6 +94,8 @@ class ProjectRow:
     #: The uploaded file's columns naming and coding each feature, when chosen.
     mesh_name_field: str = ""
     mesh_code_field: str = ""
+    #: `eez` when a country mesh takes its sea, its exclusive economic zone.
+    mesh_sea: str = ""
     description: str = ""
     out_folder: str = ""
     #: H3 resolution the values are computed and stored at.
@@ -103,6 +109,10 @@ class ProjectRow:
     mcda_tables_csv: str = ""
     #: Keep the machine awake while a run is going (`KEEP_AWAKE`).
     keep_awake: str = ""
+    #: Score statistics per model run (`MCDA_STATS_CSV`).
+    mcda_stats_csv: str = ""
+    #: The H3 code in the map tooltips (`MAP_TOOLTIP_H3`); on when blank.
+    map_tooltip_h3: str = ""
     created_at: str = ""
     updated_at: str = ""
 

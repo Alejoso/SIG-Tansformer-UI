@@ -11,14 +11,18 @@ them into the container):
 | A Natural Earth country | `natural_earth:<ADM0_A3>` | `MESH_SOURCE=natural_earth`, `MESH_COUNTRY` |
 | A geoBoundaries country | `geoboundaries:<ISO3>:<ADM0/1/2>` | `MESH_SOURCE=geoboundaries`, `MESH_COUNTRY`, `MESH_LEVEL` |
 | A file someone uploaded | `file:<upload id>` | `MESH_SOURCE=file`, `MESH_PATH`, and optionally `MESH_NAME_FIELD`, `MESH_CODE_FIELD` |
+| A country with its sea | either country id plus `:eez` | the same, and `MESH_SEA=eez` |
 
 `dane_colombia` is what every run used before meshes could be chosen, and
 the engine's default when nothing is set: Colombia from the DANE
-municipalities, with the sea out to the exclusive economic zone. It is the
-only mesh with a sea. Any other covers its own outline and nothing else, so
-the engine refuses the things that only mean something there: the `sea` fill
-domain, a `region` fill by department, and the model's `offshore` site.
-`has_sea` is what the rest of the app asks before offering any of them.
+municipalities, with the sea out to the exclusive economic zone. A country
+mesh (Natural Earth or geoBoundaries) can take its sea too, its exclusive
+economic zone, which the engine downloads from Marine Regions on its first
+run (`:eez`). Any other mesh covers its own outline and nothing else, so the
+engine refuses the things that only mean something at sea: the `sea` fill
+domain and the model's `offshore` site (and a `region` fill by department is
+Colombia's alone). `has_sea` is what the rest of the app asks before offering
+any of them.
 
 Uploads are kept in this app's own data folder (`data/meshes/<id>/`), checked
 when they arrive, and copied into the project's folder (`<project>/mesh/`)
@@ -94,6 +98,12 @@ NO_SEA = (
 )
 
 
+#: A country mesh that takes its sea: the id's suffix, and what the engine is
+#: given (`MESH_SEA`, `scope.mesh.sea`).
+SEA_VALUE = "eez"
+SEA_SUFFIX = f":{SEA_VALUE}"
+
+
 class MeshError(ValueError):
     """A mesh that cannot be used, said in words for the screen."""
 
@@ -113,20 +123,23 @@ class MeshSpec:
     file: str = ""
     name_field: str = ""
     code_field: str = ""
+    #: A country mesh that takes its sea, its exclusive economic zone.
+    sea: bool = False
 
     @property
     def id(self) -> str:
+        sea = SEA_SUFFIX if self.sea else ""
         if self.source == NATURAL_EARTH:
-            return f"{NATURAL_EARTH}:{self.country}"
+            return f"{NATURAL_EARTH}:{self.country}{sea}"
         if self.source == GEOBOUNDARIES:
-            return f"{GEOBOUNDARIES}:{self.country}:{self.level}"
+            return f"{GEOBOUNDARIES}:{self.country}:{self.level}{sea}"
         if self.source == FILE:
             return f"{FILE}:{self.upload}"
         return DANE
 
     @property
     def has_sea(self) -> bool:
-        return self.source == DANE
+        return self.source == DANE or self.sea
 
 
 # ── ids ───────────────────────────────────────────────────────────────────
@@ -141,22 +154,26 @@ def parse_id(mesh_id: str) -> MeshSpec:
     if raw == DANE:
         return MeshSpec(source=DANE)
     source, _, rest = raw.partition(":")
+    sea = rest.lower().endswith(SEA_SUFFIX) and source in (NATURAL_EARTH, GEOBOUNDARIES)
+    if sea:
+        rest = rest[: -len(SEA_SUFFIX)]
     if source == NATURAL_EARTH:
         code = rest.strip().upper()
         if _NE_CODE.match(code):
-            return MeshSpec(source=NATURAL_EARTH, country=code)
+            return MeshSpec(source=NATURAL_EARTH, country=code, sea=sea)
     elif source == GEOBOUNDARIES:
         iso, _, level = rest.partition(":")
         iso, level = iso.strip().upper(), level.strip().upper()
         if _ISO3.match(iso) and level in GEOBOUNDARIES_LEVELS:
-            return MeshSpec(source=GEOBOUNDARIES, country=iso, level=level)
+            return MeshSpec(source=GEOBOUNDARIES, country=iso, level=level, sea=sea)
     elif source == FILE:
         upload = rest.strip()
         if _UPLOAD_ID.match(upload):
             return MeshSpec(source=FILE, upload=upload)
     raise MeshError(
         f"`{raw}` is not a mesh. Use `{DANE}`, `{NATURAL_EARTH}:<code>`, "
-        f"`{GEOBOUNDARIES}:<ISO3>:<ADM0|ADM1|ADM2>` or `{FILE}:<upload id>`."
+        f"`{GEOBOUNDARIES}:<ISO3>:<ADM0|ADM1|ADM2>` or `{FILE}:<upload id>`, a country id "
+        f"with `{SEA_SUFFIX}` to take its sea."
     )
 
 
@@ -229,14 +246,15 @@ def label_of(spec: MeshSpec) -> str:
     """How the mesh reads on a project card."""
     if spec.source == DANE:
         return "Colombia (DANE)"
+    sea = ", with its sea" if spec.sea else ""
     if spec.source == NATURAL_EARTH:
         country = countries.find(spec.country)
-        return f"{country.label if country else spec.country} (Natural Earth)"
+        return f"{country.label if country else spec.country} (Natural Earth{sea})"
     if spec.source == GEOBOUNDARIES:
         country = next(
             (c for c in countries.list_countries() if c.iso3 == spec.country), None
         )
-        return f"{country.label if country else spec.country} (geoBoundaries {spec.level})"
+        return f"{country.label if country else spec.country} (geoBoundaries {spec.level}{sea})"
     upload = read_upload(spec.upload) if spec.upload else None
     name = str(upload.get("label")) if upload else (spec.file or "Uploaded mesh")
     return f"{name} (uploaded)"
@@ -288,6 +306,7 @@ def spec_of(project: store.ProjectRow) -> MeshSpec:
             source=source,
             country=project.mesh_country.strip().upper(),
             level=project.mesh_level.strip().upper() if source == GEOBOUNDARIES else "",
+            sea=project.mesh_sea.strip().lower() == SEA_VALUE,
         )
     return MeshSpec(source=DANE)
 
@@ -306,6 +325,7 @@ def store_fields(spec: MeshSpec) -> dict[str, str]:
         "mesh_file": spec.file,
         "mesh_name_field": spec.name_field,
         "mesh_code_field": spec.code_field,
+        "mesh_sea": SEA_VALUE if spec.sea else "",
     }
 
 
@@ -316,6 +336,7 @@ def store_fields(spec: MeshSpec) -> dict[str, str]:
 #: engine's `.env`, so a mesh left there by hand cannot leak into a run here.
 ENV_KEYS = (
     "MESH_SOURCE", "MESH_COUNTRY", "MESH_LEVEL", "MESH_PATH", "MESH_NAME_FIELD", "MESH_CODE_FIELD",
+    "MESH_SEA",
 )
 
 
@@ -326,6 +347,8 @@ def env_of(spec: MeshSpec) -> dict[str, str]:
         env["MESH_COUNTRY"] = spec.country
     if spec.source == GEOBOUNDARIES:
         env["MESH_LEVEL"] = spec.level
+    if spec.sea:
+        env["MESH_SEA"] = SEA_VALUE
     if spec.source == FILE:
         # Relative, so the engine resolves it against `/data`, the project.
         env["MESH_PATH"] = f"{PROJECT_MESH_DIRNAME}/{spec.file}"

@@ -564,23 +564,29 @@ its master is built at its own resolution and kept between its runs. The engine 
 the project stale so our own record of what the database holds is cleared
 with it.
 
-**Three switches go with every run**, stored per project beside the
-resolutions (`export_csv`, `mcda_tables_csv`, `keep_awake` in
-`projects.csv`) and shown under *With every run* in the same dialog. All off
-unless turned on: none changes a result, and each costs disk or time.
+**Five switches go with every run**, stored per project beside the
+resolutions (`export_csv`, `mcda_tables_csv`, `keep_awake`, `mcda_stats_csv`,
+`map_tooltip_h3` in `projects.csv`) and shown under *With every run* in the
+same dialog. None changes a result. Each has its own default: blank in the
+store is the default, `1` on and `0` off, so a change of default reaches
+every project that never chose. The ones that cost disk or time are off; the
+H3 code in the tooltips is on, as the engine has drawn its maps since
+2026-11-20.
 
 | Switch | Passed as | What it does |
 |---|---|---|
 | Master table as CSV | `EXPORT_CSV` | Each processing run writes the master as a CSV beside its parquet. Gigabytes on a real project |
 | Model tables as CSV | `MCDA_TABLES_CSV` | Each model run writes its criteria and subcriteria tables as CSV |
+| Score statistics | `MCDA_STATS_CSV` | Each model run writes `aggregate/stats.csv`: count, range, mean, deviation and quartiles of the global score, each criterion and subcriterion |
+| H3 code in the map tooltips | `MAP_TOOLTIP_H3` | On by default. Every map's tooltip names the hexagon under the cursor by its H3 code; changing it redraws the maps on the next run |
 | Keep the computer awake during runs | `KEEP_AWAKE` | The runner holds off sleep (`systemd-inhibit`) while it works |
 
 They are passed in the environment of the run, as `1` or `0`, rather than
 written into `.env`: both runners take them from there, and a value given
 explicitly wins over the engine's `.env`, so off here means off. Saved on
 their own route (`PUT …/settings/options`) so that turning one on does not
-pin the resolutions to today's engine numbers; "Default values" turns them
-off along with unpinning the resolutions.
+pin the resolutions to today's engine numbers; "Default values" puts them
+back on their defaults along with unpinning the resolutions.
 
 The coordinate system is shown and not offered: the engine works in WGS 84
 throughout. There was also a *pipeline version* offering a choice between
@@ -1082,6 +1088,26 @@ change builds its database from scratch, and until a processing run has
 finished on it there is no database for the model, so a model run is refused
 with "Run Process first". Deleting a project here does not drop its database:
 the app has no way into the engine's db container.
+
+
+### A country with its sea
+
+A country mesh, Natural Earth or geoBoundaries, can take its sea: **Include
+its sea** on the New project screen adds `:eez` to the mesh id
+(`natural_earth:GRC:eez`, `geoboundaries:GRC:ADM1:eez`), kept as `mesh_sea`
+in `projects.csv` and passed as `MESH_SEA=eez`. The engine downloads the
+country's exclusive economic zone from Marine Regions on the first run
+(CC BY 4.0) and builds the master with it, so the project has a sea: the
+`sea` fill domain and the offshore model are offered, as on Colombia (DANE).
+
+### Data of another area
+
+The engine draws only the cells inside the project's mesh. A variable with
+none (Colombian data on a Greek mesh) is not loaded or drawn, and the
+problems panel says so under *checking it against the mesh*, with the
+engine's reason. A variable the engine's per-variable corrections could not
+build says so under *applying its corrections*. An error that a successful
+map came after is history: the variable was fixed since.
 
 ## Working with the current engine
 

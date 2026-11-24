@@ -589,3 +589,36 @@ def test_deleting_a_project_removes_its_upload(data_dir, tmp_path, engine_countr
     # The copies in the projects' own folders are the user's, and stay.
     assert (tmp_path / "one" / "mesh" / "zones.geojson").is_file()
     assert (tmp_path / "two" / "mesh" / "zones.geojson").is_file()
+
+
+# ── a country with its sea ─────────────────────────────────────────────────
+
+
+def test_a_country_can_take_its_sea(engine_countries):
+    for mesh_id, level in (("natural_earth:URY:eez", ""), ("geoboundaries:URY:ADM1:eez", "ADM1")):
+        spec = meshes.resolve(mesh_id)
+        assert spec.sea and spec.has_sea and spec.id == mesh_id
+        env = meshes.env_of(spec)
+        assert env["MESH_SEA"] == "eez" and env["MESH_COUNTRY"] == "URY" and env["MESH_LEVEL"] == level
+        assert "with its sea" in meshes.label_of(spec)
+    plain = meshes.resolve("natural_earth:URY")
+    assert not plain.has_sea and meshes.env_of(plain)["MESH_SEA"] == ""
+
+
+@pytest.mark.parametrize("mesh_id", ["dane_colombia:eez", "file:abc123def456:eez", "natural_earth:URY:sea"])
+def test_only_a_country_takes_its_sea(mesh_id):
+    with pytest.raises(meshes.MeshError):
+        meshes.parse_id(mesh_id)
+
+
+def test_the_sea_is_kept_with_the_project(data_dir, engine_countries, tmp_path):
+    project = main.create_project(NewProjectPayload(name="u", meshId="natural_earth:URY:eez",
+                                                    outFolder=str(tmp_path / "p")))
+    assert project.meshId == "natural_earth:URY:eez" and project.meshHasSea
+    row = store.find_project(project.id)
+    assert row.mesh_sea == "eez"
+    assert meshes.env_for(row)["MESH_SEA"] == "eez"
+    # a row from before the option reads as no sea
+    old = store.ProjectRow(id="p-old", name="o", mesh_id="natural_earth:URY", mesh_label="",
+                           mesh_source="natural_earth", mesh_country="URY")
+    assert not meshes.spec_of(old).has_sea
