@@ -424,7 +424,8 @@ _ENV_LINE = re.compile(
 )
 
 
-def write_env_values(values: dict[str, str]) -> bool:
+def write_env_values(values: dict[str, str],
+                     note: str = "Set by Maphex from the project's settings.") -> bool:
     """
     Set these keys in the pipeline's `.env`. Returns whether anything changed.
 
@@ -473,7 +474,7 @@ def write_env_values(values: dict[str, str]) -> bool:
     if remaining:
         changed = True
         lines.append("")
-        lines.append("# Set by Maphex from the project's settings.")
+        lines.append(f"# {note}")
         lines += [f"{name}={value}" for name, value in remaining.items()]
 
     if changed:
@@ -486,6 +487,27 @@ def write_env_values(values: dict[str, str]) -> bool:
         shutil.copymode(env_path, temporary)
         os.replace(temporary, env_path)
     return changed
+
+
+def remove_env_values(names: list[str]) -> bool:
+    """
+    Take these keys out of the pipeline's `.env`, so the engine falls back to
+    its own default. Returns whether anything changed. Only the lines that set
+    them go: comments and every other line stay where they are.
+    """
+    env_path = PIPELINE_DIR / ".env"
+    if not env_path.exists():
+        return False
+    lines = env_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    kept = [line for line in lines
+            if (match := _ENV_LINE.match(line)) is None or match.group("name") not in names]
+    if len(kept) == len(lines):
+        return False
+    temporary = env_path.with_name(f".{env_path.name}.maphex-tmp")
+    temporary.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    shutil.copymode(env_path, temporary)
+    os.replace(temporary, env_path)
+    return True
 
 
 def main_database() -> str:
@@ -860,16 +882,21 @@ def reload_env(*, reset: bool, rebuild_everything: bool = False) -> dict[str, st
 
     They are separable:
 
-    * `RESET_FILES=1` truncates `archivos`, `variables` and
-      `archivo_valores` and leaves the master alone. That is what switching
-      projects needs, and it is cheap. (Older engines called it
-      `RESET_ARCHIVOS`; the current one ignores that name.)
-    * `FORCE_MASTER_REBUILD=1` is only for when the master itself is wrong —
+    * `H3_VALUES_FULL_REBUILD=1` empties `variables` and `archivo_valores`
+      and loads every result again, and leaves the master and the files on
+      disk alone. That is what a project whose database we cannot vouch for
+      needs.
+    * `RESET_FILES=1` is not that: it also empties `archivos`, the engine's
+      record of what each output on disk was made from, and forces every
+      file to be ingested, sampled and converted to H3 again. A project whose
+      last run died then reprocessed everything on the next run, which made
+      that one slower and likelier to die too. It is left to the terminal.
+    * `FORCE_MASTER_REBUILD=1` is only for when the master itself is wrong;
       and the script already detects that on its own, comparing H3_RES, the
-      bbox flag and the boundaries' mtime against `pipeline_state`.
+      bbox flag and the boundaries against `pipeline_state`.
 
     So the master rebuild is turned off and left to the script's own
-    judgement, and the per-project tables are cleared only when
+    judgement, and the project's tables are reloaded only when
     `engine_state` says they have to be.
     """
     if rebuild_everything:
@@ -877,7 +904,8 @@ def reload_env(*, reset: bool, rebuild_everything: bool = False) -> dict[str, st
     return {
         # Off, not absent: `.env` sets it, and a value here wins.
         "FORCE_MASTER_REBUILD": "0",
-        "RESET_FILES": "1" if reset else "0",
+        "RESET_FILES": "0",
+        "H3_VALUES_FULL_REBUILD": "1" if reset else "0",
     }
 
 

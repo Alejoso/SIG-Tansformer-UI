@@ -36,11 +36,12 @@ import * as projectOptions from './project-options.mjs';
 import * as modelStatus from './model-status.mjs';
 import * as valueColumns from './value-columns.mjs';
 import * as meshes from './meshes.mjs';
+import * as engineSettings from './engine-settings.mjs';
 
 const SUITES = [
   modelScreen, examplesScreen, layerOpacity, layerLegend, mapScreen, settings, modelRuns,
   batchImport, applyRun, codes, problems, variableSettings, nested, projectOptions, modelStatus,
-  valueColumns, meshes,
+  valueColumns, meshes, engineSettings,
 ];
 
 const only = process.argv.slice(2).filter((argument) => !argument.startsWith('-'));

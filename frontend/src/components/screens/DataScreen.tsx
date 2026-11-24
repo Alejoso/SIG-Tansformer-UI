@@ -93,7 +93,7 @@ function runNote(run: PipelineRun): string {
     return 'Rebuilding the H3 master as well as your data — this takes several minutes.';
   }
   if (run.reset && run.resetReason) {
-    return `Reloading everything for this project, because ${run.resetReason}.`;
+    return `Reloading this project's database from its converted files, because ${run.resetReason}.`;
   }
   return 'Loading what changed. Data is locked until it finishes.';
 }
@@ -387,6 +387,10 @@ export function DataScreen() {
    * with the progress bar.
    */
   const running = run?.status === 'starting' || run?.status === 'running';
+  // A variable not finished yet while a run is going is one the run has not
+  // reached: the per-variable fixes and the render come late, so mid-run every
+  // variable they build would read as stopped partway. Only a finished run says so.
+  const shownProblems = running ? problems.filter((p) => p.status !== 'unfinished') : problems;
   const phase = running ? 'processing' : run?.status === 'done' ? 'done' : 'empty';
   /**
    * A model run counts as the engine being busy too.
@@ -721,12 +725,11 @@ export function DataScreen() {
           if (tick.status === 'starting' || tick.status === 'running') return;
 
           unwatch.current = null;
-          if (tick.status === 'done') {
-            setShowComplete(true);
-            // The engine has just written new layers; the folder list shows
-            // what it made of each one.
-            reload();
-          }
+          if (tick.status === 'done') setShowComplete(true);
+          // The engine has just written new layers, or stopped partway: the
+          // folder list and the problems panel show what it made of each one,
+          // and what it never reached (hidden while the run was still going).
+          reload();
         },
         (error) => showToast(error.message),
       );
@@ -1657,7 +1660,7 @@ export function DataScreen() {
                     {run.erroredFiles} {run.erroredFiles === 1 ? 'file' : 'files'} could not be
                     processed; the engine carried on without{' '}
                     {run.erroredFiles === 1 ? 'it' : 'them'}
-                    {problems.length > 0 ? ', and which ones is listed above.' : '.'}{' '}
+                    {shownProblems.length > 0 ? ', and which ones is listed above.' : '.'}{' '}
                   </>
                 )}
                 {run.skippedFiles > 0 && (
@@ -1697,17 +1700,17 @@ export function DataScreen() {
             starts the next one directly beneath it. The run only ever
             reported a count, which named nothing and was gone by the next
             run; the reason has been sitting in the output folder all along. */}
-        {problems.length > 0 && (
+        {shownProblems.length > 0 && (
           <div className="problem-panel">
           <div className="folder-alert is-problem">
             <div className="folder-alert-body">
               <strong>
-                {problems.length === 1
+                {shownProblems.length === 1
                   ? 'One variable did not make it through'
-                  : `${problems.length} variables did not make it through`}
+                  : `${shownProblems.length} variables did not make it through`}
               </strong>
               <ul className="problem-list">
-                {problems.map((problem) => (
+                {shownProblems.map((problem) => (
                   <li key={problem.id}>
                     <span className="problem-code mono">{problem.code}</span>
                     {problem.status === 'unfinished' ? (
@@ -1747,7 +1750,7 @@ export function DataScreen() {
               </ul>
               <span className="muted-55">
                 The engine carries on past a variable it cannot read, so the rest of the run
-                is fine. Fix or remove {problems.length === 1 ? 'it' : 'these'} and process
+                is fine. Fix or remove {shownProblems.length === 1 ? 'it' : 'these'} and process
                 again.
               </span>
             </div>
@@ -1836,9 +1839,9 @@ export function DataScreen() {
                 {run.erroredFiles} {run.erroredFiles === 1 ? 'variable' : 'variables'} could not
                 be processed.
               </strong>{' '}
-              {problems.length > 0
-                ? `Which ${problems.length === 1 ? 'one' : 'ones'}, and what the engine said
-                   about ${problems.length === 1 ? 'it' : 'them'}, is on the page behind this.`
+              {shownProblems.length > 0
+                ? `Which ${shownProblems.length === 1 ? 'one' : 'ones'}, and what the engine said
+                   about ${shownProblems.length === 1 ? 'it' : 'them'}, is on the page behind this.`
                 : 'The engine carried on without them.'}
             </p>
           )}

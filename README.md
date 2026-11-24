@@ -613,6 +613,34 @@ is what reads best on screen, the field says what it actually means, which is
 that the project tracks the engine rather than holding a copy of today's
 numbers.
 
+## The engine's own settings
+
+Everything else in the engine's `.env` is the machine's, not a project's: the
+size of its containers, Postgres tuning, the workers of each stage. **Engine
+settings**, on the project list, shows all of it (`GET /api/engine/config`)
+and writes what is changed (`PUT /api/engine/config`, `engine_config.py`).
+
+- **Where the list comes from.** The defaults are the engine's own
+  `.env.example`; a setting it shows only commented out is off by default. The
+  labels and descriptions are ours, in English. A setting the engine has and
+  the list does not know still appears, under *Other settings*.
+- **Shown and not offered**, each with its reason: the connection (user,
+  password, database, port, URL), because Postgres created the database with
+  them; the Docker project name, which names the database's volume; and the
+  two resolutions, which each project sets for itself. The password is never
+  sent to the browser.
+- **Checked before writing**: the form of each value (`8g` for Docker, `512MB`
+  for Postgres, `30min`, a number in range, one of the choices, a path with
+  nothing bash would expand) and the two rules that tie settings together
+  (the minimal WAL level needs 0 WAL senders; shared buffers no more than 40%
+  of the database's memory).
+- **Written in place**: a line keeps its position and its comment; a new one
+  goes at the end under a note saying who wrote it; *Default* writes the
+  engine's default back, or removes the line for one that is off or worked
+  out by the engine by default (blank workers).
+- **Never during a run** (409): the runners read the file as they start, and
+  the database settings recreate its container on the next run.
+
 ## The model says when its map is out of date
 
 The model scores the master table, and every processing run builds a new
@@ -761,6 +789,10 @@ see:
   get their own `Excluded` swatch and are kept out of the range, so a `-1`
   does not drag the low end of an MCDA score down with it;
 - the ring the combined MCDA map draws over a flagged cell gets a row too.
+- cells without a value, which the engine paints its no-data grey (light grey,
+  half transparent; since 2026-11-24, before which one NaN turned the whole
+  map flat green), get a `No data` row in that grey and are kept out of the
+  range.
 
 A layer it cannot describe gets no legend rather than a made-up one: a column
 that is entirely null reaches the render as NaN cast to int, every channel
@@ -1245,6 +1277,8 @@ No component changes.
 | `getLayerUrl` | `GET /api/projects/{id}/layers/{nodeId}/document` | returns the URL of the pre-rendered document the iframe loads |
 | `getModel` | `GET /api/projects/{id}/model` | **live** — the file verbatim, plus what is wrong with it |
 | `saveModel` | `PUT /api/projects/{id}/model` | **live** — writes the text as-is; valid or not |
+| `getEngineConfig` | `GET /api/engine/config` | **live**: every setting of the engine's `.env`, with its default; never the password |
+| `saveEngineConfig` | `PUT /api/engine/config` | **live**: `{changes: {KEY: value \| null}}`; checked, written in place; 409 during a run |
 | `applyModel` | `POST /api/projects/{id}/model/apply` | **live for the write**; running the model is next |
 | `watchModelApply` | `GET /api/projects/{id}/model/apply/stream` | **SSE**, one `ApplyProgress` per variable — drives the loading dialog |
 | `listExamples` | `GET /api/model/examples` | mocked; the examples are UI copy |

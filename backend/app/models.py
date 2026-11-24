@@ -636,3 +636,46 @@ class ImportOutcome(BaseModel):
     #: re-picking the folder to retry the rest would be worse than being told
     #: which one to look at.
     failed: list[ImportFailure] = Field(default_factory=list)
+
+
+# ── the engine's own configuration (`engine_config`) ──────────────────────
+
+
+class EngineSetting(BaseModel):
+    """One setting of the engine's `.env`: what it is now and by default."""
+
+    key: str
+    label: str
+    description: str
+    #: int, float, flag, dockerSize, pgSize, pgDuration, choice, path or text.
+    kind: str
+    choices: list[str] = Field(default_factory=list)
+    minimum: float | None = None
+    maximum: float | None = None
+    optional: bool = False
+    #: Why it is shown and not offered; empty when it can be changed.
+    readOnly: str = ""
+    #: The password: its value is never sent, only whether it is set.
+    secret: bool = False
+    value: str = ""
+    isSet: bool = False
+    default: str = ""
+    isDefault: bool = True
+
+
+class EngineSection(BaseModel):
+    title: str
+    #: When a change here takes effect.
+    applies: str
+    settings: list[EngineSetting]
+
+
+class EngineConfig(BaseModel):
+    envFile: str
+    envExists: bool
+    sections: list[EngineSection]
+
+
+class SaveEngineConfigPayload(BaseModel):
+    #: Setting name to its new value; null puts the engine's default back.
+    changes: dict[str, str | None]

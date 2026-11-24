@@ -298,6 +298,8 @@ function synthetic(block, layers, tooltip) {
 }
 
 const EXCLUDED = [0, 0, 0, 220];
+/** The engine's colour for a cell without a value (render_html.NO_DATA_COLOR). */
+const NO_DATA = [190, 190, 190, 110];
 /** A plausible H3 cell string. Nothing here reads it; the legend is about
     the colour and the value. */
 const cell = (i) => `8666${i.toString(16).padStart(4, '0')}fffffff`;
@@ -482,6 +484,29 @@ export async function run(workspace) {
       check('an HTML tooltip on a classified layer: the labels, not the codes',
         htmlCodes.title === 'clase' && htmlCodes.rows.map((row) => row.label).join(',') === '3C,4A,4B',
         JSON.stringify({ title: htmlCodes.title, rows: htmlCodes.rows.map((row) => row.label) }));
+
+      // Cells without a value: the engine paints them its no-data grey
+      // (render_html.NO_DATA_COLOR) since 2026-11-24, instead of letting one
+      // NaN turn the whole map green. The grey needs its own row, and the
+      // ends of the ramp are the valid values' own.
+      const withGaps = await readSynthetic(browser, errors, synthetic(block, [{
+        data: Array.from({ length: 40 }, (unused, i) => {
+          const missing = i % 5 === 0;
+          const t = i / 39;
+          return {
+            _color: missing ? NO_DATA : [Math.round(255 * t), 50, Math.round(255 * (1 - t)), 180],
+            h3_index: cell(i),
+            value: missing ? null : 10 + i,
+          };
+        }),
+      }], 'value: {value}'));
+      check('cells without a value: a "No data" row in their grey',
+        withGaps.rows.some((row) => row.label === 'No data' && samePaint(row.paint, NO_DATA)),
+        JSON.stringify(withGaps.rows.map((row) => `${row.label}:${row.paint}`)));
+      check('cells without a value: kept out of the range',
+        withGaps.scale.length === 3 && sameNumber(withGaps.scale[0], 11)
+          && sameNumber(withGaps.scale[2], 49),
+        JSON.stringify(withGaps.scale));
 
       // A column that is entirely null reaches the render as NaN and is cast
       // to int, so every channel of every cell is int64's floor. There is no

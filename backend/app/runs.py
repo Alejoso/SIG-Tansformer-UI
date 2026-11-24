@@ -837,6 +837,15 @@ _runs: dict[tuple[str, str], Run] = {}
 _registry_lock = threading.Lock()
 
 
+def anything_running() -> bool:
+    """Whether any run is going: one this app started (processing or a model) or a
+    pipeline started from a terminal."""
+    if _pipeline_is_running():
+        return True
+    with _registry_lock:
+        return any(run.active for run in _runs.values())
+
+
 def current(project_id: str, job: str = "pipeline") -> Run | None:
     with _registry_lock:
         return _runs.get((project_id, job))
