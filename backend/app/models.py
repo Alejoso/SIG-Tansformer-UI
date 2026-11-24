@@ -332,6 +332,13 @@ class FolderEntry(BaseModel):
     path: str
 
 
+class CreateFolderPayload(BaseModel):
+    #: The folder to create it in: the one the browser is showing.
+    parent: str
+    #: One name, not a path.
+    name: str
+
+
 class FolderListing(BaseModel):
     """One level of the in-app folder browser."""
 

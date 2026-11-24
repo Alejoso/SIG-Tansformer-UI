@@ -25,6 +25,9 @@ export function FolderBrowser({ startAt, onPick, onClose }: FolderBrowserProps) 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const list = useRef<HTMLDivElement>(null);
+  /** The new folder's name while it is being typed; null when not making one. */
+  const [newName, setNewName] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const open = async (path?: string) => {
     setLoading(true);
@@ -37,6 +40,22 @@ export function FolderBrowser({ startAt, onPick, onClose }: FolderBrowserProps) 
       setError(e instanceof Error ? e.message : 'Could not read that folder');
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** Make the folder where the browser is standing, and go into it. */
+  const createFolder = async () => {
+    if (!listing || newName === null) return;
+    setCreating(true);
+    setError(null);
+    try {
+      setListing(await api.createFolder(listing.path, newName));
+      setNewName(null);
+      list.current?.scrollTo({ top: 0 });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create that folder');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -64,7 +83,61 @@ export function FolderBrowser({ startAt, onPick, onClose }: FolderBrowserProps) 
         <span className="mono folder-browser-current" title={listing?.path}>
           {listing?.path ?? '…'}
         </span>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => {
+            setNewName('');
+            setError(null);
+          }}
+          disabled={loading || !listing || newName !== null}
+        >
+          <Icon name="plus" size={14} />
+          New folder
+        </button>
       </div>
+
+      {newName !== null && (
+        <form
+          className="folder-browser-new"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void createFolder();
+          }}
+        >
+          <input
+            className="input"
+            aria-label="New folder name"
+            placeholder="New folder name"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              // Escape leaves the name, not the whole browser.
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                setNewName(null);
+                setError(null);
+              }
+            }}
+            autoFocus
+            disabled={creating}
+          />
+          <button type="submit" className="btn btn-primary" disabled={creating || !newName.trim()}>
+            {creating ? 'Creating…' : 'Create'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              setNewName(null);
+              setError(null);
+            }}
+            disabled={creating}
+          >
+            Cancel
+          </button>
+        </form>
+      )}
 
       <div ref={list} className="folder-browser-list" aria-busy={loading}>
         {listing?.folders.map((folder) => (
@@ -94,7 +167,7 @@ export function FolderBrowser({ startAt, onPick, onClose }: FolderBrowserProps) 
           type="button"
           className="btn btn-primary"
           onClick={() => listing && onPick(listing.path)}
-          disabled={loading || !listing}
+          disabled={loading || creating || !listing}
         >
           Use this folder
         </button>

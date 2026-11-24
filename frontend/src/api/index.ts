@@ -111,6 +111,16 @@ export const pickFolder = (startAt?: string): Promise<PickedFolder> =>
 export const listFolders = (path?: string): Promise<FolderListing> =>
   request(`/fs/folders${path ? `?path=${encodeURIComponent(path)}` : ''}`);
 
+/**
+ * LIVE: POST /api/fs/folders
+ *
+ * Make a folder named `name` inside `parent` and return it, opened. The
+ * server refuses a name that is a path, hidden, or already there, with a
+ * sentence to show as it is.
+ */
+export const createFolder = (parent: string, name: string): Promise<FolderListing> =>
+  request('/fs/folders', { method: 'POST', body: JSON.stringify({ parent, name }) });
+
 /* ── the data the engine will read ─────────────────────────────────────── */
 
 /* LIVE: the engine's own input tree, read and written on disk. */

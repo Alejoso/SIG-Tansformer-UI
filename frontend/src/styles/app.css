@@ -331,4 +331,7 @@ body { margin: 0; background: var(--color-bg); }
 }
 .folder-browser-row:hover { background: var(--color-neutral-200); }
 .folder-browser-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-browser-path .btn { display: inline-flex; align-items: center; gap: 6px; }
+.folder-browser-new { display: flex; align-items: center; gap: var(--space-2); }
+.folder-browser-new .input { flex: 1; min-width: 0; }
 .folder-browser-empty { margin: 0; padding: 10px; font-size: 13px; }

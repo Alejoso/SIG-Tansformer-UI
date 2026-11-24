@@ -322,3 +322,38 @@ def list_folders(raw: str | None) -> FolderListing:
         parent=str(path.parent) if path != root and path != path.parent else None,
         folders=folders,
     )
+
+
+def create_folder(parent_raw: str, name_raw: str) -> FolderListing:
+    """
+    Make one new folder inside `parent` and return it, opened.
+
+    A single name, not a path: the browser creates where it is standing, so
+    anything with a separator or `..` in it is a mistake or an escape. Raises
+    ValueError with a sentence the UI can show as it is.
+    """
+    name = name_raw.strip()
+    if not name:
+        raise ValueError("Give the folder a name.")
+    if name in {".", ".."} or "/" in name or "\\" in name or "\0" in name:
+        raise ValueError("A folder name cannot contain / or \\, or be . or ..")
+    if name.startswith("."):
+        raise ValueError("A name starting with a dot would be hidden here — choose another.")
+    if len(name.encode("utf-8")) > 255:
+        raise ValueError("That name is too long.")
+
+    root = browse_root()
+    parent = expand(parent_raw)
+    if not _within(parent, root) or not parent.is_dir():
+        raise ValueError(f"Cannot create a folder in {parent}.")
+
+    target = parent / name
+    if target.exists():
+        raise ValueError(f"{name} already exists here.")
+    try:
+        target.mkdir()
+    except PermissionError as error:
+        raise ValueError(f"No permission to create a folder in {parent}.") from error
+    except OSError as error:
+        raise ValueError(f"Could not create {name}: {error.strerror or error}.") from error
+    return list_folders(str(target))

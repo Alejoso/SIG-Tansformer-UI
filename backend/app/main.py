@@ -56,6 +56,7 @@ from .models import (
     ProjectOptions,
     ProjectSettings,
     NewProjectPayload,
+    CreateFolderPayload,
     FolderListing,
     PickFolderPayload,
     PickFolderResult,
@@ -1360,6 +1361,15 @@ def list_folders(path: str | None = None) -> FolderListing:
     For when `pick-folder` says there is no dialog here — in Docker, notably.
     """
     return fsutil.list_folders(path)
+
+
+@app.post("/api/fs/folders")
+def create_folder(payload: CreateFolderPayload) -> FolderListing:
+    """Make a new folder from the in-app browser, and open it."""
+    try:
+        return fsutil.create_folder(payload.parent, payload.name)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 # ── the built frontend ────────────────────────────────────────────────────
