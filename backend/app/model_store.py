@@ -921,6 +921,63 @@ def structure_errors(text: str) -> list[dict[str, object]]:
     return problems.found
 
 
+def _offshore(text: str) -> list[tuple[str, int | None]]:
+    """Every leaf with `site: offshore`, as where it is and its line."""
+    from ruamel.yaml import YAML  # noqa: PLC0415
+
+    try:
+        document = YAML(typ="rt").load(io.StringIO(text))
+    except Exception:  # noqa: BLE001 (a syntax error is reported on its own)
+        return []
+    found: list[tuple[str, int | None]] = []
+    criteria = document.get("criteria") if isinstance(document, dict) else None
+    for criterion in criteria if isinstance(criteria, list) else []:
+        if not isinstance(criterion, dict):
+            continue
+        subgroups = criterion.get("subgroups")
+        for subgroup in subgroups if isinstance(subgroups, list) else []:
+            if not isinstance(subgroup, dict):
+                continue
+            leaves = subgroup.get("leaves")
+            for position, leaf in enumerate(leaves if isinstance(leaves, list) else []):
+                if isinstance(leaf, dict) and str(leaf.get("site", "both")) == "offshore":
+                    where = "/".join(
+                        str(part) for part in (
+                            criterion.get("key", "?"),
+                            subgroup.get("key", "?"),
+                            leaf.get("code") or leaf.get("column") or f"leaf {position + 1}",
+                        )
+                    )
+                    found.append((where, _line_of(leaf, "site") or _line_of(leaves, position)))
+    return found
+
+
+def offshore_leaves(text: str) -> list[str]:
+    """Where each `site: offshore` leaf is (`criterion/subgroup/code`)."""
+    return [where for where, _ in _offshore(text)]
+
+
+def mesh_errors(text: str, has_sea: bool) -> list[dict[str, object]]:
+    """
+    What the project's mesh rules out of the model.
+
+    Only the Colombia (DANE) mesh has a sea. On any other the engine refuses
+    an `offshore` leaf (`onshore` and `both` cover the whole mesh), so it is
+    an error here, beside the leaf, rather than a failed run.
+    """
+    if has_sea:
+        return []
+    problems = _Problems()
+    for where, line in _offshore(text):
+        problems.error(
+            f"{where}: `site: offshore` needs a sea, and this project's mesh has none. "
+            "Use `both` or `onshore`, which cover the whole mesh. Onshore and offshore "
+            "need two projects.",
+            line,
+        )
+    return problems.found
+
+
 def container_model_path(project: store.ProjectRow) -> str:
     """
     Where the project's model file is *inside* the container.

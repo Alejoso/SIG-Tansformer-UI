@@ -137,7 +137,9 @@ const LEAF_FIELDS: Field[] = [
     name: 'site',
     what:
       '`both`, `onshore` or `offshore` — which half of the country the leaf applies to. ' +
-      'Anything else never applies, so the leaf is silently skipped. Defaults to `both`.',
+      'Anything else never applies, so the leaf is silently skipped. Defaults to `both`. ' +
+      'Only the Colombia (DANE) mesh has a sea: on any other, `offshore` is an error and ' +
+      '`onshore` and `both` cover the whole mesh. Onshore and offshore need two projects.',
   },
   {
     name: 'weight',

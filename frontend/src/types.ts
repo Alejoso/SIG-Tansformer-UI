@@ -13,10 +13,21 @@ export type ProjectStatus = 'draft' | 'processed';
 export interface Project {
   id: string;
   name: string;
-  /** Mesh file name, e.g. `ireland_5km_mesh.geojson`. */
+  /**
+   * Which mesh the engine builds the hexagons over: `dane_colombia`,
+   * `natural_earth:<ADM0_A3>`, `geoboundaries:<ISO3>:<ADM0|ADM1|ADM2>` or
+   * `file:<upload id>`.
+   */
   meshId: string;
-  /** Human label for the mesh, e.g. `Ireland — 5 km mesh`. */
+  /** Human label for the mesh, e.g. `Uruguay (geoBoundaries ADM1)`. */
   meshLabel: string;
+  meshSource: MeshSource;
+  /**
+   * Only the Colombia (DANE) mesh has a sea. Without one the engine refuses
+   * the `sea` fill domain and the model's `offshore` site, so neither is
+   * offered.
+   */
+  meshHasSea: boolean;
   status: ProjectStatus;
   description: string;
   /** Absolute path the engine writes processed files into. */
@@ -39,11 +50,21 @@ export interface NewProjectPayload {
   meshId: string;
   outFolder: string;
   description: string;
+  /** An uploaded mesh's columns naming and coding each feature. Empty: the engine finds them. */
+  meshNameField?: string;
+  meshCodeField?: string;
 }
 
+export type MeshSource = 'dane_colombia' | 'natural_earth' | 'geoboundaries' | 'file';
+
+/** geoBoundaries' administrative levels: the country, its first and second divisions. */
+export type GeoBoundariesLevel = 'ADM0' | 'ADM1' | 'ADM2';
+
 /**
- * A study area a project can be built on. Today that is a country, read from
- * Natural Earth through GeoPandas on the server.
+ * A study area a project can be built on: Colombia from DANE, a country from
+ * the engine's Natural Earth 10m set, or an uploaded outline. A country with
+ * an ISO code can also be built at geoBoundaries detail, which is a choice
+ * made on the country rather than a row of its own.
  */
 export interface Mesh {
   id: string;
@@ -51,8 +72,31 @@ export interface Mesh {
   continent: string;
   /** ISO 3166-1 alpha-3, where the dataset has one. Norway and France do not. */
   iso: string;
-  /** Every name and code this row answers to, joined — what the filter matches. */
+  /** Every name and code this row answers to, joined: what the filter matches. */
   search: string;
+  source: MeshSource;
+  /** The Natural Earth code (ADM0_A3) the engine is given. */
+  country: string;
+  /** geoBoundaries is keyed by ISO3, so only a country with one offers it. */
+  geoboundaries: boolean;
+  /** The one to pick for work in Colombia. */
+  recommended: boolean;
+  hasSea: boolean;
+  /** An upload's own description; empty or absent for the rest. */
+  format?: string;
+  featureCount?: number | null;
+  /** Its columns of text or whole numbers, any of which can name each feature. */
+  columns?: string[];
+  /**
+   * Those that can also code each one: a value for every feature and none
+   * repeated. Only these are offered as the code; picking another is refused.
+   */
+  codeColumns?: string[];
+  /** The columns that look like a name and a code. */
+  nameField?: string;
+  codeField?: string;
+  /** What was assumed, or will be left out, when it arrived. */
+  notes?: string[];
 }
 
 /* ── project data + processing ─────────────────────────────────────────── */

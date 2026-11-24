@@ -27,7 +27,7 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from . import model_store, outputs, store, value_columns
+from . import meshes, model_store, outputs, store, value_columns
 
 SETTINGS_CSV = store.DATA_DIR / "variable_settings.csv"
 SETTINGS_FIELDS = ["project_id", "variable_id", "fill", "fill_domain", "updated_at"]
@@ -41,10 +41,18 @@ CONTAINER_TRANSFORM = f"/data/{TRANSFORM_RELPATH.as_posix()}"
 #: engine has a few more that need options (`quantile` with `q`, `proxy`
 #: with `column`); those are for the engine's own projects. A number is a
 #: fixed value (`constant`).
+#:
+#: `region` is written bare, which the engine reads as the department on the
+#: Colombia (DANE) mesh and as the mesh's own features on any other (it has
+#: no departments). This app never writes a level, so it cannot ask for the
+#: department where there is none.
 FILL_METHODS = ("spatial", "nearest", "idw", "region", "mean", "median")
 #: `land` is every hexagon inside a municipality, `sea` the rest. A domain is
 #: filled only from itself, so the sea never fills the land or the other way.
+#: Only the Colombia (DANE) mesh has a sea; on any other, `land` and `all`
+#: both cover the whole mesh and `sea` is refused (`check`).
 FILL_DOMAINS = ("all", "land", "sea")
+SEA = "sea"
 #: No fill at all: the gaps stay, and the model's `absent` scores them.
 NO_FILL = "none"
 
@@ -141,10 +149,17 @@ def normalise_fill(text: str) -> str:
     return ", ".join(f"{step:g}" if isinstance(step, float) else str(step) for step in chain)
 
 
-def check(fill: str, fill_domain: str) -> tuple[str, str]:
-    """The chain and its domain, checked and normalised, or a SettingsError."""
+def check(fill: str, fill_domain: str, *, has_sea: bool = True) -> tuple[str, str]:
+    """
+    The chain and its domain, checked and normalised, or a SettingsError.
+
+    `has_sea` is the project's mesh (`meshes.has_sea`): without a sea, the
+    engine refuses the `sea` domain, so it is refused here first.
+    """
     if fill_domain not in FILL_DOMAINS:
         raise SettingsError(f"The fill domain must be one of {', '.join(FILL_DOMAINS)}.")
+    if fill_domain == SEA and not has_sea:
+        raise SettingsError(f"The fill domain cannot be `sea`. {meshes.NO_SEA}")
     return normalise_fill(fill), fill_domain
 
 
@@ -179,14 +194,14 @@ def settings_for(project_id: str, variable_id: str, file_format: str,
 
 
 def save(project_id: str, variable_id: str, fill: str, fill_domain: str,
-         file_format: str = "") -> None:
+         file_format: str = "", *, has_sea: bool = True) -> None:
     """
     Store a variable's fill. Raises SettingsError when it is not valid.
 
     A fill equal to the default for its kind of file (`file_format`) is not
     stored: the variable keeps following the default, as if never changed.
     """
-    fill, fill_domain = check(fill, fill_domain)
+    fill, fill_domain = check(fill, fill_domain, has_sea=has_sea)
     if file_format:
         default = defaults_for(file_format)
         if (fill, fill_domain) == (default.fill, default.fillDomain):
@@ -291,11 +306,14 @@ def transform_document(project: store.ProjectRow, variables: list) -> str:
     """
     rows = stored(project.id)
     by_folder = _columns_by_folder(project)
+    sea = meshes.has_sea(project)
     lines = [
         "# Written by Maphex from each variable's settings on the Data screen.",
         "# Edit them there: this file is rewritten before every run.",
         "# The engine fills each column's gaps with the chain, in order, inside the",
-        "# domain (land = hexagons in a municipality, sea = the rest, all = both).",
+        "# domain (land = hexagons in a municipality, sea = the rest, all = both)."
+        if sea else
+        "# domain (this project's mesh has no sea: land and all both cover all of it).",
         "fill:",
     ]
     entries = 0
@@ -306,6 +324,12 @@ def transform_document(project: store.ProjectRow, variables: list) -> str:
         chain = parse_fill(settings.fill)
         if not chain:
             continue
+        # Only reachable by editing the CSV by hand: the routes refuse it.
+        if settings.fillDomain == SEA and not sea:
+            raise SettingsError(
+                f"{variable.id} is filled in the sea. {meshes.NO_SEA} Change its fill on "
+                "the Data screen."
+            )
         steps = ", ".join(f"{step:g}" if isinstance(step, float) else str(step) for step in chain)
         for column in master_columns(project, variable, by_folder):
             lines.append(f"  {column}: {{{settings.fillDomain}: [{steps}]}}")

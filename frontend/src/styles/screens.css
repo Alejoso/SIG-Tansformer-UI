@@ -217,6 +217,17 @@
 }
 .project-folder-copy:hover { background: var(--color-neutral-300); color: var(--color-text); }
 
+/* The folder and the mesh side by side, wrapping on a narrow screen. */
+.project-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.project-facts .project-folder { margin-bottom: 0; }
+.project-mesh-fact { padding-right: 14px; }
+.project-mesh-note { margin: -14px 0 24px; font-size: 12px; }
+
 .folders { margin-top: 24px; }
 .folders-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
 .folders-head h4 { margin: 0; }

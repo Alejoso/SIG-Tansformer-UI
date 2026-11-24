@@ -1,17 +1,37 @@
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../../api';
 import { useApp } from '../../state/app-context';
-import type { Mesh, Resolutions } from '../../types';
+import type { GeoBoundariesLevel, Mesh, Resolutions } from '../../types';
 import { Icon } from '../ui/Icon';
 import { SearchableSelect } from '../ui/SearchableSelect';
 import { SettingsDialog } from './SettingsDialog';
+
+/** What an upload may be. The server checks it again, and says why when it cannot be a mesh. */
+const MESH_UPLOAD_ACCEPT = '.geojson,.json,.gpkg,.parquet,.zip';
+
+/** How finely a country is drawn: its outline, or geoBoundaries' divisions of it. */
+type Detail = 'outline' | GeoBoundariesLevel;
+
+const DETAILS: { value: Detail; label: string }[] = [
+  { value: 'outline', label: 'Outline (Natural Earth)' },
+  { value: 'ADM0', label: 'geoBoundaries ADM0 (the country)' },
+  { value: 'ADM1', label: 'geoBoundaries ADM1 (first-level divisions)' },
+  { value: 'ADM2', label: 'geoBoundaries ADM2 (second-level divisions)' },
+];
 
 export function NewProjectScreen() {
   const { openProject, showHints, showToast } = useApp();
 
   const [meshes, setMeshes] = useState<Mesh[]>([]);
+  /** Uploaded this visit. Kept apart so they sit at the top of the list. */
+  const [uploads, setUploads] = useState<Mesh[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [name, setName] = useState('');
-  const [meshId, setMeshId] = useState('');
+  /** The row picked in the list. The id sent is `meshId`, which adds the detail. */
+  const [pickedId, setPickedId] = useState('');
+  const [detail, setDetail] = useState<Detail>('outline');
+  const [nameField, setNameField] = useState('');
+  const [codeField, setCodeField] = useState('');
   const [outFolder, setOutFolder] = useState('');
   const [description, setDescription] = useState('');
   const [creating, setCreating] = useState(false);
@@ -45,12 +65,39 @@ export function NewProjectScreen() {
     };
   }, [showToast]);
 
+  const picked = [...uploads, ...meshes].find((mesh) => mesh.id === pickedId) ?? null;
+  // A country picked at geoBoundaries detail is its own mesh to the engine.
+  const meshId =
+    picked && picked.source === 'natural_earth' && picked.geoboundaries && detail !== 'outline'
+      ? api.geoboundariesMeshId(picked.iso, detail)
+      : pickedId;
+  const countryCount = meshes.filter((mesh) => mesh.source === 'natural_earth').length;
+
+  const pick = (id: string) => {
+    setPickedId(id);
+    setDetail('outline');
+    const mesh = [...uploads, ...meshes].find((m) => m.id === id);
+    // Suggested, not imposed: the engine finds them itself when left empty.
+    setNameField(mesh?.nameField ?? '');
+    setCodeField(mesh?.codeField ?? '');
+  };
+
   const uploadMesh = async (file: File | undefined) => {
     if (!file) return;
-    const mesh = await api.uploadMesh(file);
-    setMeshes((current) => [mesh, ...current.filter((m) => m.id !== mesh.id)]);
-    setMeshId(mesh.id);
-    showToast(`${mesh.label} added`);
+    setUploading(true);
+    try {
+      const mesh = await api.uploadMesh(file);
+      setUploads((current) => [mesh, ...current.filter((m) => m.id !== mesh.id)]);
+      setPickedId(mesh.id);
+      setDetail('outline');
+      setNameField(mesh.nameField ?? '');
+      setCodeField(mesh.codeField ?? '');
+      showToast(`${mesh.label} added`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not upload that mesh');
+    } finally {
+      setUploading(false);
+    }
   };
 
   /**
@@ -74,7 +121,13 @@ export function NewProjectScreen() {
   const create = async () => {
     setCreating(true);
     try {
-      const project = await api.createProject({ name, meshId, outFolder, description });
+      const project = await api.createProject({
+        name,
+        meshId,
+        outFolder,
+        description,
+        ...(picked?.source === 'file' ? { meshNameField: nameField, meshCodeField: codeField } : {}),
+      });
       if (resolutions) {
         // Not fatal if it fails: the project exists and would run at the
         // engine's resolution, which is what it would have done anyway. Say
@@ -86,6 +139,8 @@ export function NewProjectScreen() {
         }
       }
       openProject(project, 'data');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not create the project');
     } finally {
       setCreating(false);
     }
@@ -134,15 +189,20 @@ export function NewProjectScreen() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <SearchableSelect
                   id="project-mesh"
-                  options={meshes.map((mesh) => ({
+                  options={[...uploads, ...meshes].map((mesh) => ({
                     id: mesh.id,
                     label: mesh.label,
-                    hint: mesh.continent,
+                    hint:
+                      mesh.source === 'file'
+                        ? 'Uploaded'
+                        : mesh.recommended
+                          ? 'Recommended for Colombia'
+                          : mesh.continent,
                     search: mesh.search,
                   }))}
-                  value={meshId}
-                  onChange={setMeshId}
-                  placeholder="Search 177 countries…"
+                  value={pickedId}
+                  onChange={pick}
+                  placeholder={countryCount ? `Search ${countryCount} countries…` : 'Search countries…'}
                   emptyText="No country matches that"
                 />
               </div>
@@ -150,15 +210,20 @@ export function NewProjectScreen() {
                 type="button"
                 className="btn btn-secondary"
                 onClick={() => meshUpload.current?.click()}
+                disabled={uploading}
                 style={{ gap: 7, flex: 'none' }}
               >
-                <Icon name="upload" size={15} />
-                Upload
+                {uploading ? (
+                  <Icon name="spinner" size={15} className="spin" />
+                ) : (
+                  <Icon name="upload" size={15} />
+                )}
+                {uploading ? 'Checking…' : 'Upload'}
               </button>
               <input
                 ref={meshUpload}
                 type="file"
-                accept=".geojson,application/geo+json"
+                accept={MESH_UPLOAD_ACCEPT}
                 hidden
                 onChange={(e) => {
                   void uploadMesh(e.target.files?.[0]);
@@ -168,11 +233,106 @@ export function NewProjectScreen() {
             </div>
             {showHints && (
               <p className="field-hint muted-55">
-                The outline of the area you want to study. Search for a country, or upload your own
-                outline.
+                The area you want to study. Colombia (DANE) is the one for Colombia: its
+                municipalities and its sea. Any other country comes from Natural Earth. Or upload
+                your own outline: GeoJSON, GeoPackage, GeoParquet, or a shapefile zipped with its
+                .shx, .dbf and .prj.
+              </p>
+            )}
+            {picked && !picked.hasSea && (
+              <p className="field-hint muted-55" data-testid="mesh-no-sea">
+                {picked.source === 'natural_earth' && picked.country === 'COL'
+                  ? 'For Colombia, Colombia (DANE) is the recommended mesh: it has the municipalities and the sea. '
+                  : ''}
+                This mesh has no sea, so fills cover the whole area and the model has no offshore
+                site. Onshore and offshore need two projects.
               </p>
             )}
           </div>
+
+          {picked?.source === 'natural_earth' && (
+            <div className="field">
+              <label htmlFor="project-mesh-detail">Detail</label>
+              <select
+                id="project-mesh-detail"
+                className="input"
+                value={detail}
+                onChange={(e) => setDetail(e.target.value as Detail)}
+              >
+                {DETAILS.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    disabled={option.value !== 'outline' && !picked.geoboundaries}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {!picked.geoboundaries ? (
+                <p className="field-hint muted-55">
+                  geoBoundaries is keyed by ISO code, and Natural Earth gives {picked.label} none,
+                  so only its outline is offered.
+                </p>
+              ) : detail !== 'outline' ? (
+                <p className="field-hint muted-55">
+                  The engine downloads it from geoBoundaries on the first run, so that run needs
+                  internet. Boundaries: geoBoundaries (CC BY 4.0), www.geoboundaries.org.
+                </p>
+              ) : (
+                showHints && (
+                  <p className="field-hint muted-55">
+                    The country as one outline. geoBoundaries adds its divisions, so each hexagon
+                    knows which one it is in.
+                  </p>
+                )
+              )}
+            </div>
+          )}
+
+          {picked?.source === 'file' && (
+            <div className="field">
+              <label htmlFor="project-mesh-name">Name and code columns</label>
+              <div className="field-row">
+                <select
+                  id="project-mesh-name"
+                  className="input"
+                  aria-label="Name column"
+                  value={nameField}
+                  onChange={(e) => setNameField(e.target.value)}
+                  style={{ flex: 1, minWidth: 0 }}
+                >
+                  <option value="">Name: find it automatically</option>
+                  {(picked.columns ?? []).map((column) => (
+                    <option key={column} value={column}>
+                      Name: {column}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  id="project-mesh-code"
+                  className="input"
+                  aria-label="Code column"
+                  value={codeField}
+                  onChange={(e) => setCodeField(e.target.value)}
+                  style={{ flex: 1, minWidth: 0 }}
+                >
+                  <option value="">Code: find it automatically</option>
+                  {(picked.codeColumns ?? picked.columns ?? []).map((column) => (
+                    <option key={column} value={column}>
+                      Code: {column}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="field-hint muted-55">
+                {picked.featureCount ?? 0} area{picked.featureCount === 1 ? '' : 's'} in this{' '}
+                {picked.format || 'file'}. The columns that name and code each one are optional; a code
+                column needs a value for every area, none repeated.
+                {(picked.notes ?? []).map((note) => ` ${note}`).join('')}
+              </p>
+            </div>
+          )}
 
           <div className="field">
             <label htmlFor="out-folder">Results folder</label>

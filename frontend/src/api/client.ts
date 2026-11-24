@@ -46,8 +46,11 @@ function describe(detail: unknown): string | null {
 }
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // A FormData body sets its own type, multipart with the boundary in it;
+  // naming JSON over it would leave the server unable to read the parts.
+  const json = !(init?.body instanceof FormData);
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: { ...(json ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
     ...init,
   });
 

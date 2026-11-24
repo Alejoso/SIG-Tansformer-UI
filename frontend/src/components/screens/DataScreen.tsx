@@ -1076,6 +1076,7 @@ export function DataScreen() {
                     </div>
                   )}
                   <VariableSettingsFields
+                    hasSea={project?.meshHasSea ?? true}
                     idPrefix={`edit-${variable.id.replace(/[^A-Za-z0-9]/g, '-')}`}
                     value={editing.value}
                     disabled={savingSettings}
@@ -1138,22 +1139,42 @@ export function DataScreen() {
             until it is on screen the only way to find it is the projects
             list. The full path is in the title too, since a long one is
             clipped. */}
-        {project?.outFolder && (
-          <div className="project-folder">
-            <Icon name="folder" size={14} color="var(--color-accent-600)" />
-            <span className="project-folder-label muted-55">Project folder</span>
-            <span className="project-folder-path mono" title={project.outFolder}>
-              {project.outFolder}
-            </span>
-            <button
-              type="button"
-              className="project-folder-copy"
-              onClick={() => copyFolder(project.outFolder)}
-            >
-              <Icon name="copy" size={13} />
-              Copy
-            </button>
+        {project && (
+          <div className="project-facts">
+            {project.outFolder && (
+              <div className="project-folder">
+                <Icon name="folder" size={14} color="var(--color-accent-600)" />
+                <span className="project-folder-label muted-55">Project folder</span>
+                <span className="project-folder-path mono" title={project.outFolder}>
+                  {project.outFolder}
+                </span>
+                <button
+                  type="button"
+                  className="project-folder-copy"
+                  onClick={() => copyFolder(project.outFolder)}
+                >
+                  <Icon name="copy" size={13} />
+                  Copy
+                </button>
+              </div>
+            )}
+            {/* The area the engine builds the hexagons over. Said here
+                because it decides what the fills below can offer: only
+                Colombia from DANE has a sea. */}
+            <div className="project-folder project-mesh-fact">
+              <Icon name="hexagon" size={14} color="var(--color-accent-600)" />
+              <span className="project-folder-label muted-55">Mesh</span>
+              <span className="project-folder-path" title={project.meshLabel}>
+                {project.meshLabel}
+              </span>
+            </div>
           </div>
+        )}
+        {project && !project.meshHasSea && (
+          <p className="project-mesh-note muted-55">
+            This mesh has no sea: fills cover the whole mesh, and the model has no offshore site.
+            Onshore and offshore need two projects.
+          </p>
         )}
 
         {orphaned.length > 0 && (
@@ -1348,6 +1369,7 @@ export function DataScreen() {
                   kind of file and editable before it is added. */}
               {batch.length === 0 && plan && !plan.problem && (
                 <VariableSettingsFields
+                  hasSea={project?.meshHasSea ?? true}
                   idPrefix="single"
                   value={singleSettings ?? settingsOf(plan)}
                   onChange={setSingleSettings}
@@ -1429,6 +1451,7 @@ export function DataScreen() {
                         {!candidate.problem && (
                           <VariableSettingsFields
                             compact
+                            hasSea={project?.meshHasSea ?? true}
                             idPrefix={`batch-${key.replace(/[^A-Za-z0-9]/g, '-')}`}
                             value={batchSettings[key] ?? settingsOf(candidate)}
                             disabled={skipped}
